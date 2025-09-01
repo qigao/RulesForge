@@ -1,0 +1,30 @@
+package com.example
+
+declare Person
+    name: String
+    age: int
+end
+
+rule "Invalid Field Rule"
+when
+    // 'location' is not a declared field in Person
+    $p : Person( age > 25, location == "New York" )
+then
+    -- does not matter
+end
+
+rule "Unbound Variable Rule"
+when
+    // $c is not bound anywhere in the 'when' clause
+    $p : Person( age == $c.age )
+then
+    println("This rule is invalid.")
+end
+
+rule "Undeclared Fact Type"
+when
+    // 'Vehicle' is not a declared fact type
+    $v : Vehicle( speed > 100 )
+then
+    println("Vroom!")
+end

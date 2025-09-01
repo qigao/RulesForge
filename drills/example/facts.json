@@ -1,0 +1,34 @@
+[
+  {
+    "type": "Cheese",
+    "fields": { "name": "Stilton", "price": 25, "id": 101 }
+  },
+  {
+    "type": "Cheese",
+    "fields": { "name": "Aged Gouda", "price": 60, "id": 102 }
+  },
+  {
+    "type": "Cheese",
+    "fields": { "name": "Brie", "price": 15, "id": 103 }
+  },
+  {
+    "type": "Order",
+    "fields": { "status": "shipped", "cheeseId": 101, "orderNumber": 5001 }
+  },
+  {
+    "type": "Order",
+    "fields": { "status": "pending", "cheeseId": 102, "orderNumber": 5002 }
+  },
+  {
+    "type": "Wine",
+    "fields": { "name": "Chateau Margaux", "vintage": 1982, "type": "Bordeaux", "id": 701 }
+  },
+  {
+    "type": "Wine",
+    "fields": { "name": "Screaming Eagle", "vintage": 2010, "type": "Cabernet", "id": 702 }
+  },
+  {
+    "type": "Order",
+    "fields": { "status": "VIP", "wineId": 701 }
+  }
+]
