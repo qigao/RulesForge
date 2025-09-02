@@ -63,7 +63,7 @@ private:
     parser_state parser_state_;
     std::vector<ParsedRule> processed_rules_;
     std::shared_ptr<AccumulatorRegistry> accumulator_registry_;
-    std::map<std::string, std::chrono::milliseconds> type_expiration_policies_;
+    map<std::string, std::chrono::milliseconds> type_expiration_policies_;
     FactTypeRegistry fact_type_registry_;
 };
 

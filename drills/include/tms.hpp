@@ -30,8 +30,8 @@ public:
 private:
     INetworkCallback& network_;
 
-    std::map<int64_t, std::set<TokenWME const*>> justifications_;
-    std::map<TokenWME const*, std::vector<int64_t>> token_to_justified_facts_;
+    map<int64_t, std::set<TokenWME const*>> justifications_;
+    map<TokenWME const*, std::vector<int64_t>> token_to_justified_facts_;
 };
 
 #endif   // TMS_HPP

@@ -77,7 +77,7 @@ void KnowledgeBase::build(parser_state& state) {
     this->parser_state_ = state;
 
     // Process rule inheritance to create the final set of rules for the blueprint.
-    std::map<std::string, ParsedRule> rule_map;
+    map<std::string, ParsedRule> rule_map;
     for (auto const& rule : state.parsed_rules) { rule_map[rule.name] = rule; }
     for (auto const& rule : state.parsed_rules) {
         if (!rule.parent_rule_name) {

@@ -1,7 +1,6 @@
 #ifndef DROOLS_RETE_DEFS_HPP
 #define DROOLS_RETE_DEFS_HPP
 
-// Lua components removed - now using QuickJS
 
 #include <algorithm>   // For std::reverse
 #include <chrono>
@@ -15,6 +14,7 @@
 #include <utility>
 #include <variant>
 #include <vector>
+#include "phmap.h"
 
 // --- Forward Declarations ---
 struct Fact;
@@ -30,7 +30,7 @@ struct ParsedRule;
 
 // --- Enums and Basic Types ---
 enum class PatternType { STANDARD, NOT, EXISTS, FORALL, EVAL, QUERY_CALL };
-enum class NodeType { LEAF, AND, OR, JMESPATH };
+enum class NodeType { LEAF, AND, OR };
 enum class PropagationType { ASSERT, RETRACT, MODIFY };
 
 // --- Debug Info Structs ---
@@ -54,7 +54,7 @@ struct ConstraintValueHasher {
 struct Fact {
     int64_t id = 0;
     std::string type;
-    std::map<std::string, ConstraintValue> fields;
+    map<std::string, ConstraintValue> fields;
     std::optional<ConstraintValue> get_field(std::string const& name) const;
 };
 
@@ -93,7 +93,7 @@ struct Activation {
     ParsedRule const* rule;
     std::shared_ptr<Token> token;
     size_t hash_value;
-    std::map<std::string, int> bindings;
+    map<std::string, int> bindings;
     bool operator<(Activation const& other) const;
 };
 
@@ -132,8 +132,7 @@ struct ParsedConstraint {
     std::optional<std::pair<std::string, std::string>> right_bound_field;
     std::optional<std::vector<ConstraintValue>> right_value_list;
     std::optional<ParsedTemporalConstraint> temporal_constraint;
-    std::optional<std::string> jmespath_expression; // New field for JMESPath
-};
+ };
 
 struct ConstraintNode {
     NodeType type;
@@ -235,7 +234,7 @@ struct ParsedPattern {
 struct ParsedRule {
     tao::pegtl::position pos;
     std::string name;
-    std::map<std::string, std::string> annotations;
+    map<std::string, std::string> annotations;
     int salience = 0;
     bool salience_explicitly_set = false;
     std::optional<std::string> parent_rule_name;

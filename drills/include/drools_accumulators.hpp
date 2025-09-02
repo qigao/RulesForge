@@ -6,7 +6,7 @@
 #include <map>
 #include <memory>
 #include <set>
-#include <unordered_set>   // Required for CollectSetAccumulator
+#include "phmap.h"
 
 // The interface for all custom accumulator functions
 struct IAccumulator {
@@ -45,7 +45,7 @@ public:
     }
 
 private:
-    std::map<std::string, std::unique_ptr<IAccumulator>> prototypes_;
+     map<std::string, std::unique_ptr<IAccumulator>> prototypes_;
 };
 
 // --- Example Implementations ---

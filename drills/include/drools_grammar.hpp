@@ -96,14 +96,12 @@ namespace grammar {
 
     struct keyword_unnest : keyword<'u', 'n', 'n', 'e', 's', 't'> {};
 
-    struct keyword_jmespath : keyword<'j', 'm', 'e', 's', 'p', 'a', 't', 'h'> {};
-
     struct any_keyword :
         pegtl::sor<keyword_rule, keyword_when, keyword_then, keyword_end, keyword_salience, keyword_extends,
                    keyword_agenda_group, keyword_timer, keyword_from, keyword_not, keyword_exists, keyword_collect,
                    keyword_accumulate, keyword_forall, keyword_eval, keyword_entry_point, keyword_in, keyword_function,
                    keyword_declare, keyword_query, keyword_global, keyword_package, keyword_import, keyword_or,
-                   keyword_modify, keyword_nil, keyword_true, keyword_false, keyword_this, keyword_jmespath> {};
+                   keyword_modify, keyword_nil, keyword_true, keyword_false, keyword_this> {};
 
     // ===================================================================
     // == 3. Identifiers and Literals
@@ -193,16 +191,12 @@ namespace grammar {
         pegtl::seq<op_within, whitespace, duration_literal, whitespace, op_of, whitespace,
                    variable_binding   // The anchor point for the window (e.g., '$e1')
                    > {};
-
-    struct jmespath_expression : string_literal {};
-
-    struct jmespath_constraint : pegtl::seq<keyword_jmespath, opt_whitespace, jmespath_expression> {};
+ 
 
     // The main constraint rule must now prioritize these new, more specific rules.
     struct constraint_item :
         pegtl::sor<temporal_window_clause, temporal_seq_clause,
-                   jmespath_constraint, // New: JMESPath constraint
-                   relational_expression   // The general-purpose comparison rule
+                    relational_expression   // The general-purpose comparison rule
                    > {};
 
     struct and_expr :

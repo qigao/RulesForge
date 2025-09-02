@@ -6,7 +6,7 @@
 #include <functional>
 #include <string>
 #include <typeindex>
-#include <unordered_map>
+#include "phmap.h"
 
 // A type-erased function that knows how to convert a specific C++ struct (via void*) into a Fact.
 using FactConverter = std::function<std::shared_ptr<Fact>(void const*)>;
@@ -44,7 +44,7 @@ public:
     }
 
 private:
-    std::unordered_map<std::type_index, FactConverter> converters_;
+    unordered_map<std::type_index, FactConverter> converters_;
 };
 
 #endif   // FACT_TYPE_REGISTRY_HPP

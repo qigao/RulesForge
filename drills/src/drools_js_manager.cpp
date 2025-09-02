@@ -163,7 +163,7 @@ JSValue JSScriptingManager::populate_js_object_from_fact(Fact const& fact) {
     return fact_obj;
 }
 
-void JSScriptingManager::bind_variables(Token const& token, std::map<std::string, int> const& bindings) {
+void JSScriptingManager::bind_variables(Token const& token, map<std::string, int> const& bindings) {
     LOG_WARN("bind_variables: Processing {} bindings for token with WME depth {}", bindings.size(), 
               token.wme ? token.wme->depth : -1);
     for (auto const& [binding, depth] : bindings) {
@@ -351,7 +351,7 @@ void JSScriptingManager::create_drools_api(Token& current_token) {
 }
 
 bool JSScriptingManager::execute_eval(std::string const& code, Token const& token,
-                                      std::map<std::string, int> const& bindings) {
+                                      map<std::string, int> const& bindings) {
     if (code.empty()) return true;
     LOG_DEBUG("Executing JavaScript eval: '{}'", code);
     try {
@@ -386,7 +386,7 @@ bool JSScriptingManager::execute_eval(std::string const& code, Token const& toke
 }
 
 void JSScriptingManager::execute_rhs(std::string const& rhs_code, std::string const& rule_name, Token& token,
-                                     std::map<std::string, int> const& bindings) {
+                                     map<std::string, int> const& bindings) {
     LOG_WARN("Executing RHS for rule '{}' with {} bindings", rule_name, bindings.size());
     LOG_WARN("RHS code:\n{}", rhs_code);
     try {

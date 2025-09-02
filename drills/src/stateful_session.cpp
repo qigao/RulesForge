@@ -362,9 +362,9 @@ QueryResult StatefulSession::execute_query(std::string const& query_name,
     auto param_it = parameterized_query_inputs_.find(query_name);
     if (param_it != parameterized_query_inputs_.end()) { param_it->second->execute(*this, args); }
 
-    std::vector<std::map<std::string, std::shared_ptr<Fact>>> raw_results;
+    std::vector<map<std::string, std::shared_ptr<Fact>>> raw_results;
     for (auto const& [wme, token] : terminal_node->get_results()) {
-        std::map<std::string, std::shared_ptr<Fact>> row;
+        map<std::string, std::shared_ptr<Fact>> row;
         auto facts = token->get_facts();
         for (auto const& [binding, depth] : terminal_node->get_bindings()) {
             if (!binding.empty() && depth < facts.size()) { row[binding] = facts[depth]; }
@@ -388,8 +388,8 @@ void StatefulSession::set_global(std::string const& name, JSValue obj) {
     scripting_manager_->set_global(name, obj);
 }
 
-std::map<std::string, JSValue> const& StatefulSession::get_global_values() const {
-    static std::map<std::string, JSValue> empty;
+map<std::string, JSValue> const& StatefulSession::get_global_values() const {
+    static map<std::string, JSValue> empty;
     return empty;
 }
 
@@ -398,7 +398,7 @@ size_t StatefulSession::get_fact_count() const { return all_facts_.size(); }
 int64_t StatefulSession::get_next_fact_id() { return next_fact_id_++; }
 
 bool StatefulSession::execute_eval(std::string const& code, Token const& token,
-                                   std::map<std::string, int> const& bindings) {
+                                   map<std::string, int> const& bindings) {
     return scripting_manager_->execute_eval(code, token, bindings);
 }
 
@@ -424,8 +424,8 @@ void StatefulSession::remove_activation(size_t activation_hash) {
     }
 }
 
-std::map<int, std::shared_ptr<ReteNode>> StatefulSession::get_nodes() const {
-    std::map<int, std::shared_ptr<ReteNode>> node_map;
+map<int, std::shared_ptr<ReteNode>> StatefulSession::get_nodes() const {
+    map<int, std::shared_ptr<ReteNode>> node_map;
     for (auto const& node : all_nodes_) { node_map[node->id] = node; }
     return node_map;
 }

@@ -31,7 +31,7 @@ public:
     virtual void update_fact(std::shared_ptr<Fact> fact, std::function<void(Fact&)> modifier) = 0;
     virtual void logical_insert(Token& token, std::shared_ptr<Fact> fact) = 0;
     virtual void set_focus(std::string const& group_name) = 0;
-    virtual std::map<std::string, JSValue> const& get_global_values() const = 0;
+    virtual map<std::string, JSValue> const& get_global_values() const = 0;
 };
 
 #endif   // I_NETWORK_CALLBACK_HPP

@@ -3,7 +3,7 @@
 
 #include <atomic>
 #include <mutex>
-#include <unordered_map>
+#include "phmap.h"
 
 // Forward declaration
 class JSScriptingManager;
@@ -51,7 +51,7 @@ private:
     
     std::mutex mutex_;
     std::atomic<HandleId> next_id_{1};  // Start at 1, 0 is invalid
-    std::unordered_map<HandleId, JSScriptingManager*> handles_;
+    unordered_map<HandleId, JSScriptingManager*> handles_;
 };
 
 #endif // JS_HANDLE_MANAGER_HPP

@@ -494,25 +494,7 @@ std::unique_ptr<ConstraintNode> AstBuilder::build_constraint_item(pegtl::parse_t
         leaf_node->constraint.temporal_constraint = tc;
         return leaf_node;
     }
-
-    // --- New: Handle JMESPath constraint ---
-    if (auto const* jmespath_node = find_descendant<grammar::jmespath_constraint>(n)) {
-        auto jmespath_expr_node = find_descendant<grammar::jmespath_expression>(*jmespath_node);
-        if (jmespath_expr_node) {
-            leaf_node->type = NodeType::JMESPATH;
-            std::string expr_str = jmespath_expr_node->string();
-            // Remove quotes from the string literal
-            if (expr_str.length() >= 2 && expr_str.front() == '"' && expr_str.back() == '"') {
-                leaf_node->constraint.jmespath_expression = expr_str.substr(1, expr_str.length() - 2);
-            } else {
-                leaf_node->constraint.jmespath_expression = expr_str;
-            }
-            LOG_DEBUG("AstBuilder::build_constraint_item -> JMESPath constraint: {}", *leaf_node->constraint.jmespath_expression);
-            return leaf_node;
-        }
-    }
-
-    // --- 2. If not temporal or JMESPath, parse it as a standard relational expression ---
+    // --- 2. If not temporal, parse it as a standard relational expression ---
 
     auto const* binding_node = find_descendant<grammar::inline_binding>(n);
     auto const* primary_expr_node = find_descendant<grammar::primary_expr>(n);

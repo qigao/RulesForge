@@ -42,16 +42,16 @@ public:
 
     JSContext* get_js_context();
     void load_functions(std::vector<ParsedFunction> const& functions);
-    bool execute_eval(std::string const& code, Token const& token, std::map<std::string, int> const& bindings);
+    bool execute_eval(std::string const& code, Token const& token, map<std::string, int> const& bindings);
     void execute_rhs(std::string const& rhs_code, std::string const& rule_name, Token& token,
-                     std::map<std::string, int> const& bindings);
+                     map<std::string, int> const& bindings);
     void set_global(std::string const& name, JSValue obj);
 
 private:
     void create_drools_api(Token& current_token);
     void bind_globals();
     JSValue populate_js_object_from_fact(Fact const& fact);
-    void bind_variables(Token const& token, std::map<std::string, int> const& bindings);
+    void bind_variables(Token const& token, map<std::string, int> const& bindings);
 
     // Helper methods for JS object manipulation
     JSValue create_js_object();
