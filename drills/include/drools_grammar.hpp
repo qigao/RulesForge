@@ -96,12 +96,14 @@ namespace grammar {
 
     struct keyword_unnest : keyword<'u', 'n', 'n', 'e', 's', 't'> {};
 
+    struct keyword_jmespath : keyword<'j', 'm', 'e', 's', 'p', 'a', 't', 'h'> {};
+
     struct any_keyword :
         pegtl::sor<keyword_rule, keyword_when, keyword_then, keyword_end, keyword_salience, keyword_extends,
                    keyword_agenda_group, keyword_timer, keyword_from, keyword_not, keyword_exists, keyword_collect,
                    keyword_accumulate, keyword_forall, keyword_eval, keyword_entry_point, keyword_in, keyword_function,
                    keyword_declare, keyword_query, keyword_global, keyword_package, keyword_import, keyword_or,
-                   keyword_modify, keyword_nil, keyword_true, keyword_false, keyword_this> {};
+                   keyword_modify, keyword_nil, keyword_true, keyword_false, keyword_this, keyword_jmespath> {};
 
     // ===================================================================
     // == 3. Identifiers and Literals
@@ -130,11 +132,15 @@ namespace grammar {
 
     struct simple_name_part : pegtl::seq<pegtl::not_at<any_keyword>, raw_identifier> {};
 
-    struct constraint_field : pegtl::list<pegtl::sor<variable_binding, simple_name_part>, pegtl::one<'.'>> {};
+    struct constraint_field : pegtl::sor<
+        pegtl::list<simple_name_part, pegtl::one<'.'>>,
+        pegtl::seq<variable_binding, pegtl::one<'.'>, simple_name_part>,
+        simple_name_part
+    > {};
 
     struct primary_expr :
-        pegtl::sor<double_, integer, string_literal, keyword_true, keyword_false, keyword_nil, constraint_field,
-                   variable_binding,
+        pegtl::sor<double_, integer, string_literal, keyword_true, keyword_false, keyword_nil, keyword_this, 
+                   constraint_field, variable_binding,
                    pegtl::seq<pegtl::one<'('>, opt_whitespace, expression, opt_whitespace, pegtl::one<')'>>> {};
 
     struct not_in_op : pegtl::seq<keyword_not, whitespace, keyword_in> {};
@@ -188,9 +194,14 @@ namespace grammar {
                    variable_binding   // The anchor point for the window (e.g., '$e1')
                    > {};
 
+    struct jmespath_expression : string_literal {};
+
+    struct jmespath_constraint : pegtl::seq<keyword_jmespath, opt_whitespace, jmespath_expression> {};
+
     // The main constraint rule must now prioritize these new, more specific rules.
     struct constraint_item :
         pegtl::sor<temporal_window_clause, temporal_seq_clause,
+                   jmespath_constraint, // New: JMESPath constraint
                    relational_expression   // The general-purpose comparison rule
                    > {};
 

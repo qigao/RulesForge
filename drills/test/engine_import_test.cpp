@@ -51,7 +51,7 @@ TEST_CASE_METHOD(ImportTestFixture, "Parser: Import Resolution", "[parser][impor
         when
             $c: Customer(status == "GOLD")
         then
-            drools.insert({type="com.example.model.HighValueCustomer"});
+            drools.insert({type: "com.example.model.HighValueCustomer"});
         end
     )";
 

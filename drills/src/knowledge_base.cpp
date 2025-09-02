@@ -55,14 +55,13 @@ std::shared_ptr<KnowledgeBase> KnowledgeBase::create(parser_state& state) {
               state.parsed_rules.size());
     auto kb = std::make_shared<KnowledgeBase>(KnowledgeBase::private_key{});
     kb->build(state);
-    kb->build_and_cache_network_structure();
     return kb;
 }
 
 std::unique_ptr<StatefulSession> KnowledgeBase::create_session() {
     LOG_DEBUG("KnowledgeBase::create_session -> Creating new stateful session.");
     auto session = std::make_unique<StatefulSession>(StatefulSession::private_key{}, this->shared_from_this());
-    session->deserialize_network(serialized_network_structure_);
+    session->build_network();
     session->prime_network_state();
     return session;
 }
@@ -72,24 +71,6 @@ AccumulatorRegistry const& KnowledgeBase::get_accumulator_registry() const { ret
 FactTypeRegistry& KnowledgeBase::get_fact_type_registry() { return fact_type_registry_; }
 
 FactTypeRegistry const& KnowledgeBase::get_fact_type_registry() const { return fact_type_registry_; }
-
-std::string KnowledgeBase::serialize() const {
-    nlohmann::json j = parser_state_;
-    return j.dump(4);
-}
-
-std::shared_ptr<KnowledgeBase> KnowledgeBase::deserialize(std::string const& json_data) {
-    LOG_DEBUG("KnowledgeBase::deserialize -> Deserializing knowledge base from JSON data.");
-    try {
-        nlohmann::json j = nlohmann::json::parse(json_data);
-        auto state = j.get<parser_state>();
-        return KnowledgeBase::create(state);
-    } catch (nlohmann::json::parse_error& e) {
-        LOG_ERROR("JSON deserialization error in KnowledgeBase::deserialize: {}", e.what());
-        std::cerr << "JSON deserialization error: " << e.what() << std::endl;
-        return nullptr;
-    }
-}
 
 void KnowledgeBase::build(parser_state& state) {
     LOG_DEBUG("KnowledgeBase::build -> Building from parser state with {} rules.", state.parsed_rules.size());
@@ -121,19 +102,6 @@ void KnowledgeBase::build(parser_state& state) {
     }
     LOG_DEBUG("KnowledgeBase::build -> Finished processing rule inheritance. Total processed rules: {}",
               processed_rules_.size());
-}
-
-void KnowledgeBase::build_and_cache_network_structure() {
-    LOG_DEBUG("KnowledgeBase::build_and_cache_network_structure -> Building and caching network structure.");
-    auto blueprint_session = std::make_unique<StatefulSession>(StatefulSession::private_key{}, shared_from_this());
-
-    blueprint_session->build_network();
-    // This priming is for the blueprint only; the real priming happens in create_session()
-    blueprint_session->prime_network_state();
-
-    this->serialized_network_structure_ = blueprint_session->serialize_network();
-    LOG_DEBUG("KnowledgeBase::build_and_cache_network_structure -> Network serialized. Size: {} bytes.",
-              serialized_network_structure_.size());
 }
 
 std::unique_ptr<ConstraintNode>

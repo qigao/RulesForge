@@ -1,5 +1,3 @@
-// FILE: rete_node_test.cpp
-
 #include "catch2/catch_all.hpp"
 #include "catch2/matchers/catch_matchers_vector.hpp"   // For UnorderedEquals
 #include "drools_parser.hpp"

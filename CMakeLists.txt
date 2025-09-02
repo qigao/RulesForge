@@ -18,10 +18,10 @@ set(PROJECT_VERSION
     ${CMAKE_PROJECT_VERSION_MAJOR}.${CMAKE_PROJECT_VERSION_MINOR}.${CMAKE_PROJECT_VERSION_PATCH}
 )
 
-set(PROJECT_NAME "ProjectCppTemplate")
-set(PROJECT_DESCRIPTION "A DAG-based workflow execution system for C++")
+set(PROJECT_NAME "Drills")
+set(PROJECT_DESCRIPTION "A ReteNetwork based rules engine")
 set(PROJECT_WEBSITE "http://github.com/qigao/project-cpp-template.git")
-set(APPLICATION_LICENSE "MIT License")
+set(APPLICATION_LICENSE "Apache2 License")
 
 # Set the project name and language
 project(

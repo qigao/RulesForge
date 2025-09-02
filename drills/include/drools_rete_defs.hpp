@@ -1,7 +1,7 @@
 #ifndef DROOLS_RETE_DEFS_HPP
 #define DROOLS_RETE_DEFS_HPP
 
-#include "lua_ast.hpp"
+// Lua components removed - now using QuickJS
 
 #include <algorithm>   // For std::reverse
 #include <chrono>
@@ -9,15 +9,12 @@
 #include <iostream>
 #include <map>
 #include <memory>
-#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <tao/pegtl/position.hpp>
 #include <utility>
 #include <variant>
 #include <vector>
-
-using json = nlohmann::json;
 
 // --- Forward Declarations ---
 struct Fact;
@@ -33,7 +30,7 @@ struct ParsedRule;
 
 // --- Enums and Basic Types ---
 enum class PatternType { STANDARD, NOT, EXISTS, FORALL, EVAL, QUERY_CALL };
-enum class NodeType { LEAF, AND, OR };
+enum class NodeType { LEAF, AND, OR, JMESPATH };
 enum class PropagationType { ASSERT, RETRACT, MODIFY };
 
 // --- Debug Info Structs ---
@@ -135,6 +132,7 @@ struct ParsedConstraint {
     std::optional<std::pair<std::string, std::string>> right_bound_field;
     std::optional<std::vector<ConstraintValue>> right_value_list;
     std::optional<ParsedTemporalConstraint> temporal_constraint;
+    std::optional<std::string> jmespath_expression; // New field for JMESPath
 };
 
 struct ConstraintNode {
@@ -250,108 +248,6 @@ struct ParsedRule {
     std::vector<std::string> source_imports;
     ParsedRule();
 };
-
-// --- JSON SERIALIZATION ---
-
-namespace nlohmann {
-    template <size_t I, typename... Tp>
-    void from_json_variant_impl(json const& j, std::variant<Tp...>& v) {
-        if (j.at("index").get<size_t>() == I) {
-            using CurrentType = std::variant_alternative_t<I, std::variant<Tp...>>;
-            if constexpr (std::is_same_v<CurrentType, std::monostate>) {
-                v.template emplace<I>();
-            } else {
-                v.template emplace<I>(j.at("value").get<CurrentType>());
-            }
-            return;
-        }
-        if constexpr (I + 1 < sizeof...(Tp)) { from_json_variant_impl<I + 1>(j, v); }
-    }
-
-    template <typename... T>
-    struct adl_serializer<std::variant<T...>> {
-        inline static void to_json(json& j, std::variant<T...> const& v) {
-            std::visit(
-                [&](auto const& val) {
-                    j = json::object();
-                    j["index"] = v.index();
-                    using Type = std::decay_t<decltype(val)>;
-                    if constexpr (std::is_same_v<Type, std::monostate>) {
-                        j["value"] = nullptr;
-                    } else {
-                        j["value"] = val;
-                    }
-                },
-                v);
-        }
-
-        inline static void from_json(json const& j, std::variant<T...>& v) {
-            if (!j.is_object() || !j.contains("index") || !j.contains("value")) {
-                v = std::variant<T...>{};
-                return;
-            }
-            from_json_variant_impl<0>(j, v);
-        }
-    };
-
-    template <typename T>
-    struct adl_serializer<std::optional<T>> {
-        inline static void to_json(json& j, std::optional<T> const& opt) {
-            if (opt.has_value()) {
-                j = *opt;
-            } else {
-                j = nullptr;
-            }
-        }
-
-        inline static void from_json(json const& j, std::optional<T>& opt) {
-            if (j.is_null()) {
-                opt = std::nullopt;
-            } else {
-                opt = j.get<T>();
-            }
-        }
-    };
-}   // namespace nlohmann
-
-NLOHMANN_JSON_SERIALIZE_ENUM(PatternType, {{PatternType::STANDARD, "STANDARD"},
-                                           {PatternType::NOT, "NOT"},
-                                           {PatternType::EXISTS, "EXISTS"},
-                                           {PatternType::FORALL, "FORALL"},
-                                           {PatternType::EVAL, "EVAL"},
-                                           {PatternType::QUERY_CALL, "QUERY_CALL"}})
-NLOHMANN_JSON_SERIALIZE_ENUM(NodeType, {{NodeType::LEAF, "LEAF"}, {NodeType::AND, "AND"}, {NodeType::OR, "OR"}})
-
-void to_json(json& j, FactList const& p);
-void from_json(json const& j, FactList& p);
-void to_json(json& j, NilValue const& p);
-void from_json(json const& j, NilValue& p);
-void to_json(json& j, ParsedConstraint const& p);
-void from_json(json const& j, ParsedConstraint& p);
-void to_json(json& j, ConstraintNode const& p);
-void from_json(json const& j, ConstraintNode& p);
-void to_json(json& j, std::unique_ptr<ConstraintNode> const& p);
-void from_json(json const& j, std::unique_ptr<ConstraintNode>& p);
-void to_json(json& j, ParsedAccumulate const& p);
-void from_json(json const& j, ParsedAccumulate& p);
-void to_json(json& j, ParsedQuery const& p);
-void from_json(json const& j, ParsedQuery& p);
-void to_json(json& j, ParsedPattern const& p);
-void from_json(json const& j, ParsedPattern& p);
-void to_json(json& j, std::unique_ptr<ParsedPattern> const& p);
-void from_json(json const& j, std::unique_ptr<ParsedPattern>& p);
-void to_json(json& j, ParsedRule const& p);
-void from_json(json const& j, ParsedRule& p);
-
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ParsedUnnest, source_binding, source_field)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ParsedQueryCall, query_name, arguments)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ParsedField, name, type)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ParsedDeclaration, type_name, fields, expires, source_package)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ParsedFunction, name, return_type, body, parameter_list)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ParsedGlobal, type, name)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ParsedTimer, initial_delay, repeat_interval)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ParsedTemporalConstraint, op, lhs_field, rhs_binding_and_field, window_ms)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ParsedForall, patterns)
 
 // --- INLINE IMPLEMENTATIONS for trivial functions ---
 inline bool operator==(FactList const&, FactList const&) { return false; }

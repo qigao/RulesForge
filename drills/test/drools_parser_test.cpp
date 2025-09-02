@@ -34,7 +34,7 @@ TEST_CASE("Parser: Basic Rule Parsing", "[parser]") {
         when
             $p : Person(age > 30)
         then
-            drools.insert({type="Adult"});
+            drools.insert({type: "Adult"});
         end
     )";
     auto state = parse_string(drl);

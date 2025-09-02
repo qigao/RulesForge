@@ -35,13 +35,11 @@ public:
 
     // --- FACTORIES ---
     static std::shared_ptr<KnowledgeBase> create(parser_state& state);
-    static std::shared_ptr<KnowledgeBase> deserialize(std::string const& json_data);
 
     std::unique_ptr<StatefulSession> create_session();
     ParsedRule const* find_rule_by_name(std::string const& name) const;
 
     // --- API ---
-    std::string serialize() const;
 
     // --- Accessors for immutable data ---
     AccumulatorRegistry const& get_accumulator_registry() const;
@@ -61,14 +59,12 @@ private:
     friend class StatefulSession;
 
     void build(parser_state& state);
-    void build_and_cache_network_structure();
 
     parser_state parser_state_;
     std::vector<ParsedRule> processed_rules_;
     std::shared_ptr<AccumulatorRegistry> accumulator_registry_;
     std::map<std::string, std::chrono::milliseconds> type_expiration_policies_;
     FactTypeRegistry fact_type_registry_;
-    std::string serialized_network_structure_;
 };
 
 #endif   // KNOWLEDGE_BASE_HPP

@@ -7,11 +7,11 @@
 #include "query_result.hpp"
 
 #include <queue>
-#include <sol/sol.hpp>
+#include <quickjs.h>
 #include <unordered_set>
 
 // Forward declarations
-class LuaScriptingManager;
+class JSScriptingManager;
 class TruthMaintenanceSystem;
 class ReteNode;
 class QueryTerminalNode;
@@ -51,10 +51,10 @@ public:
 
     void set_focus(std::string const& group_name) override;
     std::string get_focus() const;
-    void set_global(std::string const& name, sol::object obj);
+    void set_global(std::string const& name, JSValue obj);
     size_t get_fact_count() const;
     int64_t get_next_fact_id();
-    sol::state& get_lua_state();
+    JSContext* get_js_context();
 
     std::shared_ptr<KnowledgeBase const> get_knowledge_base() const { return kb_; }
 
@@ -68,7 +68,7 @@ public:
     void _internal_remove_fact(int64_t fact_id);
     std::optional<std::shared_ptr<Fact>> get_fact_by_id(int64_t id) override;
     void logical_insert(Token& token, std::shared_ptr<Fact> fact) override;
-    std::map<std::string, sol::object> const& get_global_values() const override;
+    std::map<std::string, JSValue> const& get_global_values() const override;
 
     inline std::shared_ptr<TokenWME const> get_or_create_wme(std::shared_ptr<TokenWME const> parent_wme,
                                                              std::shared_ptr<Fact> fact) {
@@ -90,8 +90,6 @@ public:
     void logical_retract(TokenWME const* wme);
 
     bool execute_eval(std::string const& code, Token const& token, std::map<std::string, int> const& bindings);
-    std::string serialize_network() const;
-    void deserialize_network(std::string const& json_data);
 
 private:
     void build_network();
@@ -115,7 +113,7 @@ private:
     std::shared_ptr<KnowledgeBase const> kb_;
 
     // --- Mutable State ---
-    std::unique_ptr<LuaScriptingManager> scripting_manager_;
+    std::unique_ptr<JSScriptingManager> scripting_manager_;
     std::unique_ptr<TruthMaintenanceSystem> tms_;
 
     // Rete network instance state

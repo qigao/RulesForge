@@ -4,17 +4,8 @@
 #include "drools_rete_defs.hpp"
 
 #include <memory>
-#include <nlohmann/json.hpp>   // Required for json object
-#include <sol/sol.hpp>
 #include <string>
 #include <vector>
-
-// Forward declare the struct so the functions can be declared
-struct parser_state;
-
-// Declare the serialization functions so they are visible to other translation units
-void to_json(nlohmann::json& j, parser_state const& p);
-void from_json(nlohmann::json const& j, parser_state& p);
 
 // This struct has been simplified to hold only the final results of parsing.
 // The temporary state used by a previous action-based parser design has been removed.

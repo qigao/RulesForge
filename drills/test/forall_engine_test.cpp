@@ -33,7 +33,7 @@ struct ForallTestFixture {
                     Order(isShipped == true)
                 )
             then
-                drools.insert({type="FullyShippedCustomer", id=$id});
+                drools.insert({type: "FullyShippedCustomer", id: $id});
             end
         )";
 

@@ -119,9 +119,6 @@ public:
     void right_activate(StatefulSession&, std::shared_ptr<Fact>, PropagationType) override;
     void print_node(std::ostream& os) const override;
 
-    friend void to_json(json& j, AlphaNode const& p);
-    friend void from_json(json const& j, AlphaNode& p);
-    friend class ReteSerializer;
 
 private:
     ParsedConstraint constraint;
@@ -134,8 +131,6 @@ public:
     void right_activate(StatefulSession&, std::shared_ptr<Fact>, PropagationType) override;
     void print_node(std::ostream& os) const override;
 
-    friend void to_json(json& j, EntryPointNode const& p);
-    friend void from_json(json const& j, EntryPointNode& p);
     friend class ReteSerializer;
 };
 
@@ -172,8 +167,6 @@ public:
     void right_activate(StatefulSession& session, std::shared_ptr<Fact> fact, PropagationType p_type) override;
     void print_node(std::ostream& os) const override;
 
-    friend void to_json(json& j, HashedJoinNode const& p);
-    friend void from_json(json const& j, HashedJoinNode& p);
     friend class ReteSerializer;
 
 private:
@@ -195,8 +188,6 @@ public:
     void right_activate(StatefulSession& session, std::shared_ptr<Fact> fact, PropagationType p_type) override;
     void print_node(std::ostream& os) const override;
     friend class ReteSerializer;
-    friend void to_json(nlohmann::json& j, CrossProductJoinNode const& p);
-    friend void from_json(nlohmann::json const& j, CrossProductJoinNode& p);
 
 private:
     TokenMemory left_memory_;
@@ -216,8 +207,6 @@ public:
     NotNode() = default;
     NotNode(std::vector<ParsedConstraint> const& joins, std::map<std::string, int> const& bindings);
     void print_node(std::ostream& os) const override;
-    friend void to_json(nlohmann::json& j, NotNode const& p);
-    friend void from_json(nlohmann::json const& j, NotNode& p);
 
 protected:
     bool condition_passes(size_t match_count) const override { return match_count == 0; }
@@ -231,8 +220,6 @@ public:
     ExistsNode(std::vector<ParsedConstraint> const& joins, std::map<std::string, int> const& bindings);
     void print_node(std::ostream& os) const override;
 
-    friend void to_json(nlohmann::json& j, ExistsNode const& p);
-    friend void from_json(nlohmann::json const& j, ExistsNode& p);
 
 protected:
     bool condition_passes(size_t match_count) const override { return match_count > 0; }
@@ -248,8 +235,6 @@ public:
     void left_activate(StatefulSession&, std::shared_ptr<Token>) override;
     void right_activate(StatefulSession&, std::shared_ptr<Fact>, PropagationType) override;
     void print_node(std::ostream& os) const override;
-    friend void to_json(json& j, AccumulateNode const& p);
-    friend void from_json(json const& j, AccumulateNode& p);
     friend class KnowledgeBase;
     friend class ReteSerializer;
 
@@ -282,8 +267,6 @@ public:
     void right_activate(StatefulSession&, std::shared_ptr<Fact>, PropagationType) override {}
 
     void print_node(std::ostream& os) const override;
-    friend void to_json(json& j, UnnestNode const& p);
-    friend void from_json(json const& j, UnnestNode& p);
     friend class ReteSerializer;
 
 private:
@@ -303,8 +286,6 @@ public:
     void right_activate(StatefulSession&, std::shared_ptr<Fact>, PropagationType) override {}
 
     void print_node(std::ostream& os) const override;
-    friend void to_json(json& j, EvalNode const& p);
-    friend void from_json(json const& j, EvalNode& p);
     friend class ReteSerializer;
 
 private:
@@ -322,8 +303,6 @@ public:
     void right_activate(StatefulSession&, std::shared_ptr<Fact>, PropagationType) override {}
 
     void print_node(std::ostream& os) const override;
-    friend void to_json(json& j, TerminalNode const& p);
-    friend void from_json(json const& j, TerminalNode& p);
     friend class ReteSerializer;
 
 private:
@@ -348,8 +327,6 @@ public:
     std::map<std::string, int> const& get_bindings() const { return binding_to_token_idx; }
 
     void print_node(std::ostream& os) const override;
-    friend void to_json(json& j, QueryTerminalNode const& p);
-    friend void from_json(json const& j, QueryTerminalNode& p);
     friend class ReteSerializer;
 
 private:
@@ -369,8 +346,6 @@ public:
     void execute(StatefulSession& session, std::vector<std::shared_ptr<Fact>> const& args);
     void print_node(std::ostream& os) const override;
     friend class KnowledgeBase;
-    friend void to_json(json& j, QueryInputNode const& p);
-    friend void from_json(json const& j, QueryInputNode& p);
     friend class ReteSerializer;
 
 private:

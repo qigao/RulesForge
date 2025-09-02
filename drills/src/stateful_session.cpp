@@ -1,10 +1,9 @@
 #include "pubcxx/logger.hpp"
 
-#include "drools_lua_manager.hpp"
+#include "drools_js_manager.hpp"
 #include "query_result.hpp"
 #include "rete/beta_builder.hpp"
 #include "rete/rete_node.hpp"
-#include "rete/rete_serializer.hpp"
 #include "stateful_session.hpp"
 #include "tms.hpp"
 
@@ -43,7 +42,7 @@ namespace {
 StatefulSession::StatefulSession(private_key, std::shared_ptr<KnowledgeBase const> kb) : kb_(std::move(kb)) {
     LOG_DEBUG("StatefulSession::StatefulSession -> Creating session. KB Rules: {}, KB Queries: {}",
               kb_->get_rules().size(), kb_->get_parser_state().parsed_queries.size());
-    scripting_manager_ = std::make_unique<LuaScriptingManager>(*this);
+    scripting_manager_ = std::make_unique<JSScriptingManager>(*this);
     tms_ = std::make_unique<TruthMaintenanceSystem>(*this);
     dummy_wme_ = std::make_shared<TokenWME>(TokenWME{nullptr, nullptr, 0, 0});
     wme_cache_.insert(dummy_wme_);
@@ -140,20 +139,6 @@ void StatefulSession::prime_network_state() {
     LOG_DEBUG("Finished priming Rete network.");
 }
 
-void StatefulSession::deserialize_network(std::string const& json_data) {
-    LOG_DEBUG("Deserializing Rete network from JSON data (size: {} bytes)...", json_data.size());
-    ReteSerializer serializer(*this);
-    // Clear existing network before loading new one
-    all_nodes_.clear();
-    alpha_entry_points_.clear();
-    query_nodes_.clear();
-    parameterized_query_inputs_.clear();
-    next_node_id_ = 0;
-
-    serializer.deserialize(json_data);
-    LOG_DEBUG("Finished deserializing Rete network. Total nodes: {}", all_nodes_.size());
-}
-
 std::vector<std::shared_ptr<ReteNode>>
 StatefulSession::build_alpha_chain(ConstraintNode const* node, std::vector<std::shared_ptr<ReteNode>> parent_tails) {
     if (!node || node->children.empty()) { return parent_tails; }
@@ -177,7 +162,7 @@ StatefulSession::build_alpha_chain(ConstraintNode const* node, std::vector<std::
     return current_tails;
 }
 
-sol::state& StatefulSession::get_lua_state() { return scripting_manager_->get_lua_state(); }
+JSContext* StatefulSession::get_js_context() { return scripting_manager_->get_js_context(); }
 
 void StatefulSession::add_fact(std::shared_ptr<Fact> fact) {
     if (!fact) return;
@@ -292,6 +277,32 @@ void StatefulSession::retract_fact(std::shared_ptr<Fact> fact) {
     LOG_DEBUG("Fact count before retract: {}", all_facts_.size());
     all_facts_.erase(it);
     LOG_DEBUG("Fact count after retract: {}", all_facts_.size());
+    
+    // Clean up agenda: remove activations that depend on the retracted fact
+    std::vector<size_t> activations_to_remove;
+    for (auto const& [hash, activation] : agenda_map_) {
+        if (activation.token && activation.token->wme) {
+            // Check if this activation's token contains the retracted fact
+            std::vector<std::shared_ptr<Fact>> token_facts = activation.token->get_facts();
+            for (auto const& token_fact : token_facts) {
+                if (token_fact && token_fact->id == fact_to_retract->id) {
+                    activations_to_remove.push_back(hash);
+                    LOG_DEBUG("Removing activation for rule '{}' because it depends on retracted fact ID {}", 
+                              activation.rule->name, fact_to_retract->id);
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Remove the identified activations
+    for (size_t hash : activations_to_remove) {
+        agenda_map_.erase(hash);
+    }
+    
+    // Note: We don't need to clean the priority_queue directly since fire_all_rules() 
+    // will skip stale entries that are no longer in agenda_map_
+    
     tms_->on_fact_retracted(fact_to_retract.get());
     LOG_DEBUG("Retracting fact ID: {}, Type: {}, Propagation: {}", fact_to_retract->id, fact_to_retract->type,
               magic_enum::enum_name(PropagationType::RETRACT));
@@ -373,12 +384,12 @@ std::string StatefulSession::get_focus() const {
     return agenda_group_focus_stack_.empty() ? "MAIN" : agenda_group_focus_stack_.back();
 }
 
-void StatefulSession::set_global(std::string const& name, sol::object obj) {
+void StatefulSession::set_global(std::string const& name, JSValue obj) {
     scripting_manager_->set_global(name, obj);
 }
 
-std::map<std::string, sol::object> const& StatefulSession::get_global_values() const {
-    static std::map<std::string, sol::object> empty;
+std::map<std::string, JSValue> const& StatefulSession::get_global_values() const {
+    static std::map<std::string, JSValue> empty;
     return empty;
 }
 
@@ -411,11 +422,6 @@ void StatefulSession::remove_activation(size_t activation_hash) {
         LOG_DEBUG("Deactivating rule '{}', hash: {}", agenda_map_.at(activation_hash).rule->name, activation_hash);
         agenda_map_.erase(activation_hash);
     }
-}
-
-std::string StatefulSession::serialize_network() const {
-    ReteSerializer serializer(*this);
-    return serializer.serialize();
 }
 
 std::map<int, std::shared_ptr<ReteNode>> StatefulSession::get_nodes() const {

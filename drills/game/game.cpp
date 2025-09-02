@@ -6,7 +6,6 @@
 #include "errors.hpp"          // For ParsingResult
 
 #include <iostream>
-#include <sol/sol.hpp>
 
 namespace {
     // The DRL rules defining game logic.

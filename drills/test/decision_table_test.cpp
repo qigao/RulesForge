@@ -23,7 +23,7 @@ struct DecisionTableTestFixture {
                                         "DECLARE,Offer,\"message: String\"\n"
                                         "QUERY,find_offers,$o: Offer()\n"
                                         ",CONDITION: Customer(balance > $1),CONDITION: Customer(status == "
-                                        "\"$1\"),\"ACTION: drools.insert({type='Offer', message='$1'})\","
+                                        "\"$1\"),\"ACTION: drools.insert({type: 'Offer', message: '$1'})\","
                                         "Salience\n"
                                         "\"High Balance Offer\",5000,*,You get a high balance offer!,10\n"
                                         "\"Gold Status Offer\",*,GOLD,You get a gold status offer!,20\n";
