@@ -1,5 +1,4 @@
-# drills/capi/CMakeLists.txt
-# This CMakeLists.txt builds the C API as a shared library.
+include(GenerateExportHeader)
 
 # Add the CAPI subdirectory to the build.
 # This assumes that the parent CMakeLists.txt (at c:\projects\cpp\drills\)
@@ -17,7 +16,6 @@ generate_export_header(${CAPI_TARGET_NAME}
     EXPORT_MACRO_NAME DRILLS_CAPI_EXPORT
     NO_EXPORT_MACRO_NAME DRILLS_CAPI_NO_EXPORT
     DEPRECATED_MACRO_NAME DRILLS_CAPI_DEPRECATED
-    EXCLUDE_FROM_ALL
 )
 find_package(pegtl )
 
@@ -40,6 +38,23 @@ target_link_libraries(${CAPI_TARGET_NAME}
     drills pubcxx
     hashmap   taocpp::pegtl
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    # Link against pthread for WASM if threading is used
+    # Emscripten provides its own pthread library
+    target_link_libraries(${CAPI_TARGET_NAME} PUBLIC pthread)
+elseif(ANDROID)
+    # Android specific settings
+    # Set the C++ Standard Library to be used.
+    # Common options: c++_static, c++_shared, gnustl_static, gnustl_shared, stlport_static, stlport_shared
+    # c++_static (libc++_static.a) is generally recommended for static linking.
+    set_target_properties(${CAPI_TARGET_NAME} PROPERTIES
+        ANDROID_STL c++_static
+        ANDROID_NATIVE_API_LEVEL 21 # Minimum API level for Android NDK
+    )
+    # Link against Android specific libraries if needed, e.g., log for logging
+    # target_link_libraries(${CAPI_TARGET_NAME} PUBLIC log android)
+endif()
 add_subdirectory(tests)
 add_subdirectory(examples)
 # Set output directory for the shared library

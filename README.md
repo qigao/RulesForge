@@ -1,10 +1,12 @@
 # Drills - C++ Rete Rule Engine with JavaScript Integration
 
+[中文文档](./docs/zh-CN/README.md)
+
 This is a sophisticated, high-performance C++ rules engine implementing the **Rete algorithm** with **JavaScript (QuickJS) scripting** for rule consequences, inspired by Java Drools but designed specifically for C++ environments.
 
 ## Core Architecture
 
-**Rete Algorithm Implementation**: 
+**Rete Algorithm Implementation**:
 - Full Rete network with alpha/beta nodes (`drills/include/rete/rete_node.hpp:15175 lines`)
 - Immutable `KnowledgeBase` containing compiled rules (`drills/include/knowledge_base.hpp:74`)
 - Mutable `StatefulSession` managing working memory (`drills/include/stateful_session.hpp:141`)
@@ -29,7 +31,7 @@ This is a sophisticated, high-performance C++ rules engine implementing the **Re
 - **QuickJS** for JavaScript integration
 - **PEGTL** for parsing (`vcpkg.json:66-68`)
 - **Catch2** for testing
-- **Magic Enum**, **nlohmann-json**, **spdlog** for utilities
+- **jsoncons** for json path query
 - **CMake** build system with vcpkg dependency management
 
 ## Project Structure
@@ -175,5 +177,5 @@ This is a production-ready rules engine suitable for complex business rule scena
 ## Documentation
 
 For a complete reference on the DRL syntax, features, and advanced design patterns, please see the
-- [DRL Language Guide](./drills/guide.md)
-- [DRL Grammar Guide](./drills/dsl.md)
+- [DRL Language Guide](./docs/USER_GUIDE.md)
+- [DRL Grammar Guide](./docs/dsl.md)

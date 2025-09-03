@@ -34,6 +34,13 @@ if(MSVC)
 endif()
 target_compile_definitions(${TARGET_NAME} PUBLIC  HAS_MIMALLOC)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    # Add WASM-specific compile definitions or link libraries here
+    # For example, if you need to enable pthreads for mimalloc or quickjs-ng
+    # target_compile_definitions(${TARGET_NAME} PUBLIC -s USE_PTHREADS=1)
+    # target_link_libraries(${TARGET_NAME} PUBLIC pthread)
+endif()
+
 set_target_properties(${TARGET_NAME} PROPERTIES FOLDER "${TARGET_NAME}")
 set_target_properties(${TARGET_NAME} PROPERTIES LINKER_LANGUAGE CXX)
 # Tests

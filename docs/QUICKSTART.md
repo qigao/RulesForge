@@ -212,9 +212,7 @@ cmake --build build
 ## What's Next?
 
 - **Simple rules?** → Continue with the [User Guide](USER_GUIDE.md)
-- **Complex enterprise scenarios?** → Check the [Developer Guide](DEVELOPER_GUIDE.md)  
 - **Production deployment?** → See [Deployment Guide](DEPLOYMENT.md)
-- **API details?** → Browse [API Reference](API_REFERENCE.md)
 
 ## Need Help?
 
