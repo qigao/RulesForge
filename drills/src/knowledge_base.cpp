@@ -1,5 +1,5 @@
 #include "knowledge_base.hpp"
-#include "pubcxx/logger.hpp"
+#include "fmtlog.h"
 
 #include "drools_accumulators.hpp"
 #include "rete/beta_builder.hpp"
@@ -51,15 +51,15 @@ KnowledgeBase::KnowledgeBase(private_key) {
 KnowledgeBase::~KnowledgeBase() {}
 
 std::shared_ptr<KnowledgeBase> KnowledgeBase::create(parser_state& state) {
-    LOG_DEBUG("KnowledgeBase::create -> Creating new knowledge base from parser state with {} rules.",
-              state.parsed_rules.size());
+    logd("KnowledgeBase::create -> Creating new knowledge base from parser state with {} rules.",
+         state.parsed_rules.size());
     auto kb = std::make_shared<KnowledgeBase>(KnowledgeBase::private_key{});
     kb->build(state);
     return kb;
 }
 
 std::unique_ptr<StatefulSession> KnowledgeBase::create_session() {
-    LOG_DEBUG("KnowledgeBase::create_session -> Creating new stateful session.");
+    logd("KnowledgeBase::create_session -> Creating new stateful session.");
     auto session = std::make_unique<StatefulSession>(StatefulSession::private_key{}, this->shared_from_this());
     session->build_network();
     session->prime_network_state();
@@ -73,7 +73,7 @@ FactTypeRegistry& KnowledgeBase::get_fact_type_registry() { return fact_type_reg
 FactTypeRegistry const& KnowledgeBase::get_fact_type_registry() const { return fact_type_registry_; }
 
 void KnowledgeBase::build(parser_state& state) {
-    LOG_DEBUG("KnowledgeBase::build -> Building from parser state with {} rules.", state.parsed_rules.size());
+    logd("KnowledgeBase::build -> Building from parser state with {} rules.", state.parsed_rules.size());
     this->parser_state_ = state;
 
     // Process rule inheritance to create the final set of rules for the blueprint.
@@ -87,8 +87,8 @@ void KnowledgeBase::build(parser_state& state) {
         if (auto it = rule_map.find(*rule.parent_rule_name); it != rule_map.end()) {
             ParsedRule child_rule = rule;
             ParsedRule const& parent_rule = it->second;
-            LOG_DEBUG("KnowledgeBase::build -> Rule '{}' extends '{}'. Merging conditions.", child_rule.name,
-                      parent_rule.name);
+            logd("KnowledgeBase::build -> Rule '{}' extends '{}'. Merging conditions.", child_rule.name,
+                 parent_rule.name);
             if (!parent_rule.condition_groups.empty()) {
                 auto const& parent_patterns = parent_rule.condition_groups.front();
                 for (auto& child_group : child_rule.condition_groups) {
@@ -100,24 +100,24 @@ void KnowledgeBase::build(parser_state& state) {
             processed_rules_.push_back(child_rule);
         }
     }
-    LOG_DEBUG("KnowledgeBase::build -> Finished processing rule inheritance. Total processed rules: {}",
-              processed_rules_.size());
+    logd("KnowledgeBase::build -> Finished processing rule inheritance. Total processed rules: {}",
+         processed_rules_.size());
 }
 
 std::unique_ptr<ConstraintNode>
 KnowledgeBase::partition_and_get_alpha_root(ParsedPattern const& pattern,
                                             std::vector<ParsedConstraint>& out_join_constraints) const {
     if (!pattern.constraint_root) return nullptr;
-    LOG_DEBUG("KnowledgeBase::partition_and_get_alpha_root for pattern with fact type '{}'", pattern.fact_type);
+    logd("KnowledgeBase::partition_and_get_alpha_root for pattern with fact type '{}'", pattern.fact_type);
     auto alpha_root = std::make_unique<ConstraintNode>(NodeType::AND);
     std::function<void(ConstraintNode*)> process_node = [&](ConstraintNode* node) {
         if (!node) return;
         if (node->type == NodeType::LEAF) {
             if (node->constraint.right_bound_field || node->constraint.temporal_constraint) {
-                LOG_DEBUG("  -> Partitioned to JOIN: {}", constraint_to_string(node->constraint));
+                logd("  -> Partitioned to JOIN: {}", constraint_to_string(node->constraint));
                 out_join_constraints.push_back(node->constraint);
             } else {
-                LOG_DEBUG("  -> Partitioned to ALPHA: {}", constraint_to_string(node->constraint));
+                logd("  -> Partitioned to ALPHA: {}", constraint_to_string(node->constraint));
                 alpha_root->children.push_back(std::make_unique<ConstraintNode>(*node));
             }
         } else {

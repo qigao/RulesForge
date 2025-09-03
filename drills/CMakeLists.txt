@@ -3,7 +3,7 @@ file(GLOB_RECURSE SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h*
      ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c*
      ${CMAKE_CURRENT_SOURCE_DIR}/src/rete/*.c*
 )
-add_library(${TARGET_NAME} OBJECT ${SOURCES})
+add_library(${TARGET_NAME} STATIC ${SOURCES})
 # Find dependencies
 find_package(pegtl )
 find_path(BSHOSHANY_THREAD_POOL_INCLUDE_DIRS "BS_thread_pool.hpp")
@@ -18,7 +18,7 @@ find_package(jsoncons CONFIG REQUIRED)
 target_link_libraries(
     ${TARGET_NAME}
     PUBLIC
-    pubcxx
+    fmtlog::fmtlog
     hashmap
     mimalloc
     qjs glaze::glaze jsoncons::jsoncons

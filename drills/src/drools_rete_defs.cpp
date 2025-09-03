@@ -1,5 +1,5 @@
 #include "drools_rete_defs.hpp"
-#include "pubcxx/logger.hpp"
+#include "fmtlog.h"
 
 #include <iostream>
 #include <magic_enum/magic_enum.hpp>
@@ -45,18 +45,18 @@ std::size_t ConstraintValueHasher::operator()(ConstraintValue const& v) const {
 
 // --- Implementation for Core Struct Methods ---
 std::optional<ConstraintValue> Fact::get_field(std::string const& name) const {
-    LOG_DEBUG("Fact::get_field(this={}, id={}, name='{}')", (void*)this, this->id, name);
+    logd("Fact::get_field(this={}, id={}, name='{}')", (void*)this, this->id, name);
     // "this" is the special keyword to refer to the fact's identity (its internal ID).
     if (name == "this") { return this->id; }
     // All other names, including "id", must be looked for exclusively in the fields map.
     auto it = fields.find(name);
     if (it != fields.end()) {
-        LOG_DEBUG("  > Found key '{}' in fields map.", name);
+        logd("  > Found key '{}' in fields map.", name);
         return it->second;
     }
 
-    LOG_DEBUG("  > Did not find key '{}' in fields map.", name);
-    if (LOG_LEVEL_PUBCXX_TRACE) {
+    logd("  > Did not find key '{}' in fields map.", name);
+    if constexpr(FMTLOG_ACTIVE_LEVEL <= FMTLOG_LEVEL_DBG) {
         std::stringstream ss;
         ss << "  > Available fields in map: {";
         bool first = true;
@@ -66,14 +66,14 @@ std::optional<ConstraintValue> Fact::get_field(std::string const& name) const {
             first = false;
         }
         ss << "}";
-        LOG_DEBUG("{}", ss.str());
+        logd("{}", ss.str());
     }
 
     return std::nullopt;
 }
 
 Token::Token(std::shared_ptr<TokenWME const> w, PropagationType pt) : wme(std::move(w)), type(pt) {
-    LOG_DEBUG("Token created with PropagationType: {}", magic_enum::enum_name(pt));
+    logd("Token created with PropagationType: {}", magic_enum::enum_name(pt));
 }
 
 std::shared_ptr<Fact const> Token::get_fact() const { return wme ? wme->fact : nullptr; }
@@ -124,11 +124,11 @@ bool ScheduledExpiration::operator>(ScheduledExpiration const& other) const {
 
 // --- Implementations for custom constructors / operators ---
 ConstraintNode::ConstraintNode(NodeType t) : type(t) {
-    LOG_DEBUG("ConstraintNode created with NodeType: {}", magic_enum::enum_name(t));
+    logd("ConstraintNode created with NodeType: {}", magic_enum::enum_name(t));
 }
 
 ConstraintNode::ConstraintNode() : type(NodeType::LEAF) {
-    LOG_DEBUG("ConstraintNode created with default NodeType: {}", magic_enum::enum_name(NodeType::LEAF));
+    logd("ConstraintNode created with default NodeType: {}", magic_enum::enum_name(NodeType::LEAF));
 }
 
 ConstraintNode::ConstraintNode(ConstraintNode const& other) : type(other.type), constraint(other.constraint) {

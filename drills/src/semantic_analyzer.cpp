@@ -11,14 +11,14 @@
 
 #include "drools_rete_defs.hpp"
 #include "js_semantic_analyzer.hpp"
-#include "pubcxx/logger.hpp"
+#include "fmtlog.h"
 namespace pegtl = tao::pegtl;
 
 namespace
 {
 int calculate_levenshtein_distance(std::string const& s1, std::string const& s2)
 {
-  LOG_DEBUG("Calculating Levenshtein distance between '{}' and '{}'", s1, s2);
+  logd("Calculating Levenshtein distance between '{}' and '{}'", s1, s2);
   int const n = s1.length();
   int const m = s2.length();
   std::vector<int> p(m + 1);
@@ -49,7 +49,7 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
   if (!node) {
     return;
   }
-  LOG_DEBUG(
+  logd(
       "Analyzing constraint node type {} for pattern '{}' in rule '{}' at "
       "depth {}",
       magic_enum::enum_name(node->type),
@@ -73,7 +73,7 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
                                + "', duplicate inline binding '"
                                + *constraint.field_binding + "' is declared.");
       } else {
-        LOG_DEBUG("  -> Found new inline binding: '{}' for field '{}'",
+        logd("  -> Found new inline binding: '{}' for field '{}'",
                   *constraint.field_binding,
                   constraint.left_field);
         // This is the critical fix: use the provided pattern and depth
@@ -110,7 +110,7 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
           // Handle symbols found in new_symbols
           SymbolInfo const& info = it->second;
           if (info.source_field_of_binding) {
-            LOG_DEBUG(
+            logd(
                 "  -> Rewriting bound field from alias '{}' to source '{}.{}'",
                 binding_name,
                 info.source_field_of_binding->first,
@@ -122,7 +122,7 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
         // Handle symbols found in existing_symbols
         SymbolInfo const& info = it->second;
         if (info.source_field_of_binding) {
-          LOG_DEBUG(
+          logd(
               "  -> Rewriting bound field from alias '{}' to source '{}.{}'",
               binding_name,
               info.source_field_of_binding->first,
@@ -134,23 +134,23 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
                && std::holds_alternative<std::string>(
                    *constraint.right_literal))
     {
-      LOG_WARN("analyze_constraint_node_recursive: Processing right_literal as potential binding");
+      logw("analyze_constraint_node_recursive: Processing right_literal as potential binding");
       // This handles cases where a binding was parsed as a literal string,
       // e.g., "field == $p"
       auto const& potential_binding =
           std::get<std::string>(*constraint.right_literal);
-      LOG_WARN("analyze_constraint_node_recursive: potential_binding='{}'", potential_binding);
+      logw("analyze_constraint_node_recursive: potential_binding='{}'", potential_binding);
       if (potential_binding.rfind('$', 0) == 0) {
-        LOG_WARN("analyze_constraint_node_recursive: Found potential binding '{}'", potential_binding);
+        logw("analyze_constraint_node_recursive: Found potential binding '{}'", potential_binding);
         auto it = existing_symbols.find(potential_binding);
         bool found_in_existing = (it != existing_symbols.end());
-        
+
         if (!found_in_existing) {
           it = new_symbols.find(potential_binding);
         }
-        
+
         if (found_in_existing || it != new_symbols.end()) {
-          LOG_WARN("analyze_constraint_node_recursive: Binding '{}' found, converting to bound_field", potential_binding);
+          logw("analyze_constraint_node_recursive: Binding '{}' found, converting to bound_field", potential_binding);
           constraint.right_bound_field = {{potential_binding, "this"}};
           constraint.right_literal = std::nullopt;
 
@@ -160,7 +160,7 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
             constraint.right_bound_field = *info.source_field_of_binding;
           }
         } else {
-          LOG_WARN("analyze_constraint_node_recursive: Binding '{}' NOT FOUND, should add error", potential_binding);
+          logw("analyze_constraint_node_recursive: Binding '{}' NOT FOUND, should add error", potential_binding);
           analyzer.add_error(pos,
                              "In rule '" + rule.name
                                  + "', constraint uses undeclared binding '"
@@ -190,7 +190,7 @@ SemanticAnalyzer::SemanticAnalyzer(parser_state& st,
 
 void SemanticAnalyzer::build_schema()
 {
-  LOG_DEBUG("Building schema from {} declarations. Current package: '{}'",
+  logd("Building schema from {} declarations. Current package: '{}'",
             state_.parsed_declarations.size(),
             state_.package_name);
   type_schemas_.clear();
@@ -206,7 +206,7 @@ void SemanticAnalyzer::build_schema()
       decl.type_name = decl.source_package + "." + decl.type_name;
     }
 
-    LOG_DEBUG("  -> Schema for '{}': {} fields", decl.type_name, fields.size());
+    logd("  -> Schema for '{}': {} fields", decl.type_name, fields.size());
     type_schemas_[decl.type_name] = std::move(fields);
   }
 }
@@ -263,7 +263,7 @@ std::optional<std::string> SemanticAnalyzer::resolve_type(
 
 void SemanticAnalyzer::analyze_rule(ParsedRule& rule)
 {
-  LOG_DEBUG("Analyzing rule: {}", rule.name);
+  logd("Analyzing rule: {}", rule.name);
   if (rule.parent_rule_name) {
     bool found = false;
     for (auto const& r : state_.parsed_rules) {
@@ -288,7 +288,7 @@ void SemanticAnalyzer::analyze_rule(ParsedRule& rule)
 
 void SemanticAnalyzer::analyze_query(ParsedQuery& query)
 {
-  LOG_DEBUG("Analyzing query: {}", query.name);
+  logd("Analyzing query: {}", query.name);
 
   // First, resolve all type names within the query's patterns.
   // This is the missing piece.
@@ -344,7 +344,7 @@ void SemanticAnalyzer::analyze_pattern_list(
                   "In rule '" + rule.name + "', duplicate binding '"
                       + pattern.binding + "' is declared.");
       } else {
-        LOG_DEBUG(
+        logd(
             "  -> Found new binding '{}' at depth {}", pattern.binding, depth);
         symbols[pattern.binding] = SymbolInfo {&pattern, depth, std::nullopt};
       }
@@ -362,7 +362,7 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
                                        tao::pegtl::position const& pattern_pos,
                                        int depth)
 {
-  LOG_DEBUG("Analyzing pattern in rule '{}': type={}, fact_type={}, binding={}",
+  logd("Analyzing pattern in rule '{}': type={}, fact_type={}, binding={}",
             rule.name,
             magic_enum::enum_name(pattern.type),
             pattern.fact_type,
@@ -371,7 +371,7 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
     SymbolTable nested_symbols = symbols;
     if (!pattern.nested_patterns.empty()) {
       int nested_depth = 0;
-      LOG_DEBUG("  -> Analyzing nested patterns for NOT/EXISTS");
+      logd("  -> Analyzing nested patterns for NOT/EXISTS");
       analyze_pattern_list(
           pattern.nested_patterns, nested_symbols, nested_depth, rule);
     }
@@ -397,7 +397,7 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
         using T = std::decay_t<decltype(arg)>;
 
         if constexpr (std::is_same_v<T, ParsedAccumulate>) {
-          LOG_DEBUG("  -> Analyzing 'accumulate' source pattern");
+          logd("  -> Analyzing 'accumulate' source pattern");
           if (!arg.source_pattern) {
             return;
           }
@@ -479,7 +479,7 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
                             + type_to_check_against + "'.");
             }
           }
-          LOG_DEBUG("    -> Accumulate field resolved to '{}'",
+          logd("    -> Accumulate field resolved to '{}'",
                     field_to_accumulate);
           arg.accumulate_field_name = field_to_accumulate;
         }
@@ -504,41 +504,41 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
     if (code.empty()) {
       return;
     }
-    LOG_DEBUG("  -> Analyzing 'eval' expression: {}", code);
-    
+    logd("  -> Analyzing 'eval' expression: {}", code);
+
     // Use JavaScript semantic analyzer for eval expressions too
     JSSemanticAnalyzer js_analyzer(symbols, rule, *this);
     std::string syntax_error;
-    
+
     if (!js_analyzer.validate_syntax(code, syntax_error)) {
       add_error(pattern_pos, "JavaScript syntax error in eval expression: " + syntax_error);
       return;
     }
-    
+
     // For eval expressions, we need to ensure they return a boolean
     // For now, just do basic variable substitution
     std::string substituted_code = code;
-    
+
     // Simple variable substitution for eval (similar to RHS processing)
     std::regex var_regex(R"(\$([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*))");
     std::vector<std::string> unbound_variables;
-    
+
     auto words_begin = std::sregex_iterator(code.begin(), code.end(), var_regex);
     auto words_end = std::sregex_iterator();
-    
+
     for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
       std::smatch match = *i;
       std::string full_binding = "$" + match[1].str();
-      
+
       if (symbols.find(full_binding) == symbols.end()) {
         unbound_variables.push_back(full_binding);
       } else {
         // Replace $var with var
-        substituted_code = std::regex_replace(substituted_code, 
+        substituted_code = std::regex_replace(substituted_code,
           std::regex("\\$" + match[1].str()), match[1].str());
       }
     }
-    
+
     if (!unbound_variables.empty()) {
       std::set<std::string> unique_unbound(unbound_variables.begin(), unbound_variables.end());
       for (auto const& binding : unique_unbound) {
@@ -566,7 +566,7 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
       if (code.rfind("return ", 0) != 0) {
         code = "return " + code;
       }
-      LOG_DEBUG("    -> Substituted eval code: {}", code);
+      logd("    -> Substituted eval code: {}", code);
     }
   }
 }
@@ -577,25 +577,25 @@ void SemanticAnalyzer::analyze_rhs(ParsedRule& rule, SymbolTable const& symbols)
     return;
   }
 
-  LOG_DEBUG("Analyzing RHS of rule '{}' with JavaScript analyzer", rule.name);
+  logd("Analyzing RHS of rule '{}' with JavaScript analyzer", rule.name);
 
   // Use the new JavaScript semantic analyzer
   JSSemanticAnalyzer js_analyzer(symbols, rule, *this);
 
   if (!js_analyzer.analyze_js_rhs(rule)) {
     // Errors were already added by the JS analyzer
-    LOG_DEBUG("JavaScript RHS analysis failed for rule '{}'", rule.name);
+    logd("JavaScript RHS analysis failed for rule '{}'", rule.name);
     return;
   }
 
-  LOG_DEBUG("JavaScript RHS analysis completed successfully for rule '{}'",
+  logd("JavaScript RHS analysis completed successfully for rule '{}'",
             rule.name);
 }
 
 void SemanticAnalyzer::add_error(tao::pegtl::position const& pos,
                                  std::string const& message)
 {
-  LOG_WARN("Semantic Error Added: file={}, line={}, col={}, message='{}'",
+  logw("Semantic Error Added: file={}, line={}, col={}, message='{}'",
            source_name_,
            pos.line,
            pos.column,
@@ -608,18 +608,18 @@ void SemanticAnalyzer::add_error(tao::pegtl::position const& pos,
 
 bool SemanticAnalyzer::build_and_analyze_declarations()
 {
-  LOG_DEBUG("Semantic Analysis - Phase 1: Building schema...");
+  logd("Semantic Analysis - Phase 1: Building schema...");
   errors_.clear();
   build_schema();
   // In the future, you could add validation for declarations here.
-  LOG_DEBUG("Semantic Analysis - Phase 1 finished. Found {} errors.",
+  logd("Semantic Analysis - Phase 1 finished. Found {} errors.",
             errors_.size());
   return errors_.empty();
 }
 
 bool SemanticAnalyzer::analyze_rules_and_queries()
 {
-  LOG_DEBUG("Semantic Analysis - Phase 2: Analyzing rules and queries...");
+  logd("Semantic Analysis - Phase 2: Analyzing rules and queries...");
   // Note: errors_ is NOT cleared here, to accumulate errors from both phases.
   for (auto& rule : state_.parsed_rules) {
     analyze_rule(rule);
@@ -627,7 +627,7 @@ bool SemanticAnalyzer::analyze_rules_and_queries()
   for (auto& query : state_.parsed_queries) {
     analyze_query(query);
   }
-  LOG_DEBUG("Semantic Analysis - Phase 2 finished. Total errors: {}.",
+  logd("Semantic Analysis - Phase 2 finished. Total errors: {}.",
             errors_.size());
   return errors_.empty();
 }

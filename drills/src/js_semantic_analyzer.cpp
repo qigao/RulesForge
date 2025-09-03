@@ -1,64 +1,64 @@
 #include "js_semantic_analyzer.hpp"
-#include "pubcxx/logger.hpp"
+#include "fmtlog.h"
 #include <regex>
 #include <sstream>
 #include <set>
 
 JSSemanticAnalyzer::JSSemanticAnalyzer(SymbolTable const& symbols, ParsedRule const& rule, SemanticAnalyzer& base_analyzer)
     : symbols_(symbols), rule_(rule), analyzer_(base_analyzer) {
-    LOG_DEBUG("JSSemanticAnalyzer: Initializing for rule '{}'", rule_.name);
+    logd("JSSemanticAnalyzer: Initializing for rule '{}'", rule_.name);
 }
 
 bool JSSemanticAnalyzer::analyze_js_rhs(ParsedRule& rule) {
     if (rule.rhs_code.empty()) {
         return true; // Empty RHS is valid
     }
-    
-    LOG_WARN("JSSemanticAnalyzer: Analyzing JavaScript RHS for rule '{}'", rule.name);
-    LOG_WARN("Original RHS code: {}", rule.rhs_code);
-    
+
+    logw("JSSemanticAnalyzer: Analyzing JavaScript RHS for rule '{}'", rule.name);
+    logw("Original RHS code: {}", rule.rhs_code);
+
     size_t initial_error_count = analyzer_.get_errors().size();
-    
+
     // Step 1: Validate JavaScript syntax
     std::string syntax_error;
     if (!validate_syntax(rule.rhs_code, syntax_error)) {
         analyzer_.add_error(rule.pos, "JavaScript syntax error in rule '" + rule.name + "': " + syntax_error);
         return false;
     }
-    
+
     // Step 2: Parse and analyze the JavaScript code
     auto ast = ast_builder_.parse(rule.rhs_code);
     if (!ast.is_valid) {
         analyzer_.add_error(rule.pos, "Failed to parse JavaScript in rule '" + rule.name + "': " + ast.error_message);
         return false;
     }
-    
+
     // Step 3: Extract and validate function calls and variables
     auto function_calls = analyze_function_calls(rule.rhs_code);
     auto variables = analyze_variables(rule.rhs_code);
-    
+
     if (!validate_function_calls(function_calls)) {
         return false; // Errors already added by validate_function_calls
     }
-    
+
     if (!validate_variable_bindings(variables)) {
-        return false; // Errors already added by validate_variable_bindings  
+        return false; // Errors already added by validate_variable_bindings
     }
-    
+
     // Step 4: Resolve types and substitute variables
     std::string processed_code = resolve_and_substitute_types(rule.rhs_code);
     processed_code = substitute_variables(processed_code);
-    
+
     // Check if any errors were added during variable substitution
     if (analyzer_.get_errors().size() > initial_error_count) {
         return false;
     }
-    
+
     // Step 5: Update the rule with processed code
     rule.rhs_code = processed_code;
-    
-    LOG_WARN("Processed RHS code: {}", rule.rhs_code);
-    LOG_WARN("JSSemanticAnalyzer: Successfully analyzed rule '{}'", rule.name);
+
+    logw("Processed RHS code: {}", rule.rhs_code);
+    logw("JSSemanticAnalyzer: Successfully analyzed rule '{}'", rule.name);
     return true;
 }
 
@@ -80,15 +80,15 @@ std::string JSSemanticAnalyzer::resolve_and_substitute_types(const std::string& 
     std::string original_code = js_code;
     std::string code_with_resolved_types;
     code_with_resolved_types.reserve(original_code.length());
-    
+
     auto last_match_end = original_code.cbegin();
     for (auto i = std::sregex_iterator(original_code.begin(), original_code.end(), type_regex);
          i != std::sregex_iterator(); ++i) {
         std::smatch match = *i;
-        
+
         // Append the part before this match
         code_with_resolved_types.append(last_match_end, match.prefix().second);
-        
+
         std::string unqualified_type = match[1].str();
         if (auto resolved_type = analyzer_.resolve_type(unqualified_type, rule_.source_package, rule_.source_imports)) {
             // Append the resolved type (keep JavaScript object syntax)
@@ -99,11 +99,11 @@ std::string JSSemanticAnalyzer::resolve_and_substitute_types(const std::string& 
         }
         last_match_end = match.suffix().first;
     }
-    
+
     // Append the rest after the last match
     code_with_resolved_types.append(last_match_end, original_code.cend());
-    
-    LOG_TRACE("After type resolution: {}", code_with_resolved_types);
+
+    logi("After type resolution: {}", code_with_resolved_types);
     return code_with_resolved_types;
 }
 
@@ -114,51 +114,51 @@ std::string JSSemanticAnalyzer::substitute_variables(const std::string& js_code)
     std::regex var_regex(R"(\$([a-zA-Z_][a-zA-Z0-9_]*))");  // Removed the optional property part
     std::string substituted_code;
     substituted_code.reserve(js_code.size());
-    
-    LOG_WARN("substitute_variables: Processing code '{}'", js_code);
-    LOG_WARN("substitute_variables: Symbol table has {} entries", symbols_.size());
-    
+
+    logw("substitute_variables: Processing code '{}'", js_code);
+    logw("substitute_variables: Symbol table has {} entries", symbols_.size());
+
     bool has_unbound_variables = false;
     std::set<std::string> unbound_vars;
-    
+
     auto last_match_end = js_code.cbegin();
     for (auto i = std::sregex_iterator(js_code.begin(), js_code.end(), var_regex);
          i != std::sregex_iterator(); ++i) {
         std::smatch match = *i;
-        
+
         // Append the part before this match
         substituted_code.append(last_match_end, match.prefix().second);
-        
+
         std::string full_binding = "$" + match[1].str(); // Reconstruct full binding for lookup
         std::string var_name = match[1].str();          // Variable name without $
-        
-        LOG_WARN("substitute_variables: Found variable '{}', checking if '{}' exists in symbols", match.str(), full_binding);
-        
+
+        logw("substitute_variables: Found variable '{}', checking if '{}' exists in symbols", match.str(), full_binding);
+
         // Check if the binding exists in symbols
         if (symbols_.count(full_binding)) {
             // Valid binding - substitute by removing the $
             substituted_code += var_name;
-            LOG_WARN("Substituted {} -> {}", full_binding, var_name);
+            logw("Substituted {} -> {}", full_binding, var_name);
         } else {
             // Invalid binding - record for error reporting
             substituted_code += full_binding; // Keep original for error reporting
             unbound_vars.insert(full_binding);
             has_unbound_variables = true;
-            LOG_WARN("Binding '{}' not found in symbols, keeping original", full_binding);
+            logw("Binding '{}' not found in symbols, keeping original", full_binding);
         }
-        
+
         last_match_end = match.suffix().first;
     }
-    
+
     // Append the rest after the last match
     substituted_code.append(last_match_end, js_code.cend());
-    
+
     // Report unbound variables as errors
     if (has_unbound_variables) {
         for (const auto& binding : unbound_vars) {
             std::string suggestion;
             int min_distance = 4;
-            
+
             // Find similar variable names
             for (const auto& [valid_binding, info] : symbols_) {
                 if (valid_binding.length() > 1 && binding.length() > 1) {
@@ -168,43 +168,43 @@ std::string JSSemanticAnalyzer::substitute_variables(const std::string& js_code)
                     }
                 }
             }
-            
+
             std::string error_message = "In rule '" + rule_.name + "', RHS uses undeclared variable '" + binding + "'.";
             if (!suggestion.empty()) {
                 error_message += " Did you mean '" + suggestion + "'?";
             }
-            
+
             analyzer_.add_error(rule_.pos, error_message);
         }
     }
-    
-    LOG_WARN("substitute_variables: Result: '{}'", substituted_code);
+
+    logw("substitute_variables: Result: '{}'", substituted_code);
     return substituted_code;
 }
 
 bool JSSemanticAnalyzer::validate_variable_bindings(const std::vector<JSVariableRef>& variables) {
     bool all_valid = true;
     std::set<std::string> unbound_vars;
-    
+
     for (const auto& var : variables) {
         // Skip known non-variables
         if (var.name == "drools" || var.name == "console" || var.name == "type" || var.name == "JSON") {
             continue;
         }
-        
+
         // Check if this looks like a substituted variable (originally had $)
         std::string full_binding = "$" + var.name;
-        
+
         if (symbols_.find(full_binding) == symbols_.end()) {
             unbound_vars.insert(full_binding);
         }
     }
-    
+
     // Report unbound variables with suggestions
     for (const auto& binding : unbound_vars) {
         std::string suggestion;
         int min_distance = 4;
-        
+
         // Find similar variable names (Levenshtein distance logic from original)
         for (const auto& [valid_binding, info] : symbols_) {
             // Simple similarity check - just check if they start similarly
@@ -215,16 +215,16 @@ bool JSSemanticAnalyzer::validate_variable_bindings(const std::vector<JSVariable
                 }
             }
         }
-        
+
         std::string error_message = "In rule '" + rule_.name + "', JavaScript RHS uses undeclared variable '" + binding + "'.";
         if (!suggestion.empty()) {
             error_message += " Did you mean '" + suggestion + "'?";
         }
-        
+
         analyzer_.add_error(rule_.pos, error_message);
         all_valid = false;
     }
-    
+
     return all_valid;
 }
 
@@ -233,17 +233,17 @@ bool JSSemanticAnalyzer::validate_function_calls(const std::vector<JSFunctionCal
     std::set<std::string> known_drools_methods = {
         "insert", "insertLogical", "retract", "update", "setFocus"
     };
-    
+
     for (const auto& call : calls) {
         if (call.object_name == "drools") {
             if (known_drools_methods.find(call.method_name) == known_drools_methods.end()) {
-                analyzer_.add_error(rule_.pos, 
+                analyzer_.add_error(rule_.pos,
                     "In rule '" + rule_.name + "', unknown drools method: drools." + call.method_name + "()");
                 return false;
             }
         }
         // Other objects (like console) are allowed for now
     }
-    
+
     return true;
 }

@@ -14,8 +14,6 @@ target_include_directories(
 find_package(magic_enum CONFIG REQUIRED)
 find_package(pegtl CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
-find_package(fmt CONFIG REQUIRED)
-find_package(spdlog CONFIG REQUIRED)
 find_path(BSHOSHANY_THREAD_POOL_INCLUDE_DIRS "BS_thread_pool.hpp")
 target_include_directories( ${TARGET_NAME} PRIVATE ${BSHOSHANY_THREAD_POOL_INCLUDE_DIRS})
 find_package(mimalloc)
@@ -26,8 +24,6 @@ target_link_libraries(
     PUBLIC
     mimalloc
     hashmap
-    fmt::fmt
-    spdlog::spdlog
     xxHash::xxhash
     taocpp::pegtl
     yaml-cpp::yaml-cpp
