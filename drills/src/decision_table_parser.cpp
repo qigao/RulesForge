@@ -58,11 +58,11 @@ namespace {
                 state.table.preamble_records.push_back(std::move(state.current_record));
             } else if (!state.header_parsed) {
                 // This is the first non-preamble line, so it must be the header.
-                state.table.header = std::move(state.current_record);
+                state.table.headers = std::move(state.current_record);
                 state.header_parsed = true;
             } else {
                 // The header has been parsed, so this is a data record.
-                state.table.records.push_back(std::move(state.current_record));
+                state.table.data.push_back(std::move(state.current_record));
             }
             state.current_record.clear();
         }

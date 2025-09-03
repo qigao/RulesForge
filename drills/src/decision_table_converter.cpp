@@ -35,7 +35,7 @@ DecisionTableConverter::DecisionTableConverter(DecisionTable table) : table_(std
     drl_preamble_ = preamble_ss.str();
 
     // 2. Process the header to define columns.
-    for (std::string const& header_text : table_.header) {
+    for (std::string const& header_text : table_.headers) {
         if (header_text.rfind("CONDITION: ", 0) == 0) {
             column_defs_.push_back({"CONDITION", header_text.substr(11)});
         } else if (header_text.rfind("ACTION: ", 0) == 0) {
@@ -47,13 +47,13 @@ DecisionTableConverter::DecisionTableConverter(DecisionTable table) : table_(std
 }
 
 std::string DecisionTableConverter::generate_drl() {
-    if (table_.records.empty()) return "";
+    if (table_.data.empty()) return "";
 
     std::stringstream drl_ss;
     drl_ss << drl_preamble_ << "\n";
 
-    for (size_t row_idx = 0; row_idx < table_.records.size(); ++row_idx) {
-        auto const& record = table_.records[row_idx];
+    for (size_t row_idx = 0; row_idx < table_.data.size(); ++row_idx) {
+        auto const& record = table_.data[row_idx];
         if (record.empty()) continue;
 
         // --- Generate Rule Header ---
