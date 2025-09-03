@@ -1,10 +1,13 @@
 #include "knowledge_base.hpp"
+#include "drools_parser.hpp"
+#include "errors.hpp"
 
 #include <chrono>
 #include <iostream>
 #include <magic_enum/magic_enum.hpp>
 #include <string>
 #include <vector>
+#include <fmtlog.h>
 
 namespace DebugUtils {
     std::string indent(int level) { return std::string(level * 2, ' '); }
@@ -78,14 +81,14 @@ public:
         auto kb = build_knowledge_base(result, m_options.filepath);
 
         print_results(result, start);
-        
+
         if (result.success && m_options.dump_ast && kb) {
             std::cout << "\n--- Abstract Syntax Trees (AST) ---\n";
-            for (auto const& rule : kb->get_parser_state().parsed_rules) { 
-                DebugUtils::print_rule_ast(rule); 
+            for (auto const& rule : kb->get_parser_state().parsed_rules) {
+                DebugUtils::print_rule_ast(rule);
             }
         }
-        
+
         return result.success ? 0 : 1;
     }
 
@@ -123,11 +126,24 @@ private:
 };
 
 int main(int argc, char* argv[]) {
+    // Initialize fmtlog with TSCNS timing system
+    fmtlogWrapper<>::impl.init();
+    fmtlog::setLogLevel(fmtlog::INF);
+
+    logi("Drills Engine starting up with fmtlog logging system");
+    logi("Arguments: {}", argc);
+
     try {
         Application app(argc, argv);
-        return app.run();
+        int result = app.run();
+        logi("Drills Engine finishing with exit code: {}", result);
+        return result;
     } catch (std::exception const& e) {
+        loge("Fatal error in Drills Engine: {}", e.what());
         std::cerr << "\n[FATAL ERROR] " << e.what() << std::endl;
         return 1;
     }
+
+    // Poll and flush any remaining log messages
+    fmtlog::poll(true);
 }

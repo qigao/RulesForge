@@ -1,5 +1,5 @@
 #include "ast_transformer.hpp"
-#include "pubcxx/logger.hpp"
+#include "fmtlog.h"
 
 #include "drools_rete_defs.hpp"   // For ConstraintNode, NodeType, etc.
 
@@ -9,8 +9,8 @@
 
 // Helper function to correctly negate a constraint, with special handling for booleans.
 void negate_constraint(ParsedConstraint& c) {
-    LOG_DEBUG("Negating constraint: {}.{} {} {}", c.left_binding.value_or("fact"), c.left_field, c.op,
-              c.right_literal ? to_string(*c.right_literal) : "RHS_VAR");
+    logd("Negating constraint: {}.{} {} {}", c.left_binding.value_or("fact"), c.left_field, c.op,
+         c.right_literal ? to_string(*c.right_literal) : "RHS_VAR");
 
     if (c.op == "==")
         c.op = "!=";
@@ -30,14 +30,14 @@ void negate_constraint(ParsedConstraint& c) {
         c.op = "==";
         c.right_literal = NilValue{};
     }
-    LOG_DEBUG("  -> New constraint: {}.{} {} {}", c.left_binding.value_or("fact"), c.left_field, c.op,
-              c.right_literal ? to_string(*c.right_literal) : "RHS_VAR");
+    logd("  -> New constraint: {}.{} {} {}", c.left_binding.value_or("fact"), c.left_field, c.op,
+         c.right_literal ? to_string(*c.right_literal) : "RHS_VAR");
 }
 
 // Helper function to recursively negate a constraint tree using De Morgan's laws.
 void negate_constraint_tree(std::unique_ptr<ConstraintNode>& root) {
     if (!root) return;
-    LOG_DEBUG("Negating constraint tree. Initial type: {}", magic_enum::enum_name(root->type));
+    logd("Negating constraint tree. Initial type: {}", magic_enum::enum_name(root->type));
 
     if (root->type == NodeType::LEAF) {
         negate_constraint(root->constraint);
@@ -50,7 +50,7 @@ void negate_constraint_tree(std::unique_ptr<ConstraintNode>& root) {
     else if (root->type == NodeType::OR)
         root->type = NodeType::AND;
 
-    LOG_DEBUG("Negated constraint tree. Final type: {}", magic_enum::enum_name(root->type));
+    logd("Negated constraint tree. Final type: {}", magic_enum::enum_name(root->type));
     for (auto& child : root->children) { negate_constraint_tree(child); }
 }
 
@@ -58,34 +58,34 @@ void negate_constraint_tree(std::unique_ptr<ConstraintNode>& root) {
 AstTransformer::AstTransformer(parser_state& st) : state_(st) {}
 
 void AstTransformer::transform() {
-    LOG_DEBUG("AstTransformer::transform() starting for {} rules and {} queries.", state_.parsed_rules.size(),
-              state_.parsed_queries.size());
+    logd("AstTransformer::transform() starting for {} rules and {} queries.", state_.parsed_rules.size(),
+         state_.parsed_queries.size());
     for (auto& rule : state_.parsed_rules) {
-        LOG_DEBUG("AstTransformer transforming rule '{}'", rule.name);
+        logd("AstTransformer transforming rule '{}'", rule.name);
         for (auto& group : rule.condition_groups) { expand_foralls_in_list(group); }
     }
 
     for (auto& query : state_.parsed_queries) {
-        LOG_DEBUG("AstTransformer transforming query '{}'", query.name);
+        logd("AstTransformer transforming query '{}'", query.name);
         expand_foralls_in_list(query.patterns);
     }
-    LOG_DEBUG("AstTransformer::transform() finished.");
+    logd("AstTransformer::transform() finished.");
 }
 
 void AstTransformer::expand_foralls_in_list(std::vector<ParsedPattern>& patterns) {
-    LOG_DEBUG("AstTransformer::expand_foralls_in_list() called with {} patterns.", patterns.size());
+    logd("AstTransformer::expand_foralls_in_list() called with {} patterns.", patterns.size());
     // We must use an index-based loop or iterators because we are modifying the vector.
     for (auto it = patterns.begin(); it != patterns.end(); ++it) {
         auto& pattern = *it;
-        LOG_DEBUG("AstTransformer::expand_foralls_in_list() processing pattern type {}",
-                  magic_enum::enum_name(pattern.type));
+        logd("AstTransformer::expand_foralls_in_list() processing pattern type {}",
+             magic_enum::enum_name(pattern.type));
         // Recurse into nested patterns first
         if (!pattern.nested_patterns.empty()) { expand_foralls_in_list(pattern.nested_patterns); }
 
         if (pattern.type == PatternType::FORALL) {
-            LOG_DEBUG("Expanding 'forall' pattern.");
+            logd("Expanding 'forall' pattern.");
             if (!pattern.forall_info || pattern.forall_info->patterns.size() < 2) {
-                LOG_WARN("'forall' pattern is invalid or has fewer than two sub-patterns. Skipping.");
+                logw("'forall' pattern is invalid or has fewer than two sub-patterns. Skipping.");
                 continue;   // Not a valid forall, leave it to the semantic analyzer
             }
 
@@ -97,19 +97,19 @@ void AstTransformer::expand_foralls_in_list(std::vector<ParsedPattern>& patterns
             // 1. Create the "violating" pattern `A and not(B)`.
             //    'A' is the base pattern, which is the first pattern in the forall list.
             ParsedPattern violating_pattern = std::move(forall_patterns[0]);
-            LOG_DEBUG("  -> Base pattern (A) is of type '{}'.", violating_pattern.fact_type);
+            logd("  -> Base pattern (A) is of type '{}'.", violating_pattern.fact_type);
 
             //    'not(B)' is constructed by taking the constraints of all subsequent
             //    patterns (the restrictions), combining them, and negating them.
             auto restrictions_root = std::make_unique<ConstraintNode>(NodeType::AND);
             for (size_t i = 1; i < forall_patterns.size(); ++i) {
                 if (forall_patterns[i].constraint_root) {
-                    LOG_DEBUG("  -> Adding restriction from pattern {}.", i);
+                    logd("  -> Adding restriction from pattern {}.", i);
                     restrictions_root->children.push_back(std::move(forall_patterns[i].constraint_root));
                 }
             }
 
-            LOG_DEBUG("  -> Negating combined restriction constraints.");
+            logd("  -> Negating combined restriction constraints.");
             negate_constraint_tree(restrictions_root);
 
             //    Combine `A`'s constraints with `not(B)`'s constraints.
@@ -118,10 +118,10 @@ void AstTransformer::expand_foralls_in_list(std::vector<ParsedPattern>& patterns
                 new_root->children.push_back(std::move(violating_pattern.constraint_root));
                 new_root->children.push_back(std::move(restrictions_root));
                 violating_pattern.constraint_root = std::move(new_root);
-                LOG_DEBUG("  -> Merged base constraints with negated restrictions.");
+                logd("  -> Merged base constraints with negated restrictions.");
             } else {
                 violating_pattern.constraint_root = std::move(restrictions_root);
-                LOG_DEBUG("  -> Set negated restrictions as the new constraint root.");
+                logd("  -> Set negated restrictions as the new constraint root.");
             }
 
             // 2. Modify the current pattern (which was the 'forall') to become the final `not(...)` pattern.
@@ -129,7 +129,7 @@ void AstTransformer::expand_foralls_in_list(std::vector<ParsedPattern>& patterns
             pattern.nested_patterns.clear();
             pattern.nested_patterns.push_back(std::move(violating_pattern));
             pattern.forall_info.reset();
-            LOG_DEBUG("  -> 'forall' successfully transformed into 'not'.");
+            logd("  -> 'forall' successfully transformed into 'not'.");
         }
     }
 }

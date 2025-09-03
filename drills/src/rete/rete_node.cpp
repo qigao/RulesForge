@@ -1,4 +1,4 @@
-#include "pubcxx/logger.hpp"
+#include "fmtlog.h"
 
 #include "knowledge_base.hpp"
 #include "rete/rete_node.hpp"
@@ -9,7 +9,7 @@
 #include <magic_enum/magic_enum.hpp>
 #include <sstream>
 #include <typeinfo>
-#include <utility> 
+#include <utility>
 
 // --- Helper Functions ---
 namespace {
@@ -39,7 +39,7 @@ namespace {
     }
 
     bool compare_values(ConstraintValue const& v1, std::string const& op, ConstraintValue const& v2) {
-        LOG_TRACE("      compare_values: {} {} {}", ::to_string(v1), op, ::to_string(v2));
+        logi("      compare_values: {} {} {}", ::to_string(v1), op, ::to_string(v2));
 
         bool result = false;
         if (std::holds_alternative<NilValue>(v1) || std::holds_alternative<NilValue>(v2)) {
@@ -89,7 +89,7 @@ namespace {
                 result = d1 >= d2;
             else if (op == "<=")
                 result = d1 <= d2;
-            LOG_TRACE("        -> Arithmetic comparison result: {}", result);
+            logd("        -> Arithmetic comparison result: {}", result);
 
             return result;
         }
@@ -174,7 +174,7 @@ namespace {
 // --- ReteNode ---
 void ReteNode::add_child(std::shared_ptr<ReteNode> child) {
     if (child) {
-        LOG_DEBUG("Linking parent node {} to child node {}", this->id, child->id);
+        logd("Linking parent node {} to child node {}", this->id, child->id);
         children.push_back(child);
         child->add_parent(shared_from_this());
     }
@@ -182,7 +182,7 @@ void ReteNode::add_child(std::shared_ptr<ReteNode> child) {
 
 void ReteNode::add_parent(std::shared_ptr<ReteNode> parent) {
     if (parent) {
-        LOG_DEBUG("Linking child node {} to parent node {}", this->id, parent->id);
+        logd("Linking child node {} to parent node {}", this->id, parent->id);
         parents.push_back(parent);
     }
 }
@@ -193,7 +193,7 @@ BetaConditionNode::BetaConditionNode(std::vector<ParsedConstraint> const& joins,
     join_constraints(joins), binding_to_token_idx(bindings) {}
 
 void BetaConditionNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    LOG_DEBUG("Node {}:{} left_activate. Token depth {}, type {}", this->id, typeid(*this).name(), token->wme->depth,
+    logd("Node {}:{} left_activate. Token depth {}, type {}", this->id, typeid(*this).name(), token->wme->depth,
               magic_enum::enum_name(token->type));
     auto const& wme = token->wme;
     if (token->type == PropagationType::RETRACT) {
@@ -225,7 +225,7 @@ void BetaConditionNode::left_activate(StatefulSession& session, std::shared_ptr<
 }
 
 void BetaConditionNode::right_activate(StatefulSession& session, std::shared_ptr<Fact> fact, PropagationType p_type) {
-    LOG_DEBUG("Node {}:{} right_activate. Fact ID {}, type {}", this->id, typeid(*this).name(), fact->id,
+    logd("Node {}:{} right_activate. Fact ID {}, type {}", this->id, typeid(*this).name(), fact->id,
               magic_enum::enum_name(p_type));
 
     // If the fact is being retracted, we must first check if it was in our memory.
@@ -280,7 +280,7 @@ void AlphaNode::left_activate(StatefulSession&, std::shared_ptr<Token>) {}
 
 void AlphaNode::right_activate(StatefulSession& session, std::shared_ptr<Fact> fact, PropagationType p_type) {
     bool passes = check_constraint(*fact);
-    LOG_DEBUG("Node {}:AlphaNode right_activate. Fact ID {}. Constraint check: {}", this->id, fact->id,
+    logd("Node {}:AlphaNode right_activate. Fact ID {}. Constraint check: {}", this->id, fact->id,
               passes ? "PASS" : "FAIL");
     if (passes) {
         for (auto& weak_child : children) {
@@ -296,7 +296,7 @@ bool AlphaNode::check_constraint(Fact const& fact) const {
         // If there's no right literal, it's a pure binding. It should always pass
         // the alpha check, as the binding itself is handled elsewhere.
         if (!constraint.right_literal.has_value()) {
-            LOG_DEBUG("  -> AlphaNode ID {} passing pure binding on field '{}'.", this->id, constraint.left_field);
+            logd("  -> AlphaNode ID {} passing pure binding on field '{}'.", this->id, constraint.left_field);
             return true;
         }
         // Otherwise, it's an existence check that was transformed to `field == 1`.
@@ -305,7 +305,7 @@ bool AlphaNode::check_constraint(Fact const& fact) const {
 
     auto fact_val_opt = fact.get_field(constraint.left_field);
     if (!fact_val_opt) {
-        LOG_DEBUG("  -> AlphaNode ID {} check FAILED: field '{}' not found on fact.", this->id, constraint.left_field);
+        logd("  -> AlphaNode ID {} check FAILED: field '{}' not found on fact.", this->id, constraint.left_field);
         return false;
     }
 
@@ -313,7 +313,7 @@ bool AlphaNode::check_constraint(Fact const& fact) const {
     ConstraintValue const& rhs = constraint.right_literal.value_or(NilValue{});
     bool result = compare_values(lhs, constraint.op, rhs);
 
-    LOG_DEBUG("  -> AlphaNode ID {} checking: LHS: {} (type {}) {} RHS: {} (type {}) -> {}", this->id, to_string(lhs),
+    logd("  -> AlphaNode ID {} checking: LHS: {} (type {}) {} RHS: {} (type {}) -> {}", this->id, to_string(lhs),
               lhs.index(), constraint.op, to_string(rhs), rhs.index(), result ? "PASS" : "FAIL");
 
     return result;
@@ -336,7 +336,7 @@ void EntryPointNode::left_activate(StatefulSession&, std::shared_ptr<Token>) {
 }
 
 void EntryPointNode::right_activate(StatefulSession& session, std::shared_ptr<Fact> fact, PropagationType p_type) {
-    LOG_DEBUG("Node {}:EntryPointNode right_activate. Fact ID {}, type {}", this->id, fact->id,
+    logd("Node {}:EntryPointNode right_activate. Fact ID {}, type {}", this->id, fact->id,
               magic_enum::enum_name(p_type));
     for (auto& weak_child : children) {
         if (auto child = weak_child.lock()) { child->right_activate(session, fact, p_type); }
@@ -357,7 +357,7 @@ void BaseJoinNode::propagate_assert(StatefulSession& session, std::shared_ptr<To
     left_to_children_[token->wme.get()].push_back(new_wme);
     right_to_children_[fact->id].push_back(new_wme);
     auto new_token = std::make_shared<Token>(new_wme, PropagationType::ASSERT);
-    LOG_DEBUG("Node {}:{} propagating ASSERT. Old token depth {}, new token depth {}", this->id, typeid(*this).name(),
+    logd("Node {}:{} propagating ASSERT. Old token depth {}, new token depth {}", this->id, typeid(*this).name(),
               token->wme->depth, new_wme->depth);
     for (auto& weak_child : children) {
         if (auto c = weak_child.lock()) c->left_activate(session, new_token);
@@ -378,7 +378,7 @@ void BaseJoinNode::propagate_retract(StatefulSession& session, std::shared_ptr<T
     }
 
     if (child_to_retract) {
-        LOG_DEBUG("Node {}:{} propagating RETRACT. Old token depth {}, fact ID {}", this->id, typeid(*this).name(),
+        logd("Node {}:{} propagating RETRACT. Old token depth {}, fact ID {}", this->id, typeid(*this).name(),
                   wme->depth, fact->id);
         auto retract_token = std::make_shared<Token>(child_to_retract, PropagationType::RETRACT);
         for (auto& weak_child : children) {
@@ -412,12 +412,12 @@ std::optional<ConstraintValue> HashedJoinNode::get_key(std::shared_ptr<Fact> con
 }
 
 void HashedJoinNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    LOG_DEBUG("Node {}:HashedJoinNode left_activate. Token depth {}, type {}", this->id, token->wme->depth,
+    logd("Node {}:HashedJoinNode left_activate. Token depth {}, type {}", this->id, token->wme->depth,
               magic_enum::enum_name(token->type));
     auto key_opt = get_key(token);
     if (!key_opt) return;
     auto const& key = *key_opt;
-    LOG_DEBUG("  -> Left key: {}", ::to_string(key));
+    logd("  -> Left key: {}", ::to_string(key));
 
     if (token->type == PropagationType::RETRACT) {
         auto mem_it = left_memory_.find(key);
@@ -435,7 +435,7 @@ void HashedJoinNode::left_activate(StatefulSession& session, std::shared_ptr<Tok
     left_memory_[key].push_back(token->wme);
     auto it_right = right_memory_.find(key);
     if (it_right != right_memory_.end()) {
-        LOG_DEBUG("  -> Found {} matching facts in right memory.", it_right->second.size());
+        logd("  -> Found {} matching facts in right memory.", it_right->second.size());
         for (auto const& fact : it_right->second) {
             if (check_all_join_conditions(session, *token, *fact, join_constraints_, binding_to_token_idx_)) {
                 propagate_assert(session, token, fact);
@@ -445,12 +445,12 @@ void HashedJoinNode::left_activate(StatefulSession& session, std::shared_ptr<Tok
 }
 
 void HashedJoinNode::right_activate(StatefulSession& session, std::shared_ptr<Fact> fact, PropagationType p_type) {
-    LOG_DEBUG("Node {}:HashedJoinNode right_activate. Fact ID {}, type {}", this->id, fact->id,
+    logd("Node {}:HashedJoinNode right_activate. Fact ID {}, type {}", this->id, fact->id,
               magic_enum::enum_name(p_type));
     auto key_opt = get_key(fact);
     if (!key_opt) return;
     auto const& key = *key_opt;
-    LOG_DEBUG("  -> Right key: {}", ::to_string(key));
+    logd("  -> Right key: {}", ::to_string(key));
 
     if (p_type == PropagationType::RETRACT) {
         auto mem_it = right_memory_.find(key);
@@ -468,7 +468,7 @@ void HashedJoinNode::right_activate(StatefulSession& session, std::shared_ptr<Fa
     right_memory_[key].push_back(fact);
     auto it_left = left_memory_.find(key);
     if (it_left != left_memory_.end()) {
-        LOG_DEBUG("  -> Found {} matching tokens in left memory.", it_left->second.size());
+        logd("  -> Found {} matching tokens in left memory.", it_left->second.size());
         for (auto const& wme : it_left->second) {
             auto token = std::make_shared<Token>(wme, PropagationType::ASSERT);
             if (check_all_join_conditions(session, *token, *fact, join_constraints_, binding_to_token_idx_)) {
@@ -493,11 +493,11 @@ CrossProductJoinNode::CrossProductJoinNode(std::vector<ParsedConstraint> joins, 
     BaseJoinNode(std::move(joins), std::move(bindings)) {}
 
 void CrossProductJoinNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    LOG_DEBUG("Node {}:CrossProductJoinNode left_activate. Token depth {}, type {}", this->id, token->wme->depth,
+    logd("Node {}:CrossProductJoinNode left_activate. Token depth {}, type {}", this->id, token->wme->depth,
               magic_enum::enum_name(token->type));
     if (token->type == PropagationType::RETRACT) {
         if (left_memory_.erase(token->wme.get()) > 0) {
-            LOG_DEBUG("  -> Retracted token from left memory. Propagating retract to {} children.", children.size());
+            logd("  -> Retracted token from left memory. Propagating retract to {} children.", children.size());
             for (auto const& [id, fact] : right_memory_) { propagate_retract(session, token->wme, fact); }
         }
         return;
@@ -513,12 +513,12 @@ void CrossProductJoinNode::left_activate(StatefulSession& session, std::shared_p
 
 void CrossProductJoinNode::right_activate(StatefulSession& session, std::shared_ptr<Fact> fact,
                                           PropagationType p_type) {
-    LOG_DEBUG("Node {}:CrossProductJoinNode right_activate. Fact ID {}, type {}", this->id, fact->id,
+    logd("Node {}:CrossProductJoinNode right_activate. Fact ID {}, type {}", this->id, fact->id,
               magic_enum::enum_name(p_type));
 
     if (p_type == PropagationType::RETRACT) {
         if (right_memory_.erase(fact->id) > 0) {
-            LOG_DEBUG("  -> Retracted fact from right memory. Propagating retract to {} tokens in left memory.",
+            logd("  -> Retracted fact from right memory. Propagating retract to {} tokens in left memory.",
                       left_memory_.size());
             for (auto const& [ptr, wme] : left_memory_) { propagate_retract(session, wme, fact); }
         }
@@ -598,7 +598,7 @@ AccumulateNode::AccumulateNode(IAccumulator const* prototype, ParsedAccumulate&&
     binding_to_token_idx(std::move(bindings)), join_constraints(std::move(joins)) {}
 
 void AccumulateNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    LOG_DEBUG("Node {}:AccumulateNode left_activate. Token depth {}, type {}", this->id, token->wme->depth,
+    logd("Node {}:AccumulateNode left_activate. Token depth {}, type {}", this->id, token->wme->depth,
               magic_enum::enum_name(token->type));
     auto const& wme = token->wme;
     if (token->type == PropagationType::RETRACT) {
@@ -635,7 +635,7 @@ void AccumulateNode::left_activate(StatefulSession& session, std::shared_ptr<Tok
 }
 
 void AccumulateNode::right_activate(StatefulSession& session, std::shared_ptr<Fact> fact, PropagationType p_type) {
-    LOG_DEBUG("Node {}:AccumulateNode right_activate. Fact ID {}, type {}", this->id, fact->id,
+    logd("Node {}:AccumulateNode right_activate. Fact ID {}, type {}", this->id, fact->id,
               magic_enum::enum_name(p_type));
     if (p_type == PropagationType::MODIFY || !accumulator_prototype->supports_reverse()) {
         if (p_type == PropagationType::ASSERT || p_type == PropagationType::MODIFY) {
@@ -716,12 +716,12 @@ void AccumulateNode::update_and_propagate_result(StatefulSession& session, LeftM
         session.add_fact(item.result_fact);
         auto result_wme = session.get_or_create_wme(item.wme, item.result_fact);
         auto assert_token = std::make_shared<Token>(result_wme, PropagationType::ASSERT);
-        LOG_DEBUG("  -> Accumulate created new result fact ID {}, propagating.", item.result_fact->id);
+        logd("  -> Accumulate created new result fact ID {}, propagating.", item.result_fact->id);
         for (auto& weak_child : children) {
             if (auto c = weak_child.lock()) c->left_activate(session, assert_token);
         }
     } else {
-        LOG_DEBUG("  -> Accumulate updating existing result fact ID {}.", item.result_fact->id);
+        logd("  -> Accumulate updating existing result fact ID {}.", item.result_fact->id);
         session.update_fact(item.result_fact, modifier);
     }
 }
@@ -742,7 +742,7 @@ UnnestNode::UnnestNode(ParsedUnnest const& unnest_info, map<std::string, int> co
     info(unnest_info), binding_to_token_idx(bindings) {}
 
 void UnnestNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    LOG_DEBUG("Node {}:UnnestNode left_activate. Token depth {}, type {}", this->id, token->wme->depth,
+    logd("Node {}:UnnestNode left_activate. Token depth {}, type {}", this->id, token->wme->depth,
               magic_enum::enum_name(token->type));
     auto const& wme = token->wme;
     if (token->type == PropagationType::RETRACT) {
@@ -767,7 +767,7 @@ void UnnestNode::left_activate(StatefulSession& session, std::shared_ptr<Token> 
     if (collection_opt && std::holds_alternative<FactList>(*collection_opt)) {
         auto const& list = std::get<FactList>(*collection_opt).facts;
         if (list.empty()) return;
-        LOG_DEBUG("  -> Unnesting {} items from {}.{}", list.size(), info.source_binding, info.source_field);
+        logd("  -> Unnesting {} items from {}.{}", list.size(), info.source_binding, info.source_field);
         std::vector<std::shared_ptr<TokenWME const>> new_child_wmes;
         new_child_wmes.reserve(list.size());
         for (auto const& item_fact : list) {
@@ -793,11 +793,11 @@ EvalNode::EvalNode(std::string expr, map<std::string, int> bindings) :
 
 void EvalNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
     auto const& wme = token->wme;
-    LOG_DEBUG("Node {}:EvalNode left_activate. Token depth {}, type {}", this->id, wme->depth,
+    logd("Node {}:EvalNode left_activate. Token depth {}, type {}", this->id, wme->depth,
               magic_enum::enum_name(token->type));
     if (token->type == PropagationType::RETRACT) {
         if (memory.erase(wme.get()) > 0) {
-            LOG_DEBUG("  -> Retracted token from memory. Propagating retract to children.");
+            logd("  -> Retracted token from memory. Propagating retract to children.");
             for (auto& weak_child : children) {
                 if (auto c = weak_child.lock()) c->left_activate(session, token);
             }
@@ -805,10 +805,10 @@ void EvalNode::left_activate(StatefulSession& session, std::shared_ptr<Token> to
         return;
     }
     bool result = session.execute_eval(expression, *token, binding_to_token_idx);
-    LOG_DEBUG("  -> Eval expression '{}' result: {}", expression, result);
+    logd("  -> Eval expression '{}' result: {}", expression, result);
     if (result) {
         memory[wme.get()] = wme;
-        LOG_DEBUG("  -> Eval passed. Propagating assert to children.");
+        logd("  -> Eval passed. Propagating assert to children.");
         for (auto& weak_child : children) {
             if (auto c = weak_child.lock()) c->left_activate(session, token);
         }
@@ -832,7 +832,7 @@ TerminalNode::TerminalNode(ParsedRule const& r, map<std::string, int> b) :
     rule_name(r.name), binding_to_token_idx(std::move(b)) {}
 
 void TerminalNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    LOG_DEBUG("Node {}:TerminalNode left_activate for rule '{}'. Token type: {}", this->id, rule_name,
+    logd("Node {}:TerminalNode left_activate for rule '{}'. Token type: {}", this->id, rule_name,
               magic_enum::enum_name(token->type));
     auto wme_ptr = token->wme.get();
 
@@ -871,19 +871,19 @@ void TerminalNode::print_node(std::ostream& os) const {
 QueryTerminalNode::QueryTerminalNode(map<std::string, int> bindings) : binding_to_token_idx(std::move(bindings)) {}
 
 void QueryTerminalNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    LOG_DEBUG("Node {}:QueryTerminalNode left_activate. Token type: {}", this->id, magic_enum::enum_name(token->type));
+    logd("Node {}:QueryTerminalNode left_activate. Token type: {}", this->id, magic_enum::enum_name(token->type));
     auto const& wme = token->wme;
     if (token->type == PropagationType::ASSERT) {
         results[wme.get()] = token;
-        LOG_DEBUG("  -> Added token to query results. Total results: {}", results.size());
+        logd("  -> Added token to query results. Total results: {}", results.size());
     } else {
         results.erase(wme.get());
-        LOG_DEBUG("  -> Removed token from query results. Total results: {}", results.size());
+        logd("  -> Removed token from query results. Total results: {}", results.size());
     }
 }
 
 void QueryTerminalNode::clear_results() {
-    LOG_DEBUG("Node {}:QueryTerminalNode clearing results.", this->id);
+    logd("Node {}:QueryTerminalNode clearing results.", this->id);
     results.clear();
 }
 
@@ -905,7 +905,7 @@ void QueryTerminalNode::print_node(std::ostream& os) const {
 QueryInputNode::QueryInputNode(std::shared_ptr<QueryTerminalNode> terminal) : terminal_node(terminal) {}
 
 void QueryInputNode::execute(StatefulSession& session, std::vector<std::shared_ptr<Fact>> const& args) {
-    LOG_DEBUG("Node {}:QueryInputNode execute with {} args.", this->id, args.size());
+    logd("Node {}:QueryInputNode execute with {} args.", this->id, args.size());
     if (auto terminal = terminal_node.lock()) {
         terminal->clear_results();
     } else {

@@ -1,5 +1,5 @@
 #include "drools_parser.hpp"
-#include "pubcxx/logger.hpp"
+#include "fmtlog.h"
 
 #include "ast_builder.hpp"
 #include "ast_transformer.hpp"
@@ -78,7 +78,7 @@ namespace {
                 return;   // Already processed
             }
             context.visited_files.insert(canonical_path.string());
-            LOG_DEBUG("Parsing imported file: {}", canonical_path.string());
+            logd("Parsing imported file: {}", canonical_path.string());
         } catch (std::filesystem::filesystem_error const& e) {
             context.result.errors.push_back({.message = "File system error: " + std::string(e.what())});
             context.result.success = false;
@@ -275,7 +275,7 @@ std::shared_ptr<KnowledgeBase> build_knowledge_base_from_csv(std::string const& 
     std::string generated_drl = converter.generate_drl();
 
     // Optional: Log the generated DRL for debugging purposes.
-    LOG_DEBUG("Generated DRL from {}:\n---\n{}\n---", csv_file_path, generated_drl);
+    logd("Generated DRL from {}:\n---\n{}\n---", csv_file_path, generated_drl);
 
     if (generated_drl.empty()) {
         result.success = true;
