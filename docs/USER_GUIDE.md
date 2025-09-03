@@ -10,6 +10,7 @@
 4. [**Advanced Patterns**](#4-advanced-patterns)
 5. [**Performance Guidelines**](#5-performance-guidelines)
 6. [**Troubleshooting**](#6-troubleshooting)
+7. [**Deployment Guide**](#7-deployment-guide)
 
 ---
 
@@ -54,6 +55,34 @@ auto session2 = kb->create_session(); // Thread 2
 session1->add_fact(customer1);
 session2->add_fact(customer2); // Independent data
 ```
+
+### Data Flow: Facts, Rules, and the Engine
+
+Understanding how data moves through the Drills engine is crucial. It's a continuous cycle of **Facts** (your input data) interacting with **Rules** (your defined logic) within the engine's **Working Memory**.
+
+1.  **Rules Ingested into Knowledge Base:**
+    *   Your rules, whether defined in DRL files, decision tables (like CSVs), or other formats, are first parsed and compiled into an optimized internal representation, primarily a Rete network.
+    *   This compiled rule set is stored in a `KnowledgeBase`. The `KnowledgeBase` is immutable and thread-safe, acting as the blueprint for your business logic.
+
+2.  **Facts Inserted into Working Memory:**
+    *   Your application's data, referred to as "Facts," are objects (e.g., `Fact` instances in C++) that represent the current state of your system.
+    *   These facts are inserted into a `StatefulSession` (the engine's working memory). Each session is mutable and typically tied to a single thread or transaction.
+
+3.  **Engine Execution and Pattern Matching:**
+    *   Once facts are in the `StatefulSession`, the Rete algorithm continuously evaluates them against the rules loaded from the `KnowledgeBase`.
+    *   When a fact (or a combination of facts) matches the conditions (LHS - Left-Hand Side) of a rule, that rule is activated.
+
+4.  **Rule Actions and Data Modification:**
+    *   Activated rules execute their actions (RHS - Right-Hand Side), which are typically JavaScript code. These actions can:
+        *   **Modify existing facts:** Change the properties of facts already in working memory.
+        *   **Insert new facts:** Add new facts into the working memory, potentially triggering other rules.
+        *   **Retract facts:** Remove facts from working memory.
+        *   **Trigger external effects:** Interact with your application (e.g., logging, sending notifications, updating databases) via callbacks or external APIs.
+
+5.  **Querying Results:**
+    *   After rules have fired and the working memory has reached a stable state, you can query the `StatefulSession` to retrieve specific facts or the results of rule execution.
+
+**In essence:** Rules are compiled once into a `KnowledgeBase`. Facts are dynamically inserted into a `StatefulSession`. The engine then continuously matches facts against rules, executing actions that can modify the facts themselves or trigger external effects, and finally, you query the session for the outcome.
 
 ---
 
@@ -687,7 +716,25 @@ for (auto& [rule_name, stats] : summary) {
 }
 ```
 
----
+### 5.4 Avoid Storing Large or Complex Data in Session
+
+The `StatefulSession` is the engine\'s working memory, designed for efficient pattern matching by the Rete algorithm, not as a general-purpose data store. Inserting large volumes of data or complex, passive objects that are not actively involved in rule matching can severely degrade performance and lead to excessive memory consumption.
+
+**Why it\'s a bad idea:**
+
+*   **Memory Bloat:** Every fact inserted consumes memory. Large facts or a high number of facts can quickly exhaust available memory.
+*   **Performance Degradation:** The Rete network is incremental. Every insertion, modification, or retraction of a fact can trigger significant re-evaluation across the network. More data means exponentially higher processing overhead, leading to slow `fire_all_rules()` calls.
+*   **Unnecessary Complexity:** Treating the session as a database introduces complexity in managing data lifecycle and filtering irrelevant data within rules.
+
+**Best Practice:**
+
+*   **Only insert "active" facts:** The `StatefulSession` should only contain facts that are directly involved in the pattern matching of your rules\' `when` conditions.
+*   **Store large/complex data externally:** For data that is large, complex, or not directly participating in rule conditions, store it in external systems (e.g., databases, caches).
+*   **Load relevant subsets on demand:** When rules need access to this external data, retrieve only the necessary, minimal subset into the session (e.g., via rule actions, global variables, or external service calls) just before it\'s needed for processing.
+
+**In essence:** The rules engine processes logic, it does not store your application\'s entire dataset. Respect the engine\'s design to ensure optimal performance and maintainability.
+
+--- 
 
 ## 6. Troubleshooting
 
@@ -776,7 +823,23 @@ session->add_facts(orders);
 // Better than mixed addition
 ```
 
----
+--- 
+
+## Next Steps
+
+Ready for advanced topics?
+
+-   **[Developer Guide](DEVELOPER_GUIDE.md)** - Extending the engine, custom functions
+-   **[API Reference](API_REFERENCE.md)** - Complete C++ API documentation  
+-   **[Deployment Guide](DEPLOYMENT.md)** - Production deployment, monitoring
+-   **[Architecture Guide](ARCHITECTURE.md)** - Understanding the Rete implementation
+
+--- 
+
+*"Good programmers worry about data structures and their relationships. Bad programmers worry about the code."* - Linus Torvalds
+
+The Drills engine is built around elegant data structures that make complex business logic simple to express and blazingly fast to execute.
+
 
 ## Next Steps
 
