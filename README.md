@@ -48,6 +48,64 @@ drills/
 └── readme.md        # Quick start guide
 ```
 
+## WebAssembly Demo 🐳
+
+Experience the power of Drills Rule Engine in your browser! We've created a complete **WebAssembly demo** that runs the C++ engine directly in web browsers.
+
+### 🎮 Live Demo Features
+
+- ✅ **Browser-native Rule Engine**: Run C++ Drills engine directly via WebAssembly
+- ✅ **Interactive Demo**: Complete web interface for testing rule functionality
+- ✅ **Real-time Performance**: Live metrics and console logging
+- ✅ **Sample Business Rules**: Pre-built customer classification rules
+- ✅ **JSON I/O**: Native JSON fact handling and query results
+- ✅ **Memory Monitoring**: Real-time memory usage tracking
+
+### 🚀 Try It Now
+
+```bash
+# Build the WebAssembly demo (requires Emscripten)
+cd wasm
+./build.sh
+
+# Serve the demo locally
+cd build
+python3 -m http.server 8000
+
+# Open http://localhost:8000 in your browser
+```
+
+### 📱 Demo Workflow
+
+1. **Initialize Engine** - Load the WebAssembly module in your browser
+2. **Load Sample Rules** - Import business rules for customer classification
+3. **Insert Customer Data** - Add JSON facts (Alice: 35yo, $120k income)
+4. **Fire Rules** - Execute rules and see automatic VIP classification
+5. **Execute Queries** - Retrieve processed results with applied discounts
+6. **Monitor Performance** - Real-time metrics and memory usage
+
+### 🔧 Technical Highlights
+
+```cpp
+// WebAssembly bindings expose full C API
+EMSCRIPTEN_BINDINGS(drills_module) {
+    class_<DrillsEngine>("DrillsEngine")
+        .constructor()
+        .function("init", &DrillsEngine::init)
+        .function("createKnowledgeBase", &DrillsEngine::createKnowledgeBase)
+        .function("createSession", &DrillsEngine::createSession)
+        .function("insertFact", &DrillsEngine::insertFact)
+        .function("fireRules", &DrillsEngine::fireRules)
+        .function("query", &DrillsEngine::query);
+}
+```
+
+The demo demonstrates:
+- **Client-side Processing**: Rules execute in browser, data stays local
+- **Zero Server Dependencies**: Pure static files
+- **Cross-platform Compatibility**: Modern browsers with WebAssembly support
+- **Educational Value**: Perfect for learning rule engine concepts
+
 ## Quick Start
 
 Here's a simple example to get you up and running.
