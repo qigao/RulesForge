@@ -15,11 +15,10 @@ find_package(ZLIB REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_path(BSHOSHANY_THREAD_POOL_INCLUDE_DIRS "BS_thread_pool.hpp")
 target_include_directories( ${TARGET_NAME} PRIVATE ${BSHOSHANY_THREAD_POOL_INCLUDE_DIRS})
-find_package(nlohmann_json CONFIG REQUIRED)
 # Link dependencies
 target_link_libraries(
     ${TARGET_NAME} PUBLIC pubcxx
-    nlohmann_json::nlohmann_json ZLIB::ZLIB
+    ZLIB::ZLIB
 )
 
 target_link_libraries(

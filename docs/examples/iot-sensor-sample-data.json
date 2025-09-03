@@ -1,0 +1,254 @@
+{
+  "name": "IoT Sensor Network Data",
+  "description": "Complex IoT sensor data for environmental monitoring with JMESPath queries",
+  "data": {
+    "network_info": {
+      "id": "NETWORK-ENV-001",
+      "name": "Smart City Environmental Network",
+      "location": "Downtown San Francisco",
+      "deployment_date": "2023-06-01",
+      "total_sensors": 25
+    },
+    "timestamp": "2024-01-20T15:30:00Z",
+    "batch_id": "BATCH-2024-012015",
+    "sensors": [
+      {
+        "id": "SENSOR-001",
+        "type": "environmental",
+        "location": {
+          "lat": 37.7749,
+          "lng": -122.4194,
+          "address": "Market Street & 1st St",
+          "zone": "financial_district"
+        },
+        "status": "online",
+        "last_update": "2024-01-20T15:29:45Z",
+        "battery_level": 87,
+        "signal_strength": -45,
+        "measurements": {
+          "temperature": 18.5,
+          "humidity": 62.3,
+          "pressure": 1013.25,
+          "air_quality": {
+            "pm25": 15.2,
+            "pm10": 22.8,
+            "co2": 410.5,
+            "no2": 28.3,
+            "o3": 45.7
+          },
+          "noise_level": 68.5,
+          "light_intensity": 1250.0
+        },
+        "alerts": [],
+        "maintenance": {
+          "last_service": "2023-12-15",
+          "next_service": "2024-06-15",
+          "calibration_status": "valid"
+        }
+      },
+      {
+        "id": "SENSOR-002", 
+        "type": "environmental",
+        "location": {
+          "lat": 37.7849,
+          "lng": -122.4094,
+          "address": "Union Square",
+          "zone": "shopping_district"
+        },
+        "status": "online",
+        "last_update": "2024-01-20T15:29:50Z",
+        "battery_level": 92,
+        "signal_strength": -38,
+        "measurements": {
+          "temperature": 19.8,
+          "humidity": 58.7,
+          "pressure": 1012.95,
+          "air_quality": {
+            "pm25": 12.8,
+            "pm10": 19.5,
+            "co2": 405.2,
+            "no2": 25.1,
+            "o3": 42.3
+          },
+          "noise_level": 72.3,
+          "light_intensity": 1450.0
+        },
+        "alerts": [
+          {
+            "type": "noise_threshold",
+            "level": "warning", 
+            "message": "Noise level exceeds 70dB",
+            "timestamp": "2024-01-20T15:25:00Z"
+          }
+        ],
+        "maintenance": {
+          "last_service": "2024-01-10",
+          "next_service": "2024-07-10",
+          "calibration_status": "valid"
+        }
+      },
+      {
+        "id": "SENSOR-003",
+        "type": "environmental",
+        "location": {
+          "lat": 37.7649,
+          "lng": -122.4294,
+          "address": "Mission Bay",
+          "zone": "residential"
+        },
+        "status": "offline",
+        "last_update": "2024-01-20T14:15:20Z",
+        "battery_level": 15,
+        "signal_strength": -85,
+        "measurements": {
+          "temperature": null,
+          "humidity": null,
+          "pressure": null,
+          "air_quality": {
+            "pm25": null,
+            "pm10": null,
+            "co2": null,
+            "no2": null,
+            "o3": null
+          },
+          "noise_level": null,
+          "light_intensity": null
+        },
+        "alerts": [
+          {
+            "type": "sensor_offline",
+            "level": "critical",
+            "message": "Sensor has been offline for 75 minutes",
+            "timestamp": "2024-01-20T15:30:00Z"
+          },
+          {
+            "type": "low_battery",
+            "level": "warning",
+            "message": "Battery level critically low at 15%",
+            "timestamp": "2024-01-20T14:00:00Z"
+          }
+        ],
+        "maintenance": {
+          "last_service": "2023-11-20",
+          "next_service": "2024-05-20",
+          "calibration_status": "expired"
+        }
+      },
+      {
+        "id": "SENSOR-004",
+        "type": "environmental",
+        "location": {
+          "lat": 37.7949,
+          "lng": -122.3994,
+          "address": "Chinatown",
+          "zone": "tourist_district"
+        },
+        "status": "online", 
+        "last_update": "2024-01-20T15:29:55Z",
+        "battery_level": 78,
+        "signal_strength": -52,
+        "measurements": {
+          "temperature": 21.2,
+          "humidity": 65.8,
+          "pressure": 1014.10,
+          "air_quality": {
+            "pm25": 45.8,
+            "pm10": 68.2,
+            "co2": 450.7,
+            "no2": 38.9,
+            "o3": 35.2
+          },
+          "noise_level": 75.8,
+          "light_intensity": 950.0
+        },
+        "alerts": [
+          {
+            "type": "air_quality",
+            "level": "warning",
+            "message": "PM2.5 levels exceed recommended threshold",
+            "timestamp": "2024-01-20T15:20:00Z"
+          },
+          {
+            "type": "air_quality", 
+            "level": "warning",
+            "message": "PM10 levels exceed recommended threshold",
+            "timestamp": "2024-01-20T15:20:00Z"
+          }
+        ],
+        "maintenance": {
+          "last_service": "2024-01-05",
+          "next_service": "2024-07-05",
+          "calibration_status": "valid"
+        }
+      },
+      {
+        "id": "SENSOR-005",
+        "type": "environmental",
+        "location": {
+          "lat": 37.7549,
+          "lng": -122.4494,
+          "address": "Golden Gate Park",
+          "zone": "park"
+        },
+        "status": "online",
+        "last_update": "2024-01-20T15:29:40Z",
+        "battery_level": 94,
+        "signal_strength": -41,
+        "measurements": {
+          "temperature": 16.8,
+          "humidity": 72.5,
+          "pressure": 1013.85,
+          "air_quality": {
+            "pm25": 8.2,
+            "pm10": 12.5,
+            "co2": 385.2,
+            "no2": 15.8,
+            "o3": 55.3
+          },
+          "noise_level": 45.2,
+          "light_intensity": 1850.0
+        },
+        "alerts": [],
+        "maintenance": {
+          "last_service": "2023-12-20",
+          "next_service": "2024-06-20",
+          "calibration_status": "valid"
+        }
+      }
+    ],
+    "network_statistics": {
+      "online_sensors": 4,
+      "offline_sensors": 1,
+      "sensors_with_alerts": 3,
+      "battery_status": {
+        "critical": 1,
+        "low": 0,
+        "normal": 4
+      },
+      "average_measurements": {
+        "temperature": 19.075,
+        "humidity": 64.825,
+        "pressure": 1013.5375,
+        "pm25": 20.5,
+        "pm10": 30.75,
+        "co2": 412.9,
+        "noise_level": 65.45
+      },
+      "zone_summary": {
+        "financial_district": {"sensors": 1, "status": "normal"},
+        "shopping_district": {"sensors": 1, "status": "minor_issues"},
+        "residential": {"sensors": 1, "status": "offline"},
+        "tourist_district": {"sensors": 1, "status": "air_quality_warning"},
+        "park": {"sensors": 1, "status": "optimal"}
+      }
+    },
+    "environmental_thresholds": {
+      "temperature": {"min": -5, "max": 40, "optimal_min": 15, "optimal_max": 25},
+      "humidity": {"min": 20, "max": 90, "optimal_min": 40, "optimal_max": 70},
+      "pm25": {"good": 12, "moderate": 35, "unhealthy": 55},
+      "pm10": {"good": 20, "moderate": 50, "unhealthy": 100},
+      "co2": {"normal": 400, "elevated": 1000, "high": 5000},
+      "noise_level": {"quiet": 50, "moderate": 70, "loud": 85}
+    }
+  }
+}

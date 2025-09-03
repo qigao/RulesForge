@@ -18,10 +18,10 @@ set(PROJECT_VERSION
     ${CMAKE_PROJECT_VERSION_MAJOR}.${CMAKE_PROJECT_VERSION_MINOR}.${CMAKE_PROJECT_VERSION_PATCH}
 )
 
-set(PROJECT_NAME "ProjectCppTemplate")
-set(PROJECT_DESCRIPTION "A DAG-based workflow execution system for C++")
+set(PROJECT_NAME "RuleForge")
+set(PROJECT_DESCRIPTION "A Rete Network based rule engine")
 set(PROJECT_WEBSITE "http://github.com/qigao/project-cpp-template.git")
-set(APPLICATION_LICENSE "MIT License")
+set(APPLICATION_LICENSE "Apache2 License")
 
 # Set the project name and language
 project(
@@ -48,4 +48,5 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 add_subdirectory(vendor)
 # add_subdirectory(parser)
 add_subdirectory(shared)
-add_subdirectory(drills)
+add_subdirectory(ruleforge)
+add_subdirectory(capi)
