@@ -10,10 +10,6 @@ target_include_directories(
     ${TARGET_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Default link options
-target_link_libraries(
-    ${TARGET_NAME} PUBLIC
-)
 # Find dependencies
 find_package(magic_enum CONFIG REQUIRED)
 find_package(pegtl CONFIG REQUIRED)

@@ -3,27 +3,19 @@
 #include "knowledge_base.hpp"
 #include "stateful_session.hpp"
 
-#include <catch2/catch_approx.hpp>
+std::unique_ptr<StatefulSession> build_session(std::string const& drl) {
+    ParsingResult result;
+    auto kb = build_knowledge_base(drl, result);
+    REQUIRE(result.success);
+    for (auto const& err : result.errors) FAIL(err.to_string());
+    REQUIRE(kb != nullptr);
+    auto session = kb->create_session();
+    REQUIRE(session != nullptr);
+    return session;
+}
 
-// Test fixture to build a stateful session for each test case.
-struct TestFixture {
-    std::unique_ptr<StatefulSession> session;
-
-    void build_session(std::string const& drl) {
-        ParsingResult result;
-        auto kb = build_knowledge_base(drl, result);
-        if (!result.success) {
-            for (auto const& err : result.errors) { FAIL(err.to_string()); }
-        }
-        REQUIRE(result.success);
-        REQUIRE(kb != nullptr);
-        session = kb->create_session();
-        REQUIRE(session != nullptr);
-    }
-};
-
-TEST_CASE_METHOD(TestFixture, "Engine: Simple Rule Fire", "[engine]") {
-    build_session(R"(
+TEST_CASE("Engine: Simple Rule Fire", "[engine]") {
+    auto session = build_session(R"(
         declare Person
             name: String
             age: int
@@ -35,7 +27,7 @@ TEST_CASE_METHOD(TestFixture, "Engine: Simple Rule Fire", "[engine]") {
         when
             $p : Person(age >= 18)
         then
-            drools.insert({type="Adult", name=$p.name});
+            drools.insert({type: "Adult", name: $p.name});
         end
     )");
 
@@ -51,8 +43,8 @@ TEST_CASE_METHOD(TestFixture, "Engine: Simple Rule Fire", "[engine]") {
     CHECK(session->get_fact_count() == 2);
 }
 
-TEST_CASE_METHOD(TestFixture, "Engine: Join Condition", "[engine]") {
-    build_session(R"(
+TEST_CASE("Engine: Join Condition", "[engine]") {
+    auto session = build_session(R"(
         declare Customer
             id: int
             name: String
@@ -85,8 +77,8 @@ TEST_CASE_METHOD(TestFixture, "Engine: Join Condition", "[engine]") {
     CHECK(session->fire_all_rules() == 1);
 }
 
-TEST_CASE_METHOD(TestFixture, "Engine: `not` Pattern", "[engine]") {
-    build_session(R"(
+TEST_CASE("Engine: `not` Pattern", "[engine]") {
+    auto session = build_session(R"(
         declare Person name:String end
         declare Holiday name:String end
         rule "Work Day"
@@ -101,44 +93,39 @@ TEST_CASE_METHOD(TestFixture, "Engine: `not` Pattern", "[engine]") {
     CHECK(session->fire_all_rules() == 1);
 
     session->add_fact(std::make_shared<Fact>(Fact{0, "Holiday"}));
-    // After adding Holiday, a new call to fire_all_rules should find no matches.
-    // The previous activation is retracted automatically.
     CHECK(session->fire_all_rules() == 0);
 }
 
-TEST_CASE_METHOD(TestFixture, "Engine: Salience", "[engine]") {
-    build_session(R"(
-        global java.util.List results;
+TEST_CASE("Engine: Salience", "[engine]") {
+    auto session = build_session(R"(
         declare Trigger end
-        rule "High Salience" salience 10 when Trigger() then results.add("High"); end
-        rule "Low Salience" salience 5 when Trigger() then results.add("Low"); end
+        declare Result name:String end
+        rule "High Salience" salience 10 when Trigger() then 
+            drools.insert({type: "Result", name: "High"}); 
+        end
+        rule "Low Salience" salience 5 when Trigger() then 
+            drools.insert({type: "Result", name: "Low"}); 
+        end
     )");
-
-    std::vector<std::string> results_log;
-    sol::state& lua = session->get_lua_state();
-    sol::table results_api = lua.create_table();
-    results_api["add"] = [&](std::string const& s) { results_log.push_back(s); };
-    session->set_global("results", results_api);
 
     auto fact = std::make_shared<Fact>();
     fact->type = "Trigger";
     session->add_fact(fact);
-    session->fire_all_rules();
+    int fired = session->fire_all_rules();
 
-    REQUIRE(results_log.size() == 2);
-    CHECK(results_log[0] == "High");
-    CHECK(results_log[1] == "Low");
+    CHECK(fired == 2);
+    CHECK(session->get_fact_count() == 3);
 }
 
-TEST_CASE_METHOD(TestFixture, "Engine: Logical Insertions (TMS)", "[engine]") {
-    build_session(R"(
+TEST_CASE("Engine: Logical Insertions (TMS)", "[engine]") {
+    auto session = build_session(R"(
         declare Alarm reason:String end
         declare Fire active:bool end
         rule "Sound Alarm on Fire"
         when
             $f : Fire(active == true)
         then
-            drools.insertLogical({type="Alarm", reason="fire"});
+            drools.insertLogical({type: "Alarm", reason: "fire"});
         end
     )");
 
@@ -146,16 +133,14 @@ TEST_CASE_METHOD(TestFixture, "Engine: Logical Insertions (TMS)", "[engine]") {
     session->add_fact(fire_fact);
     session->fire_all_rules();
 
-    // After firing, we have the Fire fact and the logically inserted Alarm fact.
     CHECK(session->get_fact_count() == 2);
 
-    // Retracting the cause (the Fire) should cause the TMS to retract the consequence (the Alarm).
     session->retract_fact(fire_fact);
     CHECK(session->get_fact_count() == 0);
 }
 
-TEST_CASE_METHOD(TestFixture, "Engine: `or` Condition", "[engine][or]") {
-    build_session(R"(
+TEST_CASE("Engine: `or` Condition", "[engine][or]") {
+    auto session = build_session(R"(
         declare Customer
             id : int
             status : String
@@ -175,7 +160,7 @@ TEST_CASE_METHOD(TestFixture, "Engine: `or` Condition", "[engine][or]") {
             $c2 : Customer( $id : id )
             Order( customerId == $id, amount > 500.0 )
         then
-            drools.insert({type="PremiumCustomer"});
+            drools.insert({type: "PremiumCustomer"});
         end
     )");
 

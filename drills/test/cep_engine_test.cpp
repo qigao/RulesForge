@@ -47,7 +47,7 @@ struct CepTestFixture {
                 drools.retract($e1);
                 drools.retract($e2);
                 drools.retract($e3);
-                drools.insert({type="PotentialFraud"});
+                drools.insert({type: "PotentialFraud"});
             end
         )";
         ParsingResult result;

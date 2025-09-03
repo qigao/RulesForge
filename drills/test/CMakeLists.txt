@@ -1,4 +1,6 @@
 file(GLOB TEST_SOURCES *_test.cpp)
+ 
+
 set(folder_name ${TARGET_NAME}/test)
 find_package(catch2 CONFIG REQUIRED)
 foreach(test_source ${TEST_SOURCES})
@@ -12,3 +14,5 @@ foreach(test_source ${TEST_SOURCES})
     set_target_properties(${executable_name} PROPERTIES FOLDER ${folder_name})
     # Removed add_run_target as it is an unknown CMake command and not a standard configuration.
 endforeach()
+
+ 

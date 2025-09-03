@@ -1,27 +1,18 @@
 #include "catch2/catch_all.hpp"
 #include "drools_parser.hpp"
 #include "knowledge_base.hpp"
-#include "stateful_session.hpp"   // Needed for parse_drools_for_rete signature
 
-// This helper is for tests that need to inspect the ParsingResult (e.g., for error messages)
-ParsingResult parse_string_to_result(std::string const& drl) {
-
+ParsingResult parse_drl(std::string const& drl) {
     ParsingResult result;
     build_knowledge_base(drl, result, "string.drl");
     return result;
 }
 
-// This helper is for tests that only care about the final, successful parser_state
-parser_state parse_string(std::string const& drl) {
+parser_state parse_drl_success(std::string const& drl) {
     ParsingResult result;
     auto kb = build_knowledge_base(drl, result);
-
-    // Fail the test if parsing or analysis fails, and print the errors
-    if (!result.success) {
-        for (auto const& err : result.errors) { FAIL(err.to_string()); }
-    }
     REQUIRE(result.success);
-
+    for (auto const& err : result.errors) FAIL(err.to_string());
     REQUIRE(kb != nullptr);
     return kb->get_parser_state();
 }
@@ -34,10 +25,10 @@ TEST_CASE("Parser: Basic Rule Parsing", "[parser]") {
         when
             $p : Person(age > 30)
         then
-            drools.insert({type="Adult"});
+            drools.insert({type: "Adult"});
         end
     )";
-    auto state = parse_string(drl);
+    auto state = parse_drl_success(drl);
     REQUIRE(state.parsed_rules.size() == 1);
     auto const& rule = state.parsed_rules[0];
     CHECK(rule.name == "Simple Rule");
@@ -59,7 +50,7 @@ TEST_CASE("Parser: Rule Attributes", "[parser]") {
         then
         end
     )";
-    auto state = parse_string(drl);
+    auto state = parse_drl_success(drl);
     REQUIRE(state.parsed_rules.size() == 1);
     auto const& rule = state.parsed_rules[0];
     CHECK(rule.name == "Rule with Attributes");
@@ -81,7 +72,7 @@ TEST_CASE("Parser: Complex LHS with 'not' and 'exists'", "[parser]") {
         then
         end
     )";
-    auto state = parse_string(drl);
+    auto state = parse_drl_success(drl);
     REQUIRE(state.parsed_rules.size() == 1);
     REQUIRE(state.parsed_rules[0].condition_groups.size() == 1);
     auto const& conditions = state.parsed_rules[0].condition_groups[0];
@@ -113,7 +104,7 @@ TEST_CASE("Parser: 'from accumulate' and 'from unnest'", "[parser]") {
         then
         end
     )";
-    auto state = parse_string(drl);
+    auto state = parse_drl_success(drl);
     REQUIRE(state.parsed_rules.size() == 1);
     auto const& conditions = state.parsed_rules[0].condition_groups[0];
     REQUIRE(conditions.size() == 3);
@@ -145,7 +136,7 @@ TEST_CASE("Parser: Declarations and Globals", "[parser]") {
             age : int
         end
     )";
-    auto state = parse_string(drl);
+    auto state = parse_drl_success(drl);
     REQUIRE(state.parsed_declarations.size() == 1);
     CHECK(state.parsed_declarations[0].type_name == "com.example.Person");
     REQUIRE(state.parsed_declarations[0].fields.size() == 2);
@@ -168,7 +159,7 @@ TEST_CASE("Parser: Parameterized Query", "[parser]") {
             $p : Person(name == $name.value)
         end
     )";
-    auto state = parse_string(drl);
+    auto state = parse_drl_success(drl);
     REQUIRE(state.parsed_queries.size() == 1);
     auto const& query = state.parsed_queries[0];
     CHECK(query.name == "findPerson");
@@ -197,7 +188,7 @@ TEST_CASE("Parser: Native Temporal Operators 'after' and 'within'", "[parser][ce
     )";
 
     // The parse_string helper will fail until the grammar is correct.
-    auto state = parse_string(drl);
+    auto state = parse_drl_success(drl);
 
     // After fixing the grammar, these checks will validate the AstBuilder.
     REQUIRE(state.parsed_rules.size() == 1);

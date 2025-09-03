@@ -113,7 +113,7 @@ TEST_CASE_METHOD(SemanticTestFixture, "Semantic Analysis: Type and Field Errors"
     SECTION("Using an undeclared field in a constraint") {
         std::string drl = R"(
             declare Person name: String end
-            rule "x" when Person(non_existent_field == 'test') then end
+            rule "x" when Person(non_existent_field == "test") then end
         )";
         expect_error(drl, "constraint field 'non_existent_field' not found on fact type 'Person'");
     }

@@ -29,7 +29,7 @@ struct SymbolInfo {
  * @using SymbolTable
  * @brief Maps a binding name (e.g., "$p") to its SymbolInfo.
  */
-using SymbolTable = std::map<std::string, SymbolInfo>;
+using SymbolTable = map<std::string, SymbolInfo>;
 
 // ===================================================================
 // == SemanticAnalyzer Class Definition
@@ -54,7 +54,7 @@ public:
 
     std::vector<StructuredError> const& get_errors() const { return errors_; }
 
-    std::map<std::string, std::set<std::string>> const& get_type_schemas() const { return type_schemas_; }
+    map<std::string, std::set<std::string>> const& get_type_schemas() const { return type_schemas_; }
 
     std::optional<std::string> resolve_type(std::string const& type_name, std::string const& package_ctx,
                                             std::vector<std::string> const& imports_ctx);
@@ -73,7 +73,7 @@ private:
     parser_state& state_;
     std::string source_name_;
     std::vector<StructuredError> errors_;
-    std::map<std::string, std::set<std::string>> type_schemas_;
+    map<std::string, std::set<std::string>> type_schemas_;
 };
 
 #endif   // SEMANTIC_ANALYZER_HPP

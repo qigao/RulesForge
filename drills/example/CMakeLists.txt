@@ -6,7 +6,7 @@ foreach(example_source ${SOURCES})
     target_link_libraries(
         ${EXAMPLE_NAME}
         PRIVATE ${TARGET_NAME}
-                pubcxx taocpp::pegtl nlohmann_json::nlohmann_json
+                pubcxx taocpp::pegtl  
     )
     target_include_directories(${EXAMPLE_NAME} PRIVATE ../include)
 

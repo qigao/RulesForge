@@ -19,7 +19,7 @@ public:
 
     std::shared_ptr<ReteNode> first_beta_node_in_chain;
     std::shared_ptr<ReteNode> build();
-    std::map<std::string, int> const& get_bindings() const;
+    map<std::string, int> const& get_bindings() const;
 
 private:
     std::shared_ptr<ReteNode> create_node_for_pattern(ParsedPattern& pattern, int& pattern_depth);
@@ -40,7 +40,7 @@ private:
     bool is_query_build_;
     int parameter_count_;
     std::shared_ptr<ReteNode> last_node_;
-    std::map<std::string, int> binding_to_idx_;
+    map<std::string, int> binding_to_idx_;
 };
 
 #endif   // BETA_BUILDER_HPP

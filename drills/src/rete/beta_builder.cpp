@@ -12,7 +12,7 @@ BetaNetworkBuilder::BetaNetworkBuilder(StatefulSession& session, std::vector<Par
     session_(session), patterns_(patterns), is_query_build_(is_query), parameter_count_(param_count),
     first_beta_node_in_chain(nullptr), last_node_(nullptr) {}
 
-std::map<std::string, int> const& BetaNetworkBuilder::get_bindings() const { return binding_to_idx_; }
+map<std::string, int> const& BetaNetworkBuilder::get_bindings() const { return binding_to_idx_; }
 
 std::shared_ptr<ReteNode> BetaNetworkBuilder::build() {
     LOG_DEBUG("BetaNetworkBuilder::build starting. is_query: {}, param_count: {}", is_query_build_, parameter_count_);

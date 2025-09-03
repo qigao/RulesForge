@@ -66,6 +66,33 @@ namespace {
         if (unit == "s") return value * 1000;
         return value;
     }
+
+    // Helper function to extract field name from constraint_field or simple_name_part
+    std::string extract_field_name(pegtl::parse_tree::node const* primary_expr_node) {
+        if (!primary_expr_node) return "";
+        
+        // Check if it contains a constraint_field (compound field like $obj.field)
+        if (auto* cf_node = find_descendant<grammar::constraint_field>(*primary_expr_node)) {
+            return cf_node->string();
+        }
+        
+        // Check if it contains a simple_name_part (simple field like fieldname)  
+        if (auto* snp_node = find_descendant<grammar::simple_name_part>(*primary_expr_node)) {
+            return snp_node->string();
+        }
+        
+        // Check for other primary expressions (this, variables, literals)
+        if (find_descendant<grammar::keyword_this>(*primary_expr_node)) {
+            return "this";
+        }
+        
+        if (auto* vb_node = find_descendant<grammar::variable_binding>(*primary_expr_node)) {
+            return vb_node->string();
+        }
+        
+        // Fallback to the original behavior
+        return primary_expr_node->string();
+    }
 }   // namespace
 
 AstBuilder::AstBuilder(std::unique_ptr<pegtl::parse_tree::node> root, std::string const& source_name) :
@@ -458,8 +485,8 @@ std::unique_ptr<ConstraintNode> AstBuilder::build_constraint_item(pegtl::parse_t
     if (auto const* seq_node = find_descendant<grammar::temporal_seq_clause>(n)) {
         ParsedTemporalConstraint tc;
         tc.op = find_descendant<pegtl::sor<grammar::op_after, grammar::op_before>>(*seq_node)->string();
-        tc.lhs_field = find_all_descendants<grammar::primary_expr>(*seq_node)[0]->string();
-        std::string rhs = find_all_descendants<grammar::primary_expr>(*seq_node)[1]->string();
+        tc.lhs_field = extract_field_name(find_all_descendants<grammar::primary_expr>(*seq_node)[0]);
+        std::string rhs = extract_field_name(find_all_descendants<grammar::primary_expr>(*seq_node)[1]);
         size_t pos = rhs.find('.');
         if (pos != std::string::npos && rhs[0] == '$') {
             tc.rhs_binding_and_field = {rhs.substr(0, pos), rhs.substr(pos + 1)};
@@ -467,7 +494,6 @@ std::unique_ptr<ConstraintNode> AstBuilder::build_constraint_item(pegtl::parse_t
         leaf_node->constraint.temporal_constraint = tc;
         return leaf_node;
     }
-
     // --- 2. If not temporal, parse it as a standard relational expression ---
 
     auto const* binding_node = find_descendant<grammar::inline_binding>(n);
@@ -483,7 +509,7 @@ std::unique_ptr<ConstraintNode> AstBuilder::build_constraint_item(pegtl::parse_t
     }
 
     // The LHS of the constraint is always the first primary expression
-    leaf_node->constraint.left_field = primary_expr_node->string();
+    leaf_node->constraint.left_field = extract_field_name(primary_expr_node);
 
     // Check if there is a comparison clause (e.g., `> 18`)
     if (clause_node) {

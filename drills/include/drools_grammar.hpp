@@ -130,11 +130,15 @@ namespace grammar {
 
     struct simple_name_part : pegtl::seq<pegtl::not_at<any_keyword>, raw_identifier> {};
 
-    struct constraint_field : pegtl::list<pegtl::sor<variable_binding, simple_name_part>, pegtl::one<'.'>> {};
+    struct constraint_field : pegtl::sor<
+        pegtl::list<simple_name_part, pegtl::one<'.'>>,
+        pegtl::seq<variable_binding, pegtl::one<'.'>, simple_name_part>,
+        simple_name_part
+    > {};
 
     struct primary_expr :
-        pegtl::sor<double_, integer, string_literal, keyword_true, keyword_false, keyword_nil, constraint_field,
-                   variable_binding,
+        pegtl::sor<double_, integer, string_literal, keyword_true, keyword_false, keyword_nil, keyword_this, 
+                   constraint_field, variable_binding,
                    pegtl::seq<pegtl::one<'('>, opt_whitespace, expression, opt_whitespace, pegtl::one<')'>>> {};
 
     struct not_in_op : pegtl::seq<keyword_not, whitespace, keyword_in> {};
@@ -187,11 +191,12 @@ namespace grammar {
         pegtl::seq<op_within, whitespace, duration_literal, whitespace, op_of, whitespace,
                    variable_binding   // The anchor point for the window (e.g., '$e1')
                    > {};
+ 
 
     // The main constraint rule must now prioritize these new, more specific rules.
     struct constraint_item :
         pegtl::sor<temporal_window_clause, temporal_seq_clause,
-                   relational_expression   // The general-purpose comparison rule
+                    relational_expression   // The general-purpose comparison rule
                    > {};
 
     struct and_expr :

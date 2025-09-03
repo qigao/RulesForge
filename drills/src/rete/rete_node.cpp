@@ -7,11 +7,9 @@
 #include <algorithm>
 #include <iostream>
 #include <magic_enum/magic_enum.hpp>
-#include <nlohmann/json.hpp>
 #include <sstream>
 #include <typeinfo>
-#include <utility>
-using json = nlohmann::json;
+#include <utility> 
 
 // --- Helper Functions ---
 namespace {
@@ -100,7 +98,7 @@ namespace {
 
     bool check_all_join_conditions(StatefulSession& session, Token const& token, Fact const& fact,
                                    std::vector<ParsedConstraint> const& joins,
-                                   std::map<std::string, int> const& bindings) {
+                                   map<std::string, int> const& bindings) {
         if (joins.empty()) { return true; }
 
         for (auto const& join : joins) {
@@ -191,7 +189,7 @@ void ReteNode::add_parent(std::shared_ptr<ReteNode> parent) {
 
 // --- BetaConditionNode ---
 BetaConditionNode::BetaConditionNode(std::vector<ParsedConstraint> const& joins,
-                                     std::map<std::string, int> const& bindings) :
+                                     map<std::string, int> const& bindings) :
     join_constraints(joins), binding_to_token_idx(bindings) {}
 
 void BetaConditionNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
@@ -350,7 +348,7 @@ void EntryPointNode::print_node(std::ostream& os) const {
 }
 
 // --- BaseJoinNode ---
-BaseJoinNode::BaseJoinNode(std::vector<ParsedConstraint> joins, std::map<std::string, int> bindings) :
+BaseJoinNode::BaseJoinNode(std::vector<ParsedConstraint> joins, map<std::string, int> bindings) :
     ReteNode(), join_constraints_(std::move(joins)), binding_to_token_idx_(std::move(bindings)) {}
 
 void BaseJoinNode::propagate_assert(StatefulSession& session, std::shared_ptr<Token> token,
@@ -398,7 +396,7 @@ void BaseJoinNode::propagate_retract(StatefulSession& session, std::shared_ptr<T
 }
 
 // --- HashedJoinNode ---
-HashedJoinNode::HashedJoinNode(std::vector<ParsedConstraint> joins, std::map<std::string, int> bindings,
+HashedJoinNode::HashedJoinNode(std::vector<ParsedConstraint> joins, map<std::string, int> bindings,
                                std::pair<std::string, int> left_hash_key, std::string right_hash_key) :
     BaseJoinNode(std::move(joins), std::move(bindings)), left_hash_key_(std::move(left_hash_key)),
     right_hash_key_(std::move(right_hash_key)) {}
@@ -491,7 +489,7 @@ void HashedJoinNode::print_node(std::ostream& os) const {
 }
 
 // --- CrossProductJoinNode ---
-CrossProductJoinNode::CrossProductJoinNode(std::vector<ParsedConstraint> joins, std::map<std::string, int> bindings) :
+CrossProductJoinNode::CrossProductJoinNode(std::vector<ParsedConstraint> joins, map<std::string, int> bindings) :
     BaseJoinNode(std::move(joins), std::move(bindings)) {}
 
 void CrossProductJoinNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
@@ -546,7 +544,7 @@ void CrossProductJoinNode::print_node(std::ostream& os) const {
 }
 
 // --- OrderedJoinNode ---
-OrderedJoinNode::OrderedJoinNode(std::vector<ParsedConstraint> joins, std::map<std::string, int> bindings) :
+OrderedJoinNode::OrderedJoinNode(std::vector<ParsedConstraint> joins, map<std::string, int> bindings) :
     BaseJoinNode(std::move(joins), std::move(bindings)) {}
 
 void OrderedJoinNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
@@ -567,7 +565,7 @@ void OrderedJoinNode::print_node(std::ostream& os) const {
 }
 
 // --- NotNode ---
-NotNode::NotNode(std::vector<ParsedConstraint> const& joins, std::map<std::string, int> const& bindings) :
+NotNode::NotNode(std::vector<ParsedConstraint> const& joins, map<std::string, int> const& bindings) :
     BetaConditionNode(joins, bindings) {}
 
 void NotNode::print_node(std::ostream& os) const {
@@ -580,7 +578,7 @@ void NotNode::print_node(std::ostream& os) const {
 }
 
 // --- ExistsNode ---
-ExistsNode::ExistsNode(std::vector<ParsedConstraint> const& joins, std::map<std::string, int> const& bindings) :
+ExistsNode::ExistsNode(std::vector<ParsedConstraint> const& joins, map<std::string, int> const& bindings) :
     BetaConditionNode(joins, bindings) {}
 
 void ExistsNode::print_node(std::ostream& os) const {
@@ -594,7 +592,7 @@ void ExistsNode::print_node(std::ostream& os) const {
 
 // --- AccumulateNode ---
 AccumulateNode::AccumulateNode(IAccumulator const* prototype, ParsedAccumulate&& accumulate_info,
-                               std::string res_fact_type, std::map<std::string, int> bindings,
+                               std::string res_fact_type, map<std::string, int> bindings,
                                std::vector<ParsedConstraint> joins) :
     accumulator_prototype(prototype), info(std::move(accumulate_info)), result_fact_type(std::move(res_fact_type)),
     binding_to_token_idx(std::move(bindings)), join_constraints(std::move(joins)) {}
@@ -740,7 +738,7 @@ void AccumulateNode::print_node(std::ostream& os) const {
 }
 
 // --- UnnestNode ---
-UnnestNode::UnnestNode(ParsedUnnest const& unnest_info, std::map<std::string, int> const& bindings) :
+UnnestNode::UnnestNode(ParsedUnnest const& unnest_info, map<std::string, int> const& bindings) :
     info(unnest_info), binding_to_token_idx(bindings) {}
 
 void UnnestNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
@@ -790,7 +788,7 @@ void UnnestNode::print_node(std::ostream& os) const {
 }
 
 // --- EvalNode ---
-EvalNode::EvalNode(std::string expr, std::map<std::string, int> bindings) :
+EvalNode::EvalNode(std::string expr, map<std::string, int> bindings) :
     expression(std::move(expr)), binding_to_token_idx(std::move(bindings)) {}
 
 void EvalNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
@@ -830,7 +828,7 @@ void EvalNode::print_node(std::ostream& os) const {
 }
 
 // --- TerminalNode ---
-TerminalNode::TerminalNode(ParsedRule const& r, std::map<std::string, int> b) :
+TerminalNode::TerminalNode(ParsedRule const& r, map<std::string, int> b) :
     rule_name(r.name), binding_to_token_idx(std::move(b)) {}
 
 void TerminalNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
@@ -870,7 +868,7 @@ void TerminalNode::print_node(std::ostream& os) const {
 }
 
 // --- QueryTerminalNode ---
-QueryTerminalNode::QueryTerminalNode(std::map<std::string, int> bindings) : binding_to_token_idx(std::move(bindings)) {}
+QueryTerminalNode::QueryTerminalNode(map<std::string, int> bindings) : binding_to_token_idx(std::move(bindings)) {}
 
 void QueryTerminalNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
     LOG_DEBUG("Node {}:QueryTerminalNode left_activate. Token type: {}", this->id, magic_enum::enum_name(token->type));
@@ -889,7 +887,7 @@ void QueryTerminalNode::clear_results() {
     results.clear();
 }
 
-void QueryTerminalNode::set_bindings(std::map<std::string, int> const& bindings) { binding_to_token_idx = bindings; }
+void QueryTerminalNode::set_bindings(map<std::string, int> const& bindings) { binding_to_token_idx = bindings; }
 
 void QueryTerminalNode::print_node(std::ostream& os) const {
     os << "  \"" << id << "\" [label=\"Query Terminal (" << id << ")\\n";
@@ -932,104 +930,4 @@ void QueryInputNode::execute(StatefulSession& session, std::vector<std::shared_p
 
 void QueryInputNode::print_node(std::ostream& os) const {
     os << "  \"" << id << "\" [label=\"Query Input (" << id << ")\", shape=invhouse, style=filled, fillcolor=yellow];";
-}
-
-// --- JSON Functions for each node type ---
-void to_json(json& j, AlphaNode const& p) { j = {{"constraint", p.constraint}}; }
-
-void from_json(json const& j, AlphaNode& p) { j.at("constraint").get_to(p.constraint); }
-
-void to_json(json& j, EntryPointNode const& p) { j = json::object(); }
-
-void from_json(json const& j, EntryPointNode& p) {}
-
-void to_json(json& j, HashedJoinNode const& p) {
-    j = {{"joins", p.join_constraints_},
-         {"bindings", p.binding_to_token_idx_},
-         {"left_hash", p.left_hash_key_},
-         {"right_hash", p.right_hash_key_}};
-}
-
-void from_json(json const& j, HashedJoinNode& p) {
-    j.at("joins").get_to(p.join_constraints_);
-    j.at("bindings").get_to(p.binding_to_token_idx_);
-    j.at("left_hash").get_to(p.left_hash_key_);
-    j.at("right_hash").get_to(p.right_hash_key_);
-}
-
-void to_json(json& j, CrossProductJoinNode const& p) {
-    j = {{"joins", p.join_constraints_}, {"bindings", p.binding_to_token_idx_}};
-}
-
-void from_json(json const& j, CrossProductJoinNode& p) {
-    j.at("joins").get_to(p.join_constraints_);
-    j.at("bindings").get_to(p.binding_to_token_idx_);
-}
-
-void to_json(json& j, NotNode const& p) { j = {{"joins", p.join_constraints}, {"bindings", p.binding_to_token_idx}}; }
-
-void from_json(json const& j, NotNode& p) {
-    j.at("joins").get_to(p.join_constraints);
-    j.at("bindings").get_to(p.binding_to_token_idx);
-}
-
-void to_json(json& j, ExistsNode const& p) {
-    j = {{"joins", p.join_constraints}, {"bindings", p.binding_to_token_idx}};
-}
-
-void from_json(json const& j, ExistsNode& p) {
-    j.at("joins").get_to(p.join_constraints);
-    j.at("bindings").get_to(p.binding_to_token_idx);
-}
-
-void to_json(json& j, AccumulateNode const& p) {
-    j = {{"info", p.info},
-         {"result_type", p.result_fact_type},
-         {"bindings", p.binding_to_token_idx},
-         {"joins", p.join_constraints}};
-}
-
-void from_json(json const& j, AccumulateNode& p) {
-    j.at("info").get_to(p.info);
-    j.at("result_type").get_to(p.result_fact_type);
-    j.at("bindings").get_to(p.binding_to_token_idx);
-    j.at("joins").get_to(p.join_constraints);
-    // The prototype is relinked in ReteSerializer::deserialize
-}
-
-void to_json(json& j, UnnestNode const& p) { j = {{"info", p.info}, {"bindings", p.binding_to_token_idx}}; }
-
-void from_json(json const& j, UnnestNode& p) {
-    j.at("info").get_to(p.info);
-    j.at("bindings").get_to(p.binding_to_token_idx);
-}
-
-void to_json(json& j, EvalNode const& p) { j = {{"expression", p.expression}, {"bindings", p.binding_to_token_idx}}; }
-
-void from_json(json const& j, EvalNode& p) {
-    j.at("expression").get_to(p.expression);
-    j.at("bindings").get_to(p.binding_to_token_idx);
-}
-
-void to_json(json& j, TerminalNode const& p) { j = {{"rule", p.rule_name}, {"bindings", p.binding_to_token_idx}}; }
-
-void from_json(json const& j, TerminalNode& p) {
-    j.at("rule").get_to(p.rule_name);
-    j.at("bindings").get_to(p.binding_to_token_idx);
-}
-
-void to_json(json& j, QueryTerminalNode const& p) { j = {{"bindings", p.binding_to_token_idx}}; }
-
-void from_json(json const& j, QueryTerminalNode& p) { j.at("bindings").get_to(p.binding_to_token_idx); }
-
-void to_json(json& j, QueryInputNode const& p) {
-    if (auto terminal = p.terminal_node.lock()) {
-        j["terminal_id"] = terminal->id;
-    } else {
-        j["terminal_id"] = -1;
-    }
-}
-
-void from_json(json const& j, QueryInputNode& p) {
-    // The weak_ptr is relinked in ReteSerializer::deserialize
 }

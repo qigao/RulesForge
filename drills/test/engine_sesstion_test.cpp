@@ -36,8 +36,7 @@ TEST_CASE_METHOD(TestFixture, "Engine: Simple Rule Fire", "[engine]") {
         when
             $p : Person(age >= 18)
         then
-            // Use the simple name; the analyzer will qualify it.
-            drools.insert({type="Adult", name=$p.name});
+            drools.insert({type: "Adult", name: $p.name});
         end
     )");
 
@@ -53,36 +52,47 @@ TEST_CASE_METHOD(TestFixture, "Engine: Simple Rule Fire", "[engine]") {
     CHECK(session->get_fact_count() == 2);
 }
 
-// SessionTestFixture with the same idiomatic DRL change
-struct SessionTestFixture {
-    std::shared_ptr<KnowledgeBase> kb;
+// Helper function to create test KB - outside of any class
+static std::shared_ptr<KnowledgeBase> create_test_kb() {
+    std::string drl = R"(
+        package com.example.testing;
 
-    SessionTestFixture() {
-        std::string drl = R"(
-            package com.example.testing;
+        declare Person 
+            name: String
+            age: int 
+        end
+        declare Adult 
+            name: String 
+        end
+        declare NameParam 
+            name: String 
+        end
 
-            declare Person name: String, age: int end
-            declare Adult name: String end
-            declare NameParam name: String end
+        rule "Find Adults"
+        when
+            $p : Person(age >= 18)
+        then
+            drools.insert({type: "Adult", name: $p.name});
+        end
 
-            rule "Find Adults"
-            when
-                $p: Person(age >= 18)
-            then
-                drools.insert({type="Adult", name=$p.name});
-            end
+        query "findAdults"(NameParam $param)
+            $a: Adult(name == $param.name)
+        end
+    )";
 
-            query findAdults(NameParam $param)
-                $a: Adult(name == $param.name)
-            end
-        )";
-
-        ParsingResult result;
-        kb = build_knowledge_base(drl, result);
-        REQUIRE(result.success);
-        REQUIRE(kb != nullptr);
+    ParsingResult result;
+    auto kb = build_knowledge_base(drl, result);
+    if (!result.success) {
+        for (auto const& err : result.errors) { 
+            FAIL(err.to_string());
+        }
     }
+    REQUIRE(result.success);
+    REQUIRE(kb != nullptr);
+    return kb;
+}
 
+struct SessionTestFixture {
     std::shared_ptr<Fact> make_person(std::string const& name, int age) {
         auto fact = std::make_shared<Fact>();
         fact->type = "com.example.testing.Person";
@@ -93,6 +103,7 @@ struct SessionTestFixture {
 };
 
 TEST_CASE_METHOD(SessionTestFixture, "StatefulSession: Rule Firing and Queries", "[engine][session]") {
+    auto kb = create_test_kb();
     std::unique_ptr<StatefulSession> session = kb->create_session();
     REQUIRE(session != nullptr);
 
@@ -131,6 +142,7 @@ TEST_CASE_METHOD(SessionTestFixture, "StatefulSession: Rule Firing and Queries",
 }
 
 TEST_CASE_METHOD(SessionTestFixture, "StatefulSession: Isolation between sessions", "[engine][session]") {
+    auto kb = create_test_kb();
     std::unique_ptr<StatefulSession> session1 = kb->create_session();
     std::unique_ptr<StatefulSession> session2 = kb->create_session();
     REQUIRE(session1 != nullptr);

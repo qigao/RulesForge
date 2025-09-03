@@ -7,7 +7,6 @@
 #include <fstream>
 #include <iostream>
 
-// A test fixture to handle creation and cleanup of temporary DRL files.
 struct ImportTestFixture {
     std::string const test_dir = "import_test_files";
 
@@ -51,7 +50,7 @@ TEST_CASE_METHOD(ImportTestFixture, "Parser: Import Resolution", "[parser][impor
         when
             $c: Customer(status == "GOLD")
         then
-            drools.insert({type="com.example.model.HighValueCustomer"});
+            drools.insert({type: "com.example.model.HighValueCustomer"});
         end
     )";
 

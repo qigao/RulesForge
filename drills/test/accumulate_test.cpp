@@ -90,48 +90,65 @@ void check_all_values(StatefulSession& sess, double sum, int64_t count, double a
 
 TEST_CASE_METHOD(AccumulateTestFixture, "AccumulateNode: `sum`, `average`, `min`, `max`", "[accumulate][functions]") {
     build_session(R"(
-        declare Purchase value: double end
+declare Purchase value: double end
 
-        // Result fact types
-        declare SumResult      result: double end
-        declare AverageResult  result: double end
-        declare MinResult      result: double end
-        declare MaxResult      result: double end
-        declare CountResult    result: int end
+// Result fact types
+declare SumResult      result: double end
+declare AverageResult  result: double end
+declare MinResult      result: double end
+declare MaxResult      result: double end
+declare CountResult    result: int end
 
-        // --- Rules using the accumulators ---
-        rule "Calculate Sum"
-        when
-            $s: SumResult() from accumulate($p: Purchase(), sum($p.value))
-        then end
+// --- Rules using the accumulators ---
+rule "Calculate Sum"
+when
+    $s: SumResult() from accumulate(
+        $p: Purchase(),
+        sum($p.value)
+    )
+then end
 
-        rule "Calculate Average"
-        when
-            $a: AverageResult() from accumulate($p: Purchase(), average($p.value))
-        then end
+rule "Calculate Average"
+when
+    $a: AverageResult() from accumulate(
+        $p: Purchase(),
+        average($p.value)
+    )
+then end
 
-        rule "Calculate Min"
-        when
-            $m: MinResult() from accumulate($p: Purchase(), min($p.value))
-        then end
+rule "Calculate Min"
+when
+    $m: MinResult() from accumulate(
+        $p: Purchase(),
+        min($p.value)
+    )
+then end
 
-        rule "Calculate Max"
-        when
-            $m: MaxResult() from accumulate($p: Purchase(), max($p.value))
-        then end
+rule "Calculate Max"
+when
+    $m: MaxResult() from accumulate(
+        $p: Purchase(),
+        max($p.value)
+    )
+then end
 
-        rule "Calculate Count"
-        when
-            $c: CountResult() from accumulate($p: Purchase(), count($p))
-        then end
+rule "Calculate Count"
+when
+    $c: CountResult() from accumulate(
+        $p: Purchase(),
+        count($p.value)
+    )
+then end
 
-        // --- Queries to inspect the results ---
-        query "getSum"      $r: SumResult() end
-        query "getAverage"  $r: AverageResult() end
-        query "getMin"      $r: MinResult() end
-        query "getMax"      $r: MaxResult() end
-        query "getCount"    $r: CountResult() end
+// --- Queries to inspect the results ---
+query "getSum"      $r: SumResult() end
+query "getAverage"  $r: AverageResult() end
+query "getMin"      $r: MinResult() end
+query "getMax"      $r: MaxResult() end
+query "getCount"    $r: CountResult() end
     )");
+
+
 
     // 1. Initial state
     check_all_values(*session, /*sum*/ 0.0, /*count*/ 0, /*avg*/ 0.0, /*min*/ 0.0, /*max*/ 0.0);

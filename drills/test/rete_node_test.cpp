@@ -1,5 +1,3 @@
-// FILE: rete_node_test.cpp
-
 #include "catch2/catch_all.hpp"
 #include "catch2/matchers/catch_matchers_vector.hpp"   // For UnorderedEquals
 #include "drools_parser.hpp"
@@ -23,7 +21,7 @@ struct QueryTestFixture {
         REQUIRE(session != nullptr);
     }
 
-    std::shared_ptr<Fact> createFact(std::string const& type, std::map<std::string, ConstraintValue> const& fields) {
+    std::shared_ptr<Fact> createFact(std::string const& type, map<std::string, ConstraintValue> const& fields) {
         auto fact = std::make_shared<Fact>();
         fact->type = type;
         fact->fields = fields;

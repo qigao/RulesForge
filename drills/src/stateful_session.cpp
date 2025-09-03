@@ -1,10 +1,9 @@
 #include "pubcxx/logger.hpp"
 
-#include "drools_lua_manager.hpp"
+#include "drools_js_manager.hpp"
 #include "query_result.hpp"
 #include "rete/beta_builder.hpp"
 #include "rete/rete_node.hpp"
-#include "rete/rete_serializer.hpp"
 #include "stateful_session.hpp"
 #include "tms.hpp"
 
@@ -43,7 +42,7 @@ namespace {
 StatefulSession::StatefulSession(private_key, std::shared_ptr<KnowledgeBase const> kb) : kb_(std::move(kb)) {
     LOG_DEBUG("StatefulSession::StatefulSession -> Creating session. KB Rules: {}, KB Queries: {}",
               kb_->get_rules().size(), kb_->get_parser_state().parsed_queries.size());
-    scripting_manager_ = std::make_unique<LuaScriptingManager>(*this);
+    scripting_manager_ = std::make_unique<JSScriptingManager>(*this);
     tms_ = std::make_unique<TruthMaintenanceSystem>(*this);
     dummy_wme_ = std::make_shared<TokenWME>(TokenWME{nullptr, nullptr, 0, 0});
     wme_cache_.insert(dummy_wme_);
@@ -140,20 +139,6 @@ void StatefulSession::prime_network_state() {
     LOG_DEBUG("Finished priming Rete network.");
 }
 
-void StatefulSession::deserialize_network(std::string const& json_data) {
-    LOG_DEBUG("Deserializing Rete network from JSON data (size: {} bytes)...", json_data.size());
-    ReteSerializer serializer(*this);
-    // Clear existing network before loading new one
-    all_nodes_.clear();
-    alpha_entry_points_.clear();
-    query_nodes_.clear();
-    parameterized_query_inputs_.clear();
-    next_node_id_ = 0;
-
-    serializer.deserialize(json_data);
-    LOG_DEBUG("Finished deserializing Rete network. Total nodes: {}", all_nodes_.size());
-}
-
 std::vector<std::shared_ptr<ReteNode>>
 StatefulSession::build_alpha_chain(ConstraintNode const* node, std::vector<std::shared_ptr<ReteNode>> parent_tails) {
     if (!node || node->children.empty()) { return parent_tails; }
@@ -177,12 +162,15 @@ StatefulSession::build_alpha_chain(ConstraintNode const* node, std::vector<std::
     return current_tails;
 }
 
-sol::state& StatefulSession::get_lua_state() { return scripting_manager_->get_lua_state(); }
+JSContext* StatefulSession::get_js_context() { return scripting_manager_->get_js_context(); }
 
 void StatefulSession::add_fact(std::shared_ptr<Fact> fact) {
     if (!fact) return;
     if (fact->id == 0) { fact->id = next_fact_id_++; }
     assign_nested_fact_ids(*fact);
+    
+    tracer_.trace_fact_added(fact->id, fact->type);
+    
     LOG_DEBUG("Adding fact ID: {}, Type: '{}'", fact->id, fact->type);
     if (LOG_LEVEL_PUBCXX_TRACE) {
         std::ostringstream fields_oss;
@@ -208,6 +196,66 @@ void StatefulSession::add_fact(std::shared_ptr<Fact> fact) {
     }
 }
 
+void StatefulSession::add_facts(std::vector<std::shared_ptr<Fact>> const& facts) {
+    if (facts.empty()) return;
+    
+    LOG_DEBUG("Adding {} facts in batch. Fact count before: {}", facts.size(), all_facts_.size());
+    
+    // Phase 1: Prepare all facts without network propagation
+    phmap::flat_hash_map<std::string, std::vector<std::shared_ptr<Fact>>> facts_by_type;
+    for (auto& fact : facts) {
+        if (!fact) continue;
+        if (fact->id == 0) fact->id = next_fact_id_++;
+        assign_nested_fact_ids(*fact);
+        
+        tracer_.trace_fact_added(fact->id, fact->type);
+        
+        all_facts_[fact->id] = fact;
+        facts_by_type[fact->type].push_back(fact);
+    }
+    
+    LOG_DEBUG("Fact count after batch add: {}", all_facts_.size());
+    
+    // Phase 2: Batch propagate by type to minimize network overhead
+    for (auto const& [type, type_facts] : facts_by_type) {
+        auto it = alpha_entry_points_.find(type);
+        if (it != alpha_entry_points_.end()) {
+            LOG_DEBUG("Batch propagating {} facts of type '{}' to entry point (Node ID {})", 
+                     type_facts.size(), type, it->second->id);
+            for (auto& fact : type_facts) {
+                it->second->right_activate(*this, fact, PropagationType::ASSERT);
+            }
+        } else {
+            LOG_DEBUG("No entry point found for fact type '{}'", type);
+        }
+    }
+}
+
+void StatefulSession::retract_facts(std::vector<std::shared_ptr<Fact>> const& facts) {
+    if (facts.empty()) return;
+    
+    LOG_DEBUG("Retracting {} facts in batch", facts.size());
+    
+    // Group by type for efficient processing
+    phmap::flat_hash_map<std::string, std::vector<std::shared_ptr<Fact>>> facts_by_type;
+    for (auto& fact : facts) {
+        if (!fact) continue;
+        facts_by_type[fact->type].push_back(fact);
+    }
+    
+    // Batch retract by type
+    for (auto const& [type, type_facts] : facts_by_type) {
+        auto it = alpha_entry_points_.find(type);
+        if (it != alpha_entry_points_.end()) {
+            for (auto& fact : type_facts) {
+                it->second->right_activate(*this, fact, PropagationType::RETRACT);
+                all_facts_.erase(fact->id);
+                tms_->on_fact_retracted(fact.get());
+            }
+        }
+    }
+}
+
 void StatefulSession::_internal_add_fact(std::shared_ptr<Fact> fact) {
     if (!fact) return;
     if (fact->id == 0) { fact->id = next_fact_id_++; }
@@ -215,6 +263,15 @@ void StatefulSession::_internal_add_fact(std::shared_ptr<Fact> fact) {
               all_facts_.size());
     all_facts_[fact->id] = fact;
     LOG_DEBUG("StatefulSession::_internal_add_fact -> Fact count after: {}", all_facts_.size());
+}
+
+void StatefulSession::_internal_add_facts_batch(std::vector<std::shared_ptr<Fact>> const& facts) {
+    for (auto& fact : facts) {
+        if (!fact) continue;
+        if (fact->id == 0) fact->id = next_fact_id_++;
+        all_facts_[fact->id] = fact;
+    }
+    LOG_DEBUG("Batch internal add completed. Total facts: {}", all_facts_.size());
 }
 
 void StatefulSession::_internal_remove_fact(int64_t fact_id) {
@@ -265,9 +322,21 @@ int StatefulSession::fire_all_rules() {
         if (activation_to_fire) {
             total_fired_count++;
             Activation& act = *activation_to_fire;
+            
+            // Extract fact IDs from the token for tracing
+            std::vector<int64_t> involved_facts;
+            if (act.token && act.token->wme) {
+                auto token_facts = act.token->get_facts();
+                for (auto const& fact : token_facts) {
+                    if (fact) involved_facts.push_back(fact->id);
+                }
+            }
+            
             LOG_DEBUG("Firing rule '{}' (salience: {})", act.rule->name, act.rule->salience);
             for (auto& listener : listeners_) { listener->before_rule_fired(act.rule->name); }
+            
             try {
+                RuleExecutionTimer timer(tracer_, act.rule->name, involved_facts);
                 scripting_manager_->execute_rhs(act.rule->rhs_code, act.rule->name, *act.token, act.bindings);
             } catch (ReteExecutionException const& e) {
                 LOG_ERROR("--- RUNTIME ERROR in rule '{}': {}", e.get_rule_name(), e.what());
@@ -292,6 +361,32 @@ void StatefulSession::retract_fact(std::shared_ptr<Fact> fact) {
     LOG_DEBUG("Fact count before retract: {}", all_facts_.size());
     all_facts_.erase(it);
     LOG_DEBUG("Fact count after retract: {}", all_facts_.size());
+    
+    // Clean up agenda: remove activations that depend on the retracted fact
+    std::vector<size_t> activations_to_remove;
+    for (auto const& [hash, activation] : agenda_map_) {
+        if (activation.token && activation.token->wme) {
+            // Check if this activation's token contains the retracted fact
+            std::vector<std::shared_ptr<Fact>> token_facts = activation.token->get_facts();
+            for (auto const& token_fact : token_facts) {
+                if (token_fact && token_fact->id == fact_to_retract->id) {
+                    activations_to_remove.push_back(hash);
+                    LOG_DEBUG("Removing activation for rule '{}' because it depends on retracted fact ID {}", 
+                              activation.rule->name, fact_to_retract->id);
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Remove the identified activations
+    for (size_t hash : activations_to_remove) {
+        agenda_map_.erase(hash);
+    }
+    
+    // Note: We don't need to clean the priority_queue directly since fire_all_rules() 
+    // will skip stale entries that are no longer in agenda_map_
+    
     tms_->on_fact_retracted(fact_to_retract.get());
     LOG_DEBUG("Retracting fact ID: {}, Type: {}, Propagation: {}", fact_to_retract->id, fact_to_retract->type,
               magic_enum::enum_name(PropagationType::RETRACT));
@@ -351,9 +446,9 @@ QueryResult StatefulSession::execute_query(std::string const& query_name,
     auto param_it = parameterized_query_inputs_.find(query_name);
     if (param_it != parameterized_query_inputs_.end()) { param_it->second->execute(*this, args); }
 
-    std::vector<std::map<std::string, std::shared_ptr<Fact>>> raw_results;
+    std::vector<map<std::string, std::shared_ptr<Fact>>> raw_results;
     for (auto const& [wme, token] : terminal_node->get_results()) {
-        std::map<std::string, std::shared_ptr<Fact>> row;
+        map<std::string, std::shared_ptr<Fact>> row;
         auto facts = token->get_facts();
         for (auto const& [binding, depth] : terminal_node->get_bindings()) {
             if (!binding.empty() && depth < facts.size()) { row[binding] = facts[depth]; }
@@ -373,12 +468,12 @@ std::string StatefulSession::get_focus() const {
     return agenda_group_focus_stack_.empty() ? "MAIN" : agenda_group_focus_stack_.back();
 }
 
-void StatefulSession::set_global(std::string const& name, sol::object obj) {
+void StatefulSession::set_global(std::string const& name, JSValue obj) {
     scripting_manager_->set_global(name, obj);
 }
 
-std::map<std::string, sol::object> const& StatefulSession::get_global_values() const {
-    static std::map<std::string, sol::object> empty;
+map<std::string, JSValue> const& StatefulSession::get_global_values() const {
+    static map<std::string, JSValue> empty;
     return empty;
 }
 
@@ -387,7 +482,7 @@ size_t StatefulSession::get_fact_count() const { return all_facts_.size(); }
 int64_t StatefulSession::get_next_fact_id() { return next_fact_id_++; }
 
 bool StatefulSession::execute_eval(std::string const& code, Token const& token,
-                                   std::map<std::string, int> const& bindings) {
+                                   map<std::string, int> const& bindings) {
     return scripting_manager_->execute_eval(code, token, bindings);
 }
 
@@ -402,6 +497,18 @@ void StatefulSession::removeListener(std::shared_ptr<IEngineListener> const& lis
 void StatefulSession::add_activation(Activation const& activation) {
     LOG_DEBUG("Activating rule '{}' (salience: {}), hash: {}", activation.rule->name, activation.rule->salience,
               activation.hash_value);
+    
+    // Extract fact IDs for tracing
+    std::vector<int64_t> involved_facts;
+    if (activation.token && activation.token->wme) {
+        auto token_facts = activation.token->get_facts();
+        for (auto const& fact : token_facts) {
+            if (fact) involved_facts.push_back(fact->id);
+        }
+    }
+    
+    tracer_.trace_rule_matched(activation.rule->name, involved_facts);
+    
     agenda_map_[activation.hash_value] = activation;
     agenda_queue_.push({activation.rule->salience, activation.hash_value});
 }
@@ -413,13 +520,8 @@ void StatefulSession::remove_activation(size_t activation_hash) {
     }
 }
 
-std::string StatefulSession::serialize_network() const {
-    ReteSerializer serializer(*this);
-    return serializer.serialize();
-}
-
-std::map<int, std::shared_ptr<ReteNode>> StatefulSession::get_nodes() const {
-    std::map<int, std::shared_ptr<ReteNode>> node_map;
+map<int, std::shared_ptr<ReteNode>> StatefulSession::get_nodes() const {
+    map<int, std::shared_ptr<ReteNode>> node_map;
     for (auto const& node : all_nodes_) { node_map[node->id] = node; }
     return node_map;
 }
