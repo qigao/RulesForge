@@ -3,7 +3,6 @@
 
 #include "ast_builder.hpp"
 #include "ast_transformer.hpp"
-#include "code_generator.hpp"
 #include "decision_table_converter.hpp"
 #include "decision_table_parser.hpp"
 #include "knowledge_base.hpp"

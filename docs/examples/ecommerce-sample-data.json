@@ -1,0 +1,270 @@
+{
+  "name": "E-commerce Order Analysis",
+  "description": "Complex e-commerce dataset for JMESPath testing",
+  "data": {
+    "store_info": {
+      "name": "TechMart",
+      "location": "San Francisco, CA",
+      "established": "2010-03-15"
+    },
+    "monthly_report": {
+      "period": "2024-01",
+      "currency": "USD",
+      "exchange_rates": {
+        "EUR": 0.85,
+        "GBP": 0.73,
+        "JPY": 110.5
+      }
+    },
+    "customers": [
+      {
+        "id": "CUST-001",
+        "name": "Alice Johnson",
+        "email": "alice@example.com",
+        "membership": {
+          "tier": "premium",
+          "since": "2020-05-10",
+          "points": 15420
+        },
+        "preferences": {
+          "categories": ["electronics", "books"],
+          "notifications": {
+            "email": true,
+            "sms": false,
+            "push": true
+          }
+        },
+        "address": {
+          "street": "123 Tech Street",
+          "city": "San Francisco",
+          "state": "CA",
+          "zip": "94105",
+          "country": "US"
+        }
+      },
+      {
+        "id": "CUST-002", 
+        "name": "Bob Smith",
+        "email": "bob@example.com",
+        "membership": {
+          "tier": "regular",
+          "since": "2022-01-20",
+          "points": 890
+        },
+        "preferences": {
+          "categories": ["home", "fitness"],
+          "notifications": {
+            "email": true,
+            "sms": true,
+            "push": false
+          }
+        },
+        "address": {
+          "street": "456 Oak Avenue",
+          "city": "Austin",
+          "state": "TX", 
+          "zip": "78701",
+          "country": "US"
+        }
+      }
+    ],
+    "products": [
+      {
+        "id": "PROD-001",
+        "name": "MacBook Pro 14\"",
+        "category": "electronics",
+        "subcategory": "laptops",
+        "brand": "Apple",
+        "price": 1999.00,
+        "cost": 1200.00,
+        "inventory": {
+          "in_stock": 15,
+          "reserved": 3,
+          "available": 12
+        },
+        "ratings": {
+          "average": 4.7,
+          "count": 1250,
+          "distribution": {
+            "5": 892,
+            "4": 245,
+            "3": 78,
+            "2": 25,
+            "1": 10
+          }
+        },
+        "specifications": {
+          "cpu": "M2 Pro",
+          "ram": "16GB",
+          "storage": "512GB SSD",
+          "display": "14.2\" Retina",
+          "weight": "3.5 lbs"
+        }
+      },
+      {
+        "id": "PROD-002",
+        "name": "Wireless Mouse",
+        "category": "electronics",
+        "subcategory": "accessories",
+        "brand": "Logitech",
+        "price": 79.99,
+        "cost": 35.00,
+        "inventory": {
+          "in_stock": 150,
+          "reserved": 5,
+          "available": 145
+        },
+        "ratings": {
+          "average": 4.3,
+          "count": 3420,
+          "distribution": {
+            "5": 1850,
+            "4": 1100,
+            "3": 300,
+            "2": 120,
+            "1": 50
+          }
+        },
+        "specifications": {
+          "connectivity": "Bluetooth 5.0",
+          "battery_life": "24 months",
+          "weight": "0.2 lbs"
+        }
+      }
+    ],
+    "orders": [
+      {
+        "id": "ORD-2024-001",
+        "date": "2024-01-15T10:30:00Z",
+        "customer_id": "CUST-001",
+        "status": "delivered",
+        "priority": "standard",
+        "items": [
+          {
+            "product_id": "PROD-001",
+            "quantity": 1,
+            "unit_price": 1999.00,
+            "discount": 0.05,
+            "final_price": 1899.05
+          },
+          {
+            "product_id": "PROD-002", 
+            "quantity": 2,
+            "unit_price": 79.99,
+            "discount": 0.0,
+            "final_price": 159.98
+          }
+        ],
+        "pricing": {
+          "subtotal": 2239.03,
+          "tax": 179.12,
+          "shipping": 0.00,
+          "total": 2418.15
+        },
+        "shipping": {
+          "method": "express",
+          "carrier": "FedEx",
+          "tracking": "FDX123456789",
+          "address": {
+            "street": "123 Tech Street",
+            "city": "San Francisco",
+            "state": "CA",
+            "zip": "94105",
+            "country": "US"
+          },
+          "dates": {
+            "shipped": "2024-01-16T08:00:00Z",
+            "estimated_delivery": "2024-01-17T17:00:00Z",
+            "actual_delivery": "2024-01-17T14:23:00Z"
+          }
+        },
+        "payment": {
+          "method": "credit_card",
+          "processor": "Stripe",
+          "transaction_id": "TXN_2024_001",
+          "card": {
+            "type": "Visa",
+            "last_four": "4242",
+            "exp_month": 12,
+            "exp_year": 2026
+          }
+        }
+      },
+      {
+        "id": "ORD-2024-002",
+        "date": "2024-01-16T14:45:00Z",
+        "customer_id": "CUST-002",
+        "status": "shipped",
+        "priority": "standard",
+        "items": [
+          {
+            "product_id": "PROD-002",
+            "quantity": 3,
+            "unit_price": 79.99,
+            "discount": 0.10,
+            "final_price": 215.97
+          }
+        ],
+        "pricing": {
+          "subtotal": 215.97,
+          "tax": 17.28,
+          "shipping": 9.99,
+          "total": 243.24
+        },
+        "shipping": {
+          "method": "standard",
+          "carrier": "UPS",
+          "tracking": "UPS987654321",
+          "address": {
+            "street": "456 Oak Avenue",
+            "city": "Austin",
+            "state": "TX",
+            "zip": "78701",
+            "country": "US"
+          },
+          "dates": {
+            "shipped": "2024-01-17T12:00:00Z",
+            "estimated_delivery": "2024-01-22T17:00:00Z",
+            "actual_delivery": null
+          }
+        },
+        "payment": {
+          "method": "paypal",
+          "processor": "PayPal", 
+          "transaction_id": "PAY_2024_002",
+          "paypal_account": "bob@example.com"
+        }
+      }
+    ],
+    "analytics": {
+      "metrics": {
+        "total_orders": 2,
+        "total_revenue": 2661.39,
+        "average_order_value": 1330.70,
+        "total_items_sold": 6
+      },
+      "customer_analysis": {
+        "new_customers": 0,
+        "returning_customers": 2,
+        "customer_retention_rate": 1.0
+      },
+      "product_performance": {
+        "best_selling": "PROD-002",
+        "highest_revenue": "PROD-001",
+        "categories": {
+          "electronics": {
+            "orders": 2,
+            "revenue": 2661.39,
+            "items_sold": 6
+          }
+        }
+      },
+      "geographic_distribution": {
+        "US": {
+          "CA": 1,
+          "TX": 1
+        }
+      }
+    }
+  }
+}

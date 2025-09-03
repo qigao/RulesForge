@@ -1,56 +1,30 @@
-#include "ast_builder.hpp"
-#include "ast_transformer.hpp"
-#include "drools_grammar.hpp"
-#include "drools_parser.hpp"
-#include "drools_parser_state.hpp"
-#include "errors.hpp"
 #include "knowledge_base.hpp"
-#include "semantic_analyzer.hpp"
 
 #include <chrono>
-#include <fstream>
 #include <iostream>
 #include <magic_enum/magic_enum.hpp>
-#include <memory>
 #include <string>
-#include <tao/pegtl.hpp>
-#include <tao/pegtl/contrib/parse_tree.hpp>
-#include <tao/pegtl/file_input.hpp>
 #include <vector>
 
-namespace FileUtils {
-    std::string read_file_content(std::string const& path) {
-        std::ifstream file_stream(path);
-        if (!file_stream) { throw std::runtime_error("Could not open file: " + path); }
-        std::stringstream buffer;
-        buffer << file_stream.rdbuf();
-        return buffer.str();
-    }
-}   // namespace FileUtils
-
 namespace DebugUtils {
-    void print_constraint_node(ConstraintNode const* node, int level);
-
     std::string indent(int level) { return std::string(level * 2, ' '); }
-
-    void print_parsed_constraint(ParsedConstraint const& c, int level) {
-        std::cout << indent(level) << "LEAF: ";
-        if (c.field_binding) { std::cout << *c.field_binding << " : "; }
-        std::cout << c.left_field << " " << c.op << " ";
-        if (c.right_literal) {
-            std::cout << ::to_string(*c.right_literal);
-        } else if (c.right_bound_field) {
-            std::cout << c.right_bound_field->first << "." << c.right_bound_field->second;
-        }
-        std::cout << std::endl;
-    }
 
     void print_constraint_node(ConstraintNode const* node, int level) {
         if (!node) return;
         switch (node->type) {
-            case NodeType::LEAF:
-                print_parsed_constraint(node->constraint, level);
+            case NodeType::LEAF: {
+                auto const& c = node->constraint;
+                std::cout << indent(level) << "LEAF: ";
+                if (c.field_binding) std::cout << *c.field_binding << " : ";
+                std::cout << c.left_field << " " << c.op << " ";
+                if (c.right_literal) {
+                    std::cout << ::to_string(*c.right_literal);
+                } else if (c.right_bound_field) {
+                    std::cout << c.right_bound_field->first << "." << c.right_bound_field->second;
+                }
+                std::cout << std::endl;
                 break;
+            }
             case NodeType::AND:
                 std::cout << indent(level) << "AND" << std::endl;
                 for (auto const& child : node->children) print_constraint_node(child.get(), level + 1);
@@ -69,7 +43,7 @@ namespace DebugUtils {
         std::cout << "--- WHEN ---\n";
 
         for (size_t i = 0; i < rule.condition_groups.size(); ++i) {
-            if (i > 0) { std::cout << indent(1) << "--- OR ---\n"; }
+            if (i > 0) std::cout << indent(1) << "--- OR ---\n";
             for (auto const& pattern : rule.condition_groups[i]) {
                 std::cout << indent(1) << "PATTERN: " << std::string(magic_enum::enum_name(pattern.type));
                 if (!pattern.fact_type.empty()) {
@@ -85,7 +59,7 @@ namespace DebugUtils {
         std::cout << indent(1) << rule.rhs_code << "\n";
         std::cout << "=================================================\n\n";
     }
-}   // namespace DebugUtils
+}
 
 struct ProgramOptions {
     std::string filepath;
@@ -98,60 +72,52 @@ public:
 
     int run() {
         std::cout << "--- Analyzing DRL file: " << m_options.filepath << " ---\n\n";
-        auto start_time = std::chrono::high_resolution_clock::now();
+        auto start = std::chrono::high_resolution_clock::now();
 
-        // The entire compilation process is now encapsulated here.
         ParsingResult result;
-        std::shared_ptr<KnowledgeBase> kb = build_knowledge_base(result, m_options.filepath);
+        auto kb = build_knowledge_base(result, m_options.filepath);
 
-        // Check the result of the compilation.
-        if (!result.success) {
-            print_results(result.errors, start_time);
-            return 1;   // Failure
-        }
-
-        // If successful, print the success message.
-        print_results(result.errors, start_time);
-
-        // Optionally dump the AST from the successfully created KnowledgeBase.
-        if (m_options.dump_ast && kb) {
+        print_results(result, start);
+        
+        if (result.success && m_options.dump_ast && kb) {
             std::cout << "\n--- Abstract Syntax Trees (AST) ---\n";
-            // The AST now lives inside the KnowledgeBase's parser_state.
-            for (auto const& rule : kb->get_parser_state().parsed_rules) { DebugUtils::print_rule_ast(rule); }
+            for (auto const& rule : kb->get_parser_state().parsed_rules) { 
+                DebugUtils::print_rule_ast(rule); 
+            }
         }
+        
+        return result.success ? 0 : 1;
     }
 
 private:
     ProgramOptions m_options;
 
     void parse_arguments(int argc, char* argv[]) {
-        std::vector<std::string> args(argv + 1, argv + argc);
-        for (auto const& arg : args) {
+        for (int i = 1; i < argc; ++i) {
+            std::string arg = argv[i];
             if (arg == "--dump-ast") {
                 m_options.dump_ast = true;
-            } else if (arg.rfind("--", 0) != 0) {
+            } else if (arg[0] != '-') {
                 m_options.filepath = arg;
             }
         }
-
         if (m_options.filepath.empty()) {
             throw std::runtime_error("Usage: " + std::string(argv[0]) + " <rules_file.drl> [--dump-ast]");
         }
     }
 
-    void print_results(std::vector<StructuredError> const& errors,
-                       std::chrono::high_resolution_clock::time_point start_time) {
-        auto end_time = std::chrono::high_resolution_clock::now();
-        double duration_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+    void print_results(ParsingResult const& result, std::chrono::high_resolution_clock::time_point start) {
+        auto duration = std::chrono::duration<double, std::milli>(
+            std::chrono::high_resolution_clock::now() - start).count();
 
         std::cout << "\n----------------------------------------\n";
-        if (errors.empty()) {
+        if (result.errors.empty()) {
             std::cout << "Analysis finished successfully.\n";
         } else {
-            std::cout << "Analysis finished with " << errors.size() << " error(s):\n";
-            for (auto const& err : errors) { std::cout << "- " << err.to_string() << "\n"; }
+            std::cout << "Analysis finished with " << result.errors.size() << " error(s):\n";
+            for (auto const& err : result.errors) std::cout << "- " << err.to_string() << "\n";
         }
-        std::cout << "Total time: " << duration_ms << " ms\n";
+        std::cout << "Total time: " << duration << " ms\n";
         std::cout << "----------------------------------------\n";
     }
 };

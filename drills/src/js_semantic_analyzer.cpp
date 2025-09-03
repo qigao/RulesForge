@@ -188,7 +188,7 @@ bool JSSemanticAnalyzer::validate_variable_bindings(const std::vector<JSVariable
     
     for (const auto& var : variables) {
         // Skip known non-variables
-        if (var.name == "drools" || var.name == "console" || var.name == "type") {
+        if (var.name == "drools" || var.name == "console" || var.name == "type" || var.name == "JSON") {
             continue;
         }
         

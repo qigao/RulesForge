@@ -14,7 +14,9 @@ The language is composed of several top-level statements:
 - `query`: To define reusable, parameterized lookups into the engine's working memory.
 - `rule`: The core construct for defining conditional logic.
 
-The consequence of a rule (the `then` block) is written in **Lua**, providing a flexible and powerful scripting environment. A custom `drools` API is injected into the Lua context to allow the rule to interact with the engine (e.g., by inserting or retracting facts).
+The consequence of a rule (the `then` block) is written in **JavaScript** (via QuickJS), providing a flexible and powerful scripting environment. A custom `drools` API is injected into the JavaScript context to allow the rule to interact with the engine (e.g., by inserting or retracting facts).
+
+**New Feature**: JMESPath JSON query support is available in JavaScript contexts via the `jmespath()` function, enabling powerful JSON data processing within rules.
 
 ## Language Constructs
 

@@ -7,8 +7,13 @@
 
 #include <algorithm>
 #include <iostream>
+#include <sstream>
+#include <limits>
 #include <magic_enum/magic_enum.hpp>
 #include <vector>
+#include <glaze/glaze.hpp>
+#include <jsoncons/json.hpp>
+#include <jsoncons_ext/jmespath/jmespath.hpp>
 
 struct ParsedFunction;
 
@@ -81,10 +86,33 @@ JSScriptingManager::JSScriptingManager(INetworkCallback& callback_provider) : ca
     // Register this manager and get a handle
     handle_id_ = JSHandleManager::instance().register_manager(this);
     
-    // Set up console.log functionality
+    // Set up console.log functionality properly
     JSValue global = JS_GetGlobalObject(context_);
     JSValue console = JS_NewObject(context_);
+    
+    // Create console.log function
+    JSValue log_func = JS_NewCFunction(context_, [](JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) -> JSValue {
+        std::string output;
+        for (int i = 0; i < argc; i++) {
+            if (i > 0) output += " ";
+            const char* str = JS_ToCString(ctx, argv[i]);
+            if (str) {
+                output += str;
+                JS_FreeCString(ctx, str);
+            } else {
+                output += "[undefined]";
+            }
+        }
+        std::cout << output << std::endl;
+        return JS_UNDEFINED;
+    }, "log", 1);
+    
+    JS_SetPropertyStr(context_, console, "log", log_func);
     JS_SetPropertyStr(context_, global, "console", console);
+    
+    // Now bind jmespath functions
+    bind_jmespath_functions();
+    
     JS_FreeValue(context_, global);
 }
 
@@ -166,6 +194,15 @@ JSValue JSScriptingManager::populate_js_object_from_fact(Fact const& fact) {
 void JSScriptingManager::bind_variables(Token const& token, map<std::string, int> const& bindings) {
     LOG_WARN("bind_variables: Processing {} bindings for token with WME depth {}", bindings.size(), 
               token.wme ? token.wme->depth : -1);
+    
+    // Check if jmespath function exists before binding variables
+    JSValue test_global_before = JS_GetGlobalObject(context_);
+    JSValue test_func_before = JS_GetPropertyStr(context_, test_global_before, "jmespath");
+    bool is_function_before = JS_IsFunction(context_, test_func_before);
+    LOG_WARN("jmespath function status BEFORE variable binding: {}", is_function_before ? "FUNCTION" : "NOT FUNCTION");
+    JS_FreeValue(context_, test_func_before);
+    JS_FreeValue(context_, test_global_before);
+    
     for (auto const& [binding, depth] : bindings) {
         LOG_WARN("  -> Binding '{}' at depth {}", binding, depth);
         if (binding.empty() || binding[0] != '$') continue;
@@ -174,11 +211,26 @@ void JSScriptingManager::bind_variables(Token const& token, map<std::string, int
         if (fact_in_token) {
             auto current_fact_opt = callback_provider_.get_fact_by_id(fact_in_token->id);
             if (current_fact_opt) {
+                // Bind the regular fact object
                 JSValue fact_obj = populate_js_object_from_fact(**current_fact_opt);
                 JSValue global = JS_GetGlobalObject(context_);
                 JS_SetPropertyStr(context_, global, js_var_name.c_str(), fact_obj);
+                
+                // Also bind JSON representation for jmespath queries
+                // Variable name pattern: $fact -> fact_json
+                std::string json_var_name = js_var_name + "_json";
+                std::string fact_json = fact_to_json(**current_fact_opt);
+                JSValue json_str = JS_NewString(context_, fact_json.c_str());
+                JS_SetPropertyStr(context_, global, json_var_name.c_str(), json_str);
+                
+                // Special case: if variable is $JSON, bind it directly for convenience
+                if (js_var_name == "JSON") {
+                    JS_SetPropertyStr(context_, global, "JSON_data", json_str);
+                }
+                
                 JS_FreeValue(context_, global);
-                LOG_WARN("JavaScript: Bound variable '{}' to fact ID {}", js_var_name, (*current_fact_opt)->id);
+                LOG_WARN("JavaScript: Bound variable '{}' to fact ID {} (JSON: {})", 
+                        js_var_name, (*current_fact_opt)->id, json_var_name);
             } else {
                 LOG_WARN("JavaScript: Fact at depth {} found in token but missing from working memory", depth);
             }
@@ -186,16 +238,48 @@ void JSScriptingManager::bind_variables(Token const& token, map<std::string, int
             LOG_WARN("JavaScript: No fact found at depth {} for binding '{}'", depth, binding);
         }
     }
+    
+    // Check if jmespath function exists after binding variables
+    JSValue test_global_after = JS_GetGlobalObject(context_);
+    JSValue test_func_after = JS_GetPropertyStr(context_, test_global_after, "jmespath");
+    bool is_function_after = JS_IsFunction(context_, test_func_after);
+    LOG_WARN("jmespath function status AFTER variable binding: {}", is_function_after ? "FUNCTION" : "NOT FUNCTION");
+    JS_FreeValue(context_, test_func_after);
+    JS_FreeValue(context_, test_global_after);
 }
 
 void JSScriptingManager::create_drools_api(Token& current_token) {
+    // Check jmespath function status at the start of create_drools_api
+    JSValue test_global_start = JS_GetGlobalObject(context_);
+    JSValue test_func_start = JS_GetPropertyStr(context_, test_global_start, "jmespath");
+    bool is_function_start = JS_IsFunction(context_, test_func_start);
+    LOG_WARN("jmespath function status at START of create_drools_api: {}", is_function_start ? "FUNCTION" : "NOT FUNCTION");
+    JS_FreeValue(context_, test_func_start);
+    JS_FreeValue(context_, test_global_start);
+    
     JSValue global = JS_GetGlobalObject(context_);
     
     // Store the handle ID instead of raw pointer
     JS_SetPropertyStr(context_, global, "__drools_handle_id", JS_NewInt32(context_, static_cast<int32_t>(handle_id_)));
     
+    // Check jmespath function status after setting handle ID
+    JSValue test_global_handle = JS_GetGlobalObject(context_);
+    JSValue test_func_handle = JS_GetPropertyStr(context_, test_global_handle, "jmespath");
+    bool is_function_handle = JS_IsFunction(context_, test_func_handle);
+    LOG_WARN("jmespath function status after setting __drools_handle_id: {}", is_function_handle ? "FUNCTION" : "NOT FUNCTION");
+    JS_FreeValue(context_, test_func_handle);
+    JS_FreeValue(context_, test_global_handle);
+    
     // Store the current token pointer for use in insertLogical
     JS_SetPropertyStr(context_, global, "__current_token", JS_NewBigUint64(context_, reinterpret_cast<uint64_t>(&current_token)));
+    
+    // Check jmespath function status after setting token
+    JSValue test_global_token = JS_GetGlobalObject(context_);
+    JSValue test_func_token = JS_GetPropertyStr(context_, test_global_token, "jmespath");
+    bool is_function_token = JS_IsFunction(context_, test_func_token);
+    LOG_WARN("jmespath function status after setting __current_token: {}", is_function_token ? "FUNCTION" : "NOT FUNCTION");
+    JS_FreeValue(context_, test_func_token);
+    JS_FreeValue(context_, test_global_token);
     
     // Create C++ callback function for drools.insert with exception boundary
     JSValue insert_func = JS_NewCFunction(context_, [](JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) -> JSValue {
@@ -347,6 +431,16 @@ void JSScriptingManager::create_drools_api(Token& current_token) {
     JS_SetPropertyStr(context_, drools, "retract", retract_func);
     JS_SetPropertyStr(context_, global, "drools", drools);
     
+    // Note: jmespath functions are already bound during initialization
+    
+    // Check jmespath function status at the END of create_drools_api
+    JSValue test_global_end = JS_GetGlobalObject(context_);
+    JSValue test_func_end = JS_GetPropertyStr(context_, test_global_end, "jmespath");
+    bool is_function_end = JS_IsFunction(context_, test_func_end);
+    LOG_WARN("jmespath function status at END of create_drools_api: {}", is_function_end ? "FUNCTION" : "NOT FUNCTION");
+    JS_FreeValue(context_, test_func_end);
+    JS_FreeValue(context_, test_global_end);
+    
     JS_FreeValue(context_, global);
 }
 
@@ -390,10 +484,24 @@ void JSScriptingManager::execute_rhs(std::string const& rhs_code, std::string co
     LOG_WARN("Executing RHS for rule '{}' with {} bindings", rule_name, bindings.size());
     LOG_WARN("RHS code:\n{}", rhs_code);
     try {
+        LOG_DEBUG("Step 1: Binding variables");
         bind_variables(token, bindings);
+        
+        LOG_DEBUG("Step 2: Creating drools API");
         create_drools_api(token);
         
+        // Final check right before JavaScript execution
+        JSValue test_global_final = JS_GetGlobalObject(context_);
+        JSValue test_func_final = JS_GetPropertyStr(context_, test_global_final, "jmespath");
+        bool is_function_final = JS_IsFunction(context_, test_func_final);
+        LOG_WARN("jmespath function status RIGHT BEFORE JS execution: {}", is_function_final ? "FUNCTION" : "NOT FUNCTION");
+        JS_FreeValue(context_, test_func_final);
+        JS_FreeValue(context_, test_global_final);
+        
+        LOG_DEBUG("Step 3: About to execute JavaScript code");
         JSValue result = JS_Eval(context_, rhs_code.c_str(), rhs_code.length(), rule_name.c_str(), JS_EVAL_TYPE_GLOBAL);
+        
+        LOG_DEBUG("Step 4: JavaScript execution completed");
         if (JS_IsException(result)) {
             JSValue exception = JS_GetException(context_);
             std::string error_msg = get_js_string(exception);
@@ -402,6 +510,7 @@ void JSScriptingManager::execute_rhs(std::string const& rhs_code, std::string co
             throw ReteExecutionException(error_msg, rule_name);
         }
         JS_FreeValue(context_, result);
+        LOG_DEBUG("Step 5: RHS execution completed successfully");
 
     } catch (ReteExecutionException const&) {
         // Re-throw specific exceptions
@@ -487,4 +596,188 @@ int64_t JSScriptingManager::get_js_int(JSValue val) {
 
 bool JSScriptingManager::get_js_bool(JSValue val) {
     return JS_ToBool(context_, val) != 0;
+}
+
+
+
+// JMESPath implementation using jsoncons
+static JSValue jmespath_native_func(JSContext* ctx, JSValueConst this_val, 
+                                   int argc, JSValueConst* argv) {
+    LOG_DEBUG("jmespath_native_func called with {} arguments", argc);
+    
+    if (argc < 2) {
+        LOG_ERROR("jmespath requires 2 arguments, got {}", argc);
+        return JS_NULL;
+    }
+    
+    const char* json_str_c = nullptr;
+    const char* jmespath_expr_c = nullptr;
+    
+    try {
+        // Get JSON string and jmespath expression from JavaScript
+        json_str_c = JS_ToCString(ctx, argv[0]);
+        jmespath_expr_c = JS_ToCString(ctx, argv[1]);
+        
+        if (!json_str_c || !jmespath_expr_c) {
+            if (json_str_c) JS_FreeCString(ctx, json_str_c);
+            if (jmespath_expr_c) JS_FreeCString(ctx, jmespath_expr_c);
+            LOG_ERROR("jmespath arguments are null");
+            return JS_NULL;
+        }
+        
+        std::string json_str(json_str_c);
+        std::string jmespath_expr(jmespath_expr_c);
+
+        LOG_DEBUG("Executing jmespath query '{}' on JSON: {}", jmespath_expr, json_str);
+        
+        // Parse JSON using jsoncons
+        jsoncons::json data = jsoncons::json::parse(json_str);
+        
+        // Perform JMESPath query using jsoncons
+        jsoncons::json result = jsoncons::jmespath::search(data, jmespath_expr);
+        
+        // Convert result back to JSON string
+        std::string result_json = result.to_string();
+        
+        // Parse the result JSON string into JavaScript value with error checking
+        JSValue js_result = JS_ParseJSON(ctx, result_json.c_str(), 
+                                       result_json.length(), nullptr);
+        
+        // Clean up C strings
+        JS_FreeCString(ctx, json_str_c);
+        JS_FreeCString(ctx, jmespath_expr_c);
+        
+        if (JS_IsException(js_result)) {
+            LOG_ERROR("Failed to parse jmespath result as JSON: {}", result_json);
+            return JS_NULL;
+        }
+        
+        LOG_DEBUG("JMESPath query successful, result: {}", result_json);
+        return js_result;
+        
+    } catch (const jsoncons::jmespath::jmespath_error& e) {
+        if (json_str_c) JS_FreeCString(ctx, json_str_c);
+        if (jmespath_expr_c) JS_FreeCString(ctx, jmespath_expr_c);
+        LOG_ERROR("JMESPath error: {}", e.what());
+        return JS_NULL;
+    } catch (const jsoncons::json_exception& e) {
+        if (json_str_c) JS_FreeCString(ctx, json_str_c);
+        if (jmespath_expr_c) JS_FreeCString(ctx, jmespath_expr_c);
+        LOG_ERROR("JSON parsing error: {}", e.what());
+        return JS_NULL;
+    } catch (const std::exception& e) {
+        // Ensure cleanup on exception
+        if (json_str_c) JS_FreeCString(ctx, json_str_c);
+        if (jmespath_expr_c) JS_FreeCString(ctx, jmespath_expr_c);
+        LOG_ERROR("jmespath exception: {}", e.what());
+        return JS_NULL;
+    } catch (...) {
+        // Handle any other exceptions
+        if (json_str_c) JS_FreeCString(ctx, json_str_c);
+        if (jmespath_expr_c) JS_FreeCString(ctx, jmespath_expr_c);
+        LOG_ERROR("Unknown jmespath exception");
+        return JS_NULL;
+    }
+}
+
+void JSScriptingManager::bind_jmespath_functions() {
+    LOG_DEBUG("JSScriptingManager::bind_jmespath_functions starting");
+    
+    // Register the static function
+    JSValue global = JS_GetGlobalObject(context_);
+    if (JS_IsException(global)) {
+        LOG_ERROR("Failed to get global object");
+        return;
+    }
+    
+    // First try with a different name to test if there's a naming conflict
+    JSValue jmespath_func = JS_NewCFunction(context_, jmespath_native_func, "jmespath_query", 2);
+    if (JS_IsException(jmespath_func)) {
+        LOG_ERROR("Failed to create jmespath function");
+        JS_FreeValue(context_, global);
+        return;
+    }
+    
+    int result = JS_SetPropertyStr(context_, global, "jmespath", jmespath_func);
+    if (result < 0) {
+        LOG_ERROR("Failed to set jmespath property, result: {}", result);
+        JS_FreeValue(context_, jmespath_func);
+    } else {
+        LOG_DEBUG("Successfully set jmespath property");
+    }
+    
+    JS_FreeValue(context_, global);
+    
+    // Verify the function was set correctly
+    JSValue test_global = JS_GetGlobalObject(context_);
+    JSValue test_func = JS_GetPropertyStr(context_, test_global, "jmespath");
+    bool is_function = JS_IsFunction(context_, test_func);
+    
+    // Add extra debugging
+    if (is_function) {
+        LOG_INFO("JMESPath function verification: PASS");
+    } else {
+        LOG_ERROR("JMESPath function verification: FAIL - not a function");
+        
+        // Check what type it actually is
+        if (JS_IsUndefined(test_func)) {
+            LOG_ERROR("jmespath property is undefined");
+        } else if (JS_IsNull(test_func)) {
+            LOG_ERROR("jmespath property is null");
+        } else {
+            LOG_ERROR("jmespath property exists but is not a function");
+        }
+    }
+    
+    LOG_INFO("JMESPath functions bound successfully, is_function: {}", is_function);
+    
+    JS_FreeValue(context_, test_func);
+    JS_FreeValue(context_, test_global);
+}
+
+std::string JSScriptingManager::fact_to_json(Fact const& fact) {
+    try {
+        // Build JSON structure using glaze json_t
+        glz::json_t json_obj;
+        
+        // Set the type field
+        json_obj["type"] = fact.type;
+        
+        // Convert all fact fields to JSON
+        for (auto const& [key, val] : fact.fields) {
+            std::visit([&json_obj, &key](auto&& value) {
+                using T = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<T, std::string>) {
+                    json_obj[key] = value;
+                } else if constexpr (std::is_same_v<T, int64_t>) {
+                    json_obj[key] = value;
+                } else if constexpr (std::is_same_v<T, double>) {
+                    json_obj[key] = value;
+                } else if constexpr (std::is_same_v<T, bool>) {
+                    json_obj[key] = value;
+                } else {
+                    // For other types, convert to string representation
+                    json_obj[key] = std::string("unsupported_type");
+                }
+            }, val);
+        }
+        
+        // Include fact ID if available
+        if (fact.id != -1) {
+            json_obj["id"] = fact.id;
+        }
+        
+        // Serialize to JSON string using glaze
+        auto json_result = glz::write_json(json_obj);
+        if (!json_result) {
+            LOG_ERROR("Failed to serialize Fact to JSON");
+            return "{}";
+        }
+        
+        return json_result.value();
+        
+    } catch (const std::exception& e) {
+        LOG_ERROR("Exception during Fact to JSON conversion: {}", e.what());
+        return "{}";
+    }
 }

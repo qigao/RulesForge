@@ -50,6 +50,7 @@ public:
 private:
     void create_drools_api(Token& current_token);
     void bind_globals();
+    void bind_jmespath_functions();
     JSValue populate_js_object_from_fact(Fact const& fact);
     void bind_variables(Token const& token, map<std::string, int> const& bindings);
 
@@ -65,6 +66,9 @@ private:
     double get_js_number(JSValue val);
     int64_t get_js_int(JSValue val);
     bool get_js_bool(JSValue val);
+
+    // JSON conversion utilities
+    std::string fact_to_json(Fact const& fact);
 
     // Helper for fact creation from JS object
     std::shared_ptr<Fact> fact_from_js_object(JSValue fact_obj);

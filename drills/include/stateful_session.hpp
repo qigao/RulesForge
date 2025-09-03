@@ -10,6 +10,7 @@
 #include "knowledge_base.hpp"
 #include "phmap.h"
 #include "query_result.hpp"
+#include "rule_execution_tracer.hpp"
 
 // Forward declarations
 class JSScriptingManager;
@@ -45,8 +46,10 @@ public:
 
   // --- User-facing Runtime API ---
   void add_fact(std::shared_ptr<Fact> fact) override;
+  void add_facts(std::vector<std::shared_ptr<Fact>> const& facts);
   int fire_all_rules();
   void retract_fact(std::shared_ptr<Fact> fact) override;
+  void retract_facts(std::vector<std::shared_ptr<Fact>> const& facts);
   void update_fact(std::shared_ptr<Fact> fact,
                    std::function<void(Fact&)> modifier) override;
 
@@ -67,6 +70,16 @@ public:
   int64_t get_next_fact_id();
   JSContext* get_js_context();
 
+  // Rule execution tracing
+  RuleExecutionTracer& get_tracer() { return tracer_; }
+  void enable_tracing(bool enabled = true) { tracer_.enable_tracing(enabled); }
+  std::string get_execution_trace(bool include_network = false) const { 
+      return tracer_.format_trace(include_network); 
+  }
+  std::string get_rule_performance_summary() const { 
+      return tracer_.format_rule_summary(); 
+  }
+
   std::shared_ptr<KnowledgeBase const> get_knowledge_base() const
   {
     return kb_;
@@ -82,6 +95,7 @@ public:
 
   // --- Internal & INetworkCallback API ---
   void _internal_add_fact(std::shared_ptr<Fact> fact);
+  void _internal_add_facts_batch(std::vector<std::shared_ptr<Fact>> const& facts);
   void _internal_remove_fact(int64_t fact_id);
   std::optional<std::shared_ptr<Fact>> get_fact_by_id(int64_t id) override;
   void logical_insert(Token& token, std::shared_ptr<Fact> fact) override;
@@ -148,6 +162,7 @@ private:
   // --- Mutable State ---
   std::unique_ptr<JSScriptingManager> scripting_manager_;
   std::unique_ptr<TruthMaintenanceSystem> tms_;
+  RuleExecutionTracer tracer_;
 
   // Rete network instance state
   mutable int64_t next_fact_id_ = 1;

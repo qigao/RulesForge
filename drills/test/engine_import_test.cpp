@@ -7,7 +7,6 @@
 #include <fstream>
 #include <iostream>
 
-// A test fixture to handle creation and cleanup of temporary DRL files.
 struct ImportTestFixture {
     std::string const test_dir = "import_test_files";
 
