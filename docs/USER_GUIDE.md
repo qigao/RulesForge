@@ -829,10 +829,7 @@ session->add_facts(orders);
 
 Ready for advanced topics?
 
--   **[Developer Guide](DEVELOPER_GUIDE.md)** - Extending the engine, custom functions
--   **[API Reference](API_REFERENCE.md)** - Complete C++ API documentation  
 -   **[Deployment Guide](DEPLOYMENT.md)** - Production deployment, monitoring
--   **[Architecture Guide](ARCHITECTURE.md)** - Understanding the Rete implementation
 
 --- 
 

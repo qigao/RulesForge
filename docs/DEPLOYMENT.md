@@ -98,5 +98,3 @@ Effective logging and monitoring are essential for debugging, performance tuning
 ## Next Steps
 
 *   **[User Guide](USER_GUIDE.md)** - Get started with Drills and understand core concepts.
-*   **[Developer Guide](DEVELOPER_GUIDE.md)** - Extend Drills with custom functionalities.
-*   **[API Reference](API_REFERENCE.md)** - Detailed C++ API documentation.

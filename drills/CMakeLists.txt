@@ -29,8 +29,17 @@ target_link_libraries(
 target_include_directories(
     ${TARGET_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_compile_options(${TARGET_NAME} PUBLIC /bigobj )
+if(MSVC)
+    target_compile_options(${TARGET_NAME} PUBLIC /bigobj )
+endif()
 target_compile_definitions(${TARGET_NAME} PUBLIC  HAS_MIMALLOC)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    # Add WASM-specific compile definitions or link libraries here
+    # For example, if you need to enable pthreads for mimalloc or quickjs-ng
+    # target_compile_definitions(${TARGET_NAME} PUBLIC -s USE_PTHREADS=1)
+    # target_link_libraries(${TARGET_NAME} PUBLIC pthread)
+endif()
 
 set_target_properties(${TARGET_NAME} PROPERTIES FOLDER "${TARGET_NAME}")
 set_target_properties(${TARGET_NAME} PROPERTIES LINKER_LANGUAGE CXX)
