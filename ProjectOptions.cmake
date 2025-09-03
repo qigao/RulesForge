@@ -35,7 +35,7 @@ message(STATUS "SSL backend used: ${SSL_BACKEND_USED}")
 option(ENABLE_ZLIB "Use zlib" ON)
 
 option(ENABLE_GIT_INFO "List git status" OFF)
-option(ENABLE_CROSS_COMPILING "Detect cross compiler and setup toolchain" OFF)
+option(ENABLE_CROSS_COMPILING "Detect cross compiler and setup toolchain" ON)
 option(ENABLE_SAMPLES "Enable sample projects" ON)
 option(BUILD_SHARED_LIBS "Build shared instead of static libraries." ON)
 

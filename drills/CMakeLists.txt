@@ -29,7 +29,9 @@ target_link_libraries(
 target_include_directories(
     ${TARGET_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_compile_options(${TARGET_NAME} PUBLIC /bigobj )
+if(MSVC)
+    target_compile_options(${TARGET_NAME} PUBLIC /bigobj )
+endif()
 target_compile_definitions(${TARGET_NAME} PUBLIC  HAS_MIMALLOC)
 
 set_target_properties(${TARGET_NAME} PROPERTIES FOLDER "${TARGET_NAME}")
