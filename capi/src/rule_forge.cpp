@@ -1,5 +1,5 @@
 // Include the header file to get type definitions
-#include "drills_capi.h"
+#include "rule_forge.h"
 
 // Include C string handling
 #include <cstring>
@@ -21,17 +21,17 @@ extern "C" {
 // Basic error handling
 static char last_error[1024] = "";
 
-drills_status_t drills_init() {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_init() {
     last_error[0] = '\0';
     return DRILLS_OK;
 }
 
-drills_status_t drills_cleanup() {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_cleanup() {
     last_error[0] = '\0';
     return DRILLS_OK;
 }
 
-const char* drills_get_last_error_message() {
+DRILLS_CAPI_API const char* DRILLS_CAPI_CALL ruleforge_get_last_error_message() {
     return last_error;
 }
 
@@ -41,7 +41,7 @@ struct KnowledgeBaseWrapper {
     std::shared_ptr<KnowledgeBase> kb;
 };
 
-drills_status_t drills_kb_create(drills_knowledge_base_t* out_kb) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_kb_create(ruleforge_knowledge_base_t* out_kb) {
     if (!out_kb) {
         strcpy(last_error, "Output Knowledge Base pointer is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -51,7 +51,7 @@ drills_status_t drills_kb_create(drills_knowledge_base_t* out_kb) {
         parser_state empty_state;
         auto kb_wrapper = new KnowledgeBaseWrapper();
         kb_wrapper->kb = KnowledgeBase::create(empty_state);
-        *out_kb = static_cast<drills_knowledge_base_t>(kb_wrapper);
+        *out_kb = static_cast<ruleforge_knowledge_base_t>(kb_wrapper);
         last_error[0] = '\0';
         return DRILLS_OK;
     }
@@ -61,7 +61,7 @@ drills_status_t drills_kb_create(drills_knowledge_base_t* out_kb) {
     }
 }
 
-drills_status_t drills_kb_load_drl(drills_knowledge_base_t kb, const char* drl_source) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const char* drl_source) {
     if (!kb) {
         strcpy(last_error, "Knowledge Base handle is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -95,7 +95,7 @@ drills_status_t drills_kb_load_drl(drills_knowledge_base_t kb, const char* drl_s
     }
 }
 
-drills_status_t drills_kb_load_decision_table_csv(drills_knowledge_base_t kb, const char* csv_source) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base_t kb, const char* csv_source) {
     if (!kb) {
         strcpy(last_error, "Knowledge Base handle is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -130,7 +130,7 @@ drills_status_t drills_kb_load_decision_table_csv(drills_knowledge_base_t kb, co
     }
 }
 
-drills_status_t drills_kb_destroy(drills_knowledge_base_t kb) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_kb_destroy(ruleforge_knowledge_base_t kb) {
     if (!kb) {
         strcpy(last_error, "Knowledge Base handle is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -152,7 +152,7 @@ struct StatefulSessionWrapper {
     std::unique_ptr<StatefulSession> session;
 };
 
-drills_status_t drills_session_create(drills_knowledge_base_t kb, drills_stateful_session_t* out_session) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_session_create(ruleforge_knowledge_base_t kb, ruleforge_stateful_session_t* out_session) {
     if (!kb) {
         strcpy(last_error, "Knowledge Base handle is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -165,7 +165,7 @@ drills_status_t drills_session_create(drills_knowledge_base_t kb, drills_statefu
         auto kb_wrapper = static_cast<KnowledgeBaseWrapper*>(kb);
         auto session_wrapper = new StatefulSessionWrapper();
         session_wrapper->session = kb_wrapper->kb->create_session();
-        *out_session = static_cast<drills_stateful_session_t>(session_wrapper);
+        *out_session = static_cast<ruleforge_stateful_session_t>(session_wrapper);
         last_error[0] = '\0';
         return DRILLS_OK;
     }
@@ -180,7 +180,7 @@ struct QueryResultWrapper {
     std::unique_ptr<QueryResult> query_result;
 };
 
-drills_status_t drills_session_add_fact_json(drills_stateful_session_t session, const char* fact_type, const char* fact_json) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_session_add_fact_json(ruleforge_stateful_session_t session, const char* fact_type, const char* fact_json) {
     if (!session || !fact_type || !fact_json) {
         strcpy(last_error, "Session handle, fact type, or fact JSON is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -222,7 +222,7 @@ drills_status_t drills_session_add_fact_json(drills_stateful_session_t session, 
     }
 }
 
-drills_status_t drills_session_fire_all_rules(drills_stateful_session_t session) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_session_fire_all_rules(ruleforge_stateful_session_t session) {
     if (!session) {
         strcpy(last_error, "Session handle is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -239,7 +239,7 @@ drills_status_t drills_session_fire_all_rules(drills_stateful_session_t session)
     }
 }
 
-drills_status_t drills_session_query(drills_stateful_session_t session, const char* query_name, drills_query_result_t* out_query_result) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_session_query(ruleforge_stateful_session_t session, const char* query_name, ruleforge_query_result_t* out_query_result) {
     if (!session) {
         strcpy(last_error, "Session handle is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -262,7 +262,7 @@ drills_status_t drills_session_query(drills_stateful_session_t session, const ch
         auto result_wrapper = new QueryResultWrapper();
         result_wrapper->query_result = std::make_unique<QueryResult>(query_result);
 
-        *out_query_result = static_cast<drills_query_result_t>(result_wrapper);
+        *out_query_result = static_cast<ruleforge_query_result_t>(result_wrapper);
         last_error[0] = '\0';
         return DRILLS_OK;
     }
@@ -272,10 +272,7 @@ drills_status_t drills_session_query(drills_stateful_session_t session, const ch
     }
 }
 
-// Fact field access functions need proper implementation
-// For now, stub implementation for basic functionality
-
-drills_status_t drills_session_destroy(drills_stateful_session_t session) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_session_destroy(ruleforge_stateful_session_t session) {
     if (!session) {
         strcpy(last_error, "Session handle is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -293,7 +290,7 @@ drills_status_t drills_session_destroy(drills_stateful_session_t session) {
 }
 
 // Query result functions
-int drills_query_result_get_size(drills_query_result_t query_result) {
+DRILLS_CAPI_API int DRILLS_CAPI_CALL ruleforge_query_result_get_size(ruleforge_query_result_t query_result) {
     if (!query_result) {
         strcpy(last_error, "Query Result handle is NULL");
         return -1;
@@ -309,7 +306,7 @@ int drills_query_result_get_size(drills_query_result_t query_result) {
     }
 }
 
-drills_status_t drills_query_result_get_fact_at_index(drills_query_result_t query_result, int row_index, const char* binding_name, drills_fact_t* out_fact) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_query_result_get_fact_at_index(ruleforge_query_result_t query_result, int row_index, const char* binding_name, ruleforge_fact_t* out_fact) {
     if (!query_result || !binding_name || !out_fact) {
         strcpy(last_error, "Query Result handle, binding name, or output Fact pointer is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -338,7 +335,7 @@ drills_status_t drills_query_result_get_fact_at_index(drills_query_result_t quer
         }
 
         // Return the raw pointer - ownership remains with QueryResult
-        *out_fact = static_cast<drills_fact_t>(fact_opt->get());
+        *out_fact = static_cast<ruleforge_fact_t>(fact_opt->get());
         last_error[0] = '\0';
         return DRILLS_OK;
     }
@@ -348,7 +345,7 @@ drills_status_t drills_query_result_get_fact_at_index(drills_query_result_t quer
     }
 }
 
-drills_status_t drills_query_result_destroy(drills_query_result_t query_result) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_query_result_destroy(ruleforge_query_result_t query_result) {
     if (!query_result) {
         strcpy(last_error, "Query Result handle is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -366,40 +363,130 @@ drills_status_t drills_query_result_destroy(drills_query_result_t query_result) 
 }
 
 // Fact functions
-drills_status_t drills_fact_get_field_as_string(drills_fact_t fact, const char* field_name, char* buffer, size_t buffer_size, size_t* out_actual_length) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_fact_get_field_as_string(ruleforge_fact_t fact, const char* field_name, char* buffer, size_t buffer_size, size_t* out_actual_length) {
     if (!fact || !field_name || !buffer || !out_actual_length) {
         strcpy(last_error, "Fact handle, field name, buffer, or actual length pointer is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
     }
-    strcpy(last_error, "Stub implementation - no actual field extraction");
-    return DRILLS_ERROR_GENERIC;
+    try {
+        auto f = static_cast<const Fact*>(fact);
+        auto field_opt = f->get_field(field_name);
+        if (!field_opt) {
+            strcpy(last_error, "Field not found");
+            return DRILLS_ERROR_INVALID_ARGUMENT;
+        }
+
+        auto* field_ptr = std::get_if<std::string>(&(*field_opt));
+        if (!field_ptr) {
+            strcpy(last_error, "Field not found or not a string");
+            return DRILLS_ERROR_INVALID_ARGUMENT;
+        }
+        const auto& field = *field_ptr;
+
+        *out_actual_length = field.length();
+        if (buffer_size <= field.length()) {
+            strcpy(last_error, "Buffer too small");
+            return DRILLS_ERROR_INVALID_ARGUMENT;
+        }
+
+        strcpy(buffer, field.c_str());
+        last_error[0] = '\0';
+        return DRILLS_OK;
+    }
+    catch (const std::exception& e) {
+        strcpy(last_error, std::string("Failed to get string field: ").append(e.what()).c_str());
+        return DRILLS_ERROR_GENERIC;
+    }
 }
 
-drills_status_t drills_fact_get_field_as_double(drills_fact_t fact, const char* field_name, double* out_value) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_fact_get_field_as_double(ruleforge_fact_t fact, const char* field_name, double* out_value) {
     if (!fact || !field_name || !out_value) {
         strcpy(last_error, "Fact handle, field name, or output value pointer is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
     }
-    strcpy(last_error, "Stub implementation - no actual field extraction");
-    return DRILLS_ERROR_GENERIC;
+    try {
+        auto f = static_cast<const Fact*>(fact);
+        auto field_opt = f->get_field(field_name);
+        if (!field_opt) {
+            strcpy(last_error, "Field not found");
+            return DRILLS_ERROR_INVALID_ARGUMENT;
+        }
+
+        auto* double_ptr = std::get_if<double>(&(*field_opt));
+        if (double_ptr) {
+            *out_value = *double_ptr;
+        } else {
+            auto* int_ptr = std::get_if<int64_t>(&(*field_opt));
+            if (int_ptr) {
+                *out_value = static_cast<double>(*int_ptr);
+            } else {
+                strcpy(last_error, "Field not found or not a numeric type");
+                return DRILLS_ERROR_INVALID_ARGUMENT;
+            }
+        }
+        last_error[0] = '\0';
+        return DRILLS_OK;
+    }
+    catch (const std::exception& e) {
+        strcpy(last_error, std::string("Failed to get double field: ").append(e.what()).c_str());
+        return DRILLS_ERROR_GENERIC;
+    }
 }
 
-drills_status_t drills_fact_get_field_as_int(drills_fact_t fact, const char* field_name, int64_t* out_value) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_fact_get_field_as_int(ruleforge_fact_t fact, const char* field_name, int64_t* out_value) {
     if (!fact || !field_name || !out_value) {
         strcpy(last_error, "Fact handle, field name, or output value pointer is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
     }
-    strcpy(last_error, "Stub implementation - no actual field extraction");
-    return DRILLS_ERROR_GENERIC;
+    try {
+        auto f = static_cast<const Fact*>(fact);
+        auto field_opt = f->get_field(field_name);
+        if (!field_opt) {
+            strcpy(last_error, "Field not found");
+            return DRILLS_ERROR_INVALID_ARGUMENT;
+        }
+
+        auto* field_ptr = std::get_if<int64_t>(&(*field_opt));
+        if (!field_ptr) {
+            strcpy(last_error, "Field not found or not an int");
+            return DRILLS_ERROR_INVALID_ARGUMENT;
+        }
+        *out_value = *field_ptr;
+        last_error[0] = '\0';
+        return DRILLS_OK;
+    }
+    catch (const std::exception& e) {
+        strcpy(last_error, std::string("Failed to get int field: ").append(e.what()).c_str());
+        return DRILLS_ERROR_GENERIC;
+    }
 }
 
-drills_status_t drills_fact_get_field_as_bool(drills_fact_t fact, const char* field_name, int* out_value) {
+DRILLS_CAPI_API ruleforge_status_t DRILLS_CAPI_CALL ruleforge_fact_get_field_as_bool(ruleforge_fact_t fact, const char* field_name, int* out_value) {
     if (!fact || !field_name || !out_value) {
         strcpy(last_error, "Fact handle, field name, or output value pointer is NULL");
         return DRILLS_ERROR_INVALID_ARGUMENT;
     }
-    strcpy(last_error, "Stub implementation - no actual field extraction");
-    return DRILLS_ERROR_GENERIC;
+    try {
+        auto f = static_cast<const Fact*>(fact);
+        auto field_opt = f->get_field(field_name);
+        if (!field_opt) {
+            strcpy(last_error, "Field not found");
+            return DRILLS_ERROR_INVALID_ARGUMENT;
+        }
+
+        auto* field_ptr = std::get_if<int64_t>(&(*field_opt));
+        if (!field_ptr) {
+            strcpy(last_error, "Field not found or not a bool");
+            return DRILLS_ERROR_INVALID_ARGUMENT;
+        }
+        *out_value = (*field_ptr != 0) ? 1 : 0;
+        last_error[0] = '\0';
+        return DRILLS_OK;
+    }
+    catch (const std::exception& e) {
+        strcpy(last_error, std::string("Failed to get bool field: ").append(e.what()).c_str());
+        return DRILLS_ERROR_GENERIC;
+    }
 }
 
 } // extern "C"

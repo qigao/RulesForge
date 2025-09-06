@@ -25,7 +25,16 @@ public:
     /// @return An optional containing the fact, or std::nullopt if the binding is not found.
     std::optional<std::shared_ptr<Fact>> get(std::string const& binding) const {
         auto it = row_data_.find(binding);
-        if (it != row_data_.end()) { return it->second; }
+        if (it != row_data_.end()) {
+            return it->second;
+        }
+        // If not found, and the binding doesn't already start with '$', try prepending it.
+        if (binding.rfind('$', 0) != 0) {
+            it = row_data_.find("$" + binding);
+            if (it != row_data_.end()) {
+                return it->second;
+            }
+        }
         return std::nullopt;
     }
 

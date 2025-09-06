@@ -1,4 +1,4 @@
-set(TARGET_NAME drills)
+set(TARGET_NAME RuleForge)
 file(GLOB_RECURSE SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h*
      ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c*
      ${CMAKE_CURRENT_SOURCE_DIR}/src/rete/*.c*

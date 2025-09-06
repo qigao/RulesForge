@@ -32,10 +32,10 @@ extern "C" {
 // --- Opaque Types (Handles) ---
 // These are pointers to internal C++ objects.
 // Users of the C API should treat them as opaque handles.
-typedef void* drills_knowledge_base_t;
-typedef void* drills_stateful_session_t;
-typedef void* drills_fact_t; // For facts retrieved from queries or created by C API
-typedef void* drills_query_result_t;
+typedef void* ruleforge_knowledge_base_t;
+typedef void* ruleforge_stateful_session_t;
+typedef void* ruleforge_fact_t; // For facts retrieved from queries or created by C API
+typedef void* ruleforge_query_result_t;
 
 // --- Status Codes ---
 // All C API functions will return one of these status codes.
@@ -49,65 +49,65 @@ typedef enum {
     DRILLS_ERROR_QUERY_FAILED = 6,
     DRILLS_ERROR_MEMORY_ALLOCATION = 7,
     // Add more specific error codes as needed
-} drills_status_t;
+} ruleforge_status_t;
 
 // --- Global Initialization and Cleanup ---
 // Call these once at the start and end of your application.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_init(void);
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_cleanup(void);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_init(void);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_cleanup(void);
 
-DRILLS_CAPI_API const char* DRILLS_CAPI_CALL drills_get_last_error_message(void);
+DRILLS_CAPI_API const char* DRILLS_CAPI_CALL ruleforge_get_last_error_message(void);
 
 // --- Knowledge Base (Rules) Management ---
 // Creates a new, empty Knowledge Base.
 // Returns DRILLS_OK on success, and sets 'out_kb' to the handle.
 // On failure, 'out_kb' will be NULL.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_kb_create(drills_knowledge_base_t* out_kb);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_kb_create(ruleforge_knowledge_base_t* out_kb);
 
 // Loads DRL rules into the Knowledge Base.
 // drl_source_json: A JSON string containing the DRL source.
 // Returns DRILLS_OK on success.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_kb_load_drl(drills_knowledge_base_t kb, const char* drl_source_json);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const char* drl_source_json);
 
 // Loads rules from a decision table CSV into the Knowledge Base.
 // csv_source: The CSV content as a string.
 // Returns DRILLS_OK on success.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_kb_load_decision_table_csv(drills_knowledge_base_t kb, const char* csv_source);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base_t kb, const char* csv_source);
 
 // Destroys a Knowledge Base and frees its associated resources.
 // The handle becomes invalid after this call.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_kb_destroy(drills_knowledge_base_t kb);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_kb_destroy(ruleforge_knowledge_base_t kb);
 
 // --- Stateful Session Management ---
 // Creates a new Stateful Session from a Knowledge Base.
 // Returns DRILLS_OK on success, and sets 'out_session' to the handle.
 // On failure, 'out_session' will be NULL.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_session_create(drills_knowledge_base_t kb, drills_stateful_session_t* out_session);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_create(ruleforge_knowledge_base_t kb, ruleforge_stateful_session_t* out_session);
 
 // Adds a fact to the Stateful Session.
 // fact_type: The type of the fact (e.g., "Customer", "Order").
 // fact_json: A JSON string representing the fact's fields (e.g., "{\"name\": \"Alice\", \"age\": 30}").
 // Returns DRILLS_OK on success.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_session_add_fact_json(drills_stateful_session_t session, const char* fact_type, const char* fact_json);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_add_fact_json(ruleforge_stateful_session_t session, const char* fact_type, const char* fact_json);
 
 // Fires all rules in the Stateful Session.
 // Returns DRILLS_OK on success.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_session_fire_all_rules(drills_stateful_session_t session);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_fire_all_rules(ruleforge_stateful_session_t session);
 
 // Executes a query on the Stateful Session.
 // query_name: The name of the query to execute.
-// out_query_result: On success, set to a handle for the query results. Must be destroyed with drills_query_result_destroy().
+// out_query_result: On success, set to a handle for the query results. Must be destroyed with ruleforge_query_result_destroy().
 // Returns DRILLS_OK on success.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_session_query(drills_stateful_session_t session, const char* query_name, drills_query_result_t* out_query_result);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_query(ruleforge_stateful_session_t session, const char* query_name, ruleforge_query_result_t* out_query_result);
 
 // Destroys a Stateful Session and frees its associated resources.
 // The handle becomes invalid after this call.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_session_destroy(drills_stateful_session_t session);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_destroy(ruleforge_stateful_session_t session);
 
 // --- Query Result Access ---
 // Gets the number of results (rows) in a query result.
 // Returns the number of results, or -1 on error.
-int DRILLS_CAPI_API DRILLS_CAPI_CALL drills_query_result_get_size(drills_query_result_t query_result);
+int DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_query_result_get_size(ruleforge_query_result_t query_result);
 
 // Gets a fact from a specific result row and binding name.
 // query_result: The query result handle.
@@ -116,11 +116,11 @@ int DRILLS_CAPI_API DRILLS_CAPI_CALL drills_query_result_get_size(drills_query_r
 // out_fact: On success, set to a handle for the fact. This fact handle is owned by the query_result
 //           and becomes invalid when query_result is destroyed. Do NOT destroy this fact handle directly.
 // Returns DRILLS_OK on success.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_query_result_get_fact_at_index(drills_query_result_t query_result, int row_index, const char* binding_name, drills_fact_t* out_fact);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_query_result_get_fact_at_index(ruleforge_query_result_t query_result, int row_index, const char* binding_name, ruleforge_fact_t* out_fact);
 
 // Destroys a Query Result and frees its associated resources.
 // The handle becomes invalid after this call.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_query_result_destroy(drills_query_result_t query_result);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_query_result_destroy(ruleforge_query_result_t query_result);
 
 // --- Fact Field Access ---
 // Gets a fact field as a string.
@@ -131,19 +131,19 @@ drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_query_result_destroy(dri
 // out_actual_length: On success, set to the actual length of the string (excluding null terminator).
 // Returns DRILLS_OK on success. If buffer is too small, returns DRILLS_ERROR_INVALID_ARGUMENT
 // and sets out_actual_length to the required size.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_fact_get_field_as_string(drills_fact_t fact, const char* field_name, char* buffer, size_t buffer_size, size_t* out_actual_length);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_fact_get_field_as_string(ruleforge_fact_t fact, const char* field_name, char* buffer, size_t buffer_size, size_t* out_actual_length);
 
 // Gets a fact field as a double.
 // Returns DRILLS_OK on success.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_fact_get_field_as_double(drills_fact_t fact, const char* field_name, double* out_value);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_fact_get_field_as_double(ruleforge_fact_t fact, const char* field_name, double* out_value);
 
 // Gets a fact field as an integer (64-bit).
 // Returns DRILLS_OK on success.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_fact_get_field_as_int(drills_fact_t fact, const char* field_name, int64_t* out_value);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_fact_get_field_as_int(ruleforge_fact_t fact, const char* field_name, int64_t* out_value);
 
 // Gets a fact field as a boolean.
 // Returns DRILLS_OK on success.
-drills_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL drills_fact_get_field_as_bool(drills_fact_t fact, const char* field_name, int* out_value); // Use int for bool in C
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_fact_get_field_as_bool(ruleforge_fact_t fact, const char* field_name, int* out_value); // Use int for bool in C
 
 // End extern "C" block
 #ifdef __cplusplus

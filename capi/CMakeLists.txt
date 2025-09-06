@@ -1,41 +1,33 @@
 include(GenerateExportHeader)
 
-# Add the CAPI subdirectory to the build.
-# This assumes that the parent CMakeLists.txt (at c:\projects\cpp\drills\)
-# already includes this subdirectory using add_subdirectory(capi).
-
 # Define the target name for the shared library
-set(CAPI_TARGET_NAME drills_capi)
+set(CAPI_TARGET_NAME rule_forge)
 
 # Add the shared library target
 add_library(${CAPI_TARGET_NAME} SHARED
-    src/drills_capi.cpp
+    src/rule_forge.cpp
 )
+
+target_compile_definitions(${CAPI_TARGET_NAME} PRIVATE DRILLS_CAPI_EXPORTS)
 generate_export_header(${CAPI_TARGET_NAME}
-    BASE_NAME DRILLS_CAPI
-    EXPORT_MACRO_NAME DRILLS_CAPI_EXPORT
-    NO_EXPORT_MACRO_NAME DRILLS_CAPI_NO_EXPORT
-    DEPRECATED_MACRO_NAME DRILLS_CAPI_DEPRECATED
+    BASE_NAME RULEFORGE_CAPI
+    EXPORT_MACRO_NAME RULEFORGE_CAPI_EXPORT
+    NO_EXPORT_MACRO_NAME RULEFORGE_CAPI_NO_EXPORT
+    DEPRECATED_MACRO_NAME RULEFORGE_CAPI_DEPRECATED
 )
 find_package(pegtl )
 
 
 # Include directories for the CAPI.
-# This needs to include the public CAPI header and the Drills core library headers.
-target_include_directories(${CAPI_TARGET_NAME} PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> # For drills_capi.h
+ target_include_directories(${CAPI_TARGET_NAME} PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include> # For installation
-    # Assuming Drills core headers are in drills/include
-    # You might need to adjust this path based on your project structure
-    ${CMAKE_SOURCE_DIR}/drills/include
+    ${CMAKE_SOURCE_DIR}/ruleforge/include
     ${CMAKE_SOURCE_DIR}/shared/pubcxx/include
 )
 
-# Link against the Drills core library.
-# This assumes your main Drills library is built as a static or shared library
-# and is named 'drills_core' or similar. Adjust as needed.
 target_link_libraries(${CAPI_TARGET_NAME}
-    drills pubcxx
+     RuleForge  pubcxx
     hashmap   taocpp::pegtl
 )
 

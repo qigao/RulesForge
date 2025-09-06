@@ -1,4 +1,4 @@
-# Drills - C++ Rete Rule Engine with JavaScript Integration
+# RuleForge - C++ Rete Rule Engine with JavaScript Integration
 
 [中文文档](./docs/zh-CN/README.md)
 
@@ -7,18 +7,18 @@ This is a sophisticated, high-performance C++ rules engine implementing the **Re
 ## Core Architecture
 
 **Rete Algorithm Implementation**:
-- Full Rete network with alpha/beta nodes (`drills/include/rete/rete_node.hpp:15175 lines`)
-- Immutable `KnowledgeBase` containing compiled rules (`drills/include/knowledge_base.hpp:74`)
-- Mutable `StatefulSession` managing working memory (`drills/include/stateful_session.hpp:141`)
+- Full Rete network with alpha/beta nodes (`ruleforge/include/rete/rete_node.hpp:15175 lines`)
+- Immutable `KnowledgeBase` containing compiled rules (`ruleforge/include/knowledge_base.hpp:74`)
+- Mutable `StatefulSession` managing working memory (`ruleforge/include/stateful_session.hpp:141`)
 
 **JavaScript Integration**:
-- `JSScriptingManager` bridges C++ and JavaScript (`drills/src/drools_js_manager.cpp`)
+- `JSScriptingManager` bridges C++ and JavaScript (`ruleforge/src/drools_js_manager.cpp`)
 - QuickJS library for seamless C++/JavaScript binding (`vcpkg.json:90-92`)
 - Custom `drools` API exposed to JavaScript for fact manipulation
 
 ## Key Features
 
-1. **DRL Language**: Drools-like syntax with comprehensive grammar (`drills/dsl.md`, `drills/guide.md`)
+1. **DRL Language**: Drools-like syntax with comprehensive grammar (`ruleforge/dsl.md`, `ruleforge/guide.md`)
 2. **Advanced Conditional Logic**: Support for `not`, `exists`, `forall` patterns
 3. **Data Aggregation**: Built-in accumulators (`sum`, `count`, `average`, etc.)
 4. **Truth Maintenance System (TMS)**: Logical assertions with automatic dependency tracking
@@ -37,7 +37,7 @@ This is a sophisticated, high-performance C++ rules engine implementing the **Re
 ## Project Structure
 
 ```
-drills/
+ruleforge/
 ├── include/           # Headers (AST, parser, Rete nodes, Lua manager)
 ├── src/              # Implementation files
 ├── test/             # Comprehensive test suite
@@ -50,11 +50,11 @@ drills/
 
 ## WebAssembly Demo 🐳
 
-Experience the power of Drills Rule Engine in your browser! We've created a complete **WebAssembly demo** that runs the C++ engine directly in web browsers.
+Experience the power of RuleForge in your browser! We've created a complete **WebAssembly demo** that runs the C++ engine directly in web browsers.
 
 ### 🎮 Live Demo Features
 
-- ✅ **Browser-native Rule Engine**: Run C++ Drills engine directly via WebAssembly
+- ✅ **Browser-native Rule Engine**: Run C++ RuleForge engine directly via WebAssembly
 - ✅ **Interactive Demo**: Complete web interface for testing rule functionality
 - ✅ **Real-time Performance**: Live metrics and console logging
 - ✅ **Sample Business Rules**: Pre-built customer classification rules
@@ -88,15 +88,15 @@ python3 -m http.server 8000
 
 ```cpp
 // WebAssembly bindings expose full C API
-EMSCRIPTEN_BINDINGS(drills_module) {
-    class_<DrillsEngine>("DrillsEngine")
+EMSCRIPTEN_BINDINGS(ruleforge_module) {
+    class_<RuleForgeEngine>("RuleForgeEngine")
         .constructor()
-        .function("init", &DrillsEngine::init)
-        .function("createKnowledgeBase", &DrillsEngine::createKnowledgeBase)
-        .function("createSession", &DrillsEngine::createSession)
-        .function("insertFact", &DrillsEngine::insertFact)
-        .function("fireRules", &DrillsEngine::fireRules)
-        .function("query", &DrillsEngine::query);
+        .function("init", &RuleForgeEngine::init)
+        .function("createKnowledgeBase", &RuleForgeEngine::createKnowledgeBase)
+        .function("createSession", &RuleForgeEngine::createSession)
+        .function("insertFact", &RuleForgeEngine::insertFact)
+        .function("fireRules", &RuleForgeEngine::fireRules)
+        .function("query", &RuleForgeEngine::query);
 }
 ```
 
