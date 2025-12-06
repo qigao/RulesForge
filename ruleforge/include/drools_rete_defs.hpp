@@ -237,6 +237,7 @@ struct ParsedRule {
     map<std::string, std::string> annotations;
     int salience = 0;
     bool salience_explicitly_set = false;
+    bool no_loop = false;
     std::optional<std::string> parent_rule_name;
     std::optional<std::string> agenda_group;
     std::optional<ParsedTimer> timer;

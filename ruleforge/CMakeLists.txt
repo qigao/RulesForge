@@ -20,26 +20,27 @@ target_link_libraries(
     PUBLIC
     fmtlog::fmtlog
     hashmap
-    mimalloc
     qjs glaze::glaze jsoncons::jsoncons
     taocpp::pegtl
     magic_enum::magic_enum
     xxHash::xxhash
+    TurboMemory
 )
 target_include_directories(
     ${TARGET_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE ${CMAKE_SOURCE_DIR}/vendor/arena/include
 )
 if(MSVC)
     target_compile_options(${TARGET_NAME} PUBLIC /bigobj )
 endif()
-target_compile_definitions(${TARGET_NAME} PUBLIC  HAS_MIMALLOC)
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
-    # Add WASM-specific compile definitions or link libraries here
-    # For example, if you need to enable pthreads for mimalloc or quickjs-ng
-    # target_compile_definitions(${TARGET_NAME} PUBLIC -s USE_PTHREADS=1)
-    # target_link_libraries(${TARGET_NAME} PUBLIC pthread)
-endif()
+# Disable debug/info logging in release builds for performance
+# FMTLOG_LEVEL_DBG=0, INF=1, WRN=2, ERR=3, OFF=4
+target_compile_definitions(${TARGET_NAME} PUBLIC
+    HAS_MIMALLOC
+    $<$<CONFIG:Release>:FMTLOG_ACTIVE_LEVEL=2>
+    $<$<CONFIG:RelWithDebInfo>:FMTLOG_ACTIVE_LEVEL=2>
+    $<$<CONFIG:MinSizeRel>:FMTLOG_ACTIVE_LEVEL=2>
+)
 
 set_target_properties(${TARGET_NAME} PROPERTIES FOLDER "${TARGET_NAME}")
 set_target_properties(${TARGET_NAME} PROPERTIES LINKER_LANGUAGE CXX)

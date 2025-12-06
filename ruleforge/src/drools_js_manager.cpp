@@ -192,19 +192,9 @@ JSValue JSScriptingManager::populate_js_object_from_fact(Fact const& fact) {
 }
 
 void JSScriptingManager::bind_variables(Token const& token, map<std::string, int> const& bindings) {
-    logw("bind_variables: Processing {} bindings for token with WME depth {}", bindings.size(),
-              token.wme ? token.wme->depth : -1);
-
-    // Check if jmespath function exists before binding variables
-    JSValue test_global_before = JS_GetGlobalObject(context_);
-    JSValue test_func_before = JS_GetPropertyStr(context_, test_global_before, "jmespath");
-    bool is_function_before = JS_IsFunction(context_, test_func_before);
-    logw("jmespath function status BEFORE variable binding: {}", is_function_before ? "FUNCTION" : "NOT FUNCTION");
-    JS_FreeValue(context_, test_func_before);
-    JS_FreeValue(context_, test_global_before);
+    logd("bind_variables: Processing {} bindings", bindings.size());
 
     for (auto const& [binding, depth] : bindings) {
-        logw("  -> Binding '{}' at depth {}", binding, depth);
         if (binding.empty() || binding[0] != '$') continue;
         std::string js_var_name = binding.substr(1);
         auto fact_in_token = token.get_fact_at_depth(depth);
@@ -217,7 +207,6 @@ void JSScriptingManager::bind_variables(Token const& token, map<std::string, int
                 JS_SetPropertyStr(context_, global, js_var_name.c_str(), fact_obj);
 
                 // Also bind JSON representation for jmespath queries
-                // Variable name pattern: $fact -> fact_json
                 std::string json_var_name = js_var_name + "_json";
                 std::string fact_json = fact_to_json(**current_fact_opt);
                 JSValue json_str = JS_NewString(context_, fact_json.c_str());
@@ -229,57 +218,20 @@ void JSScriptingManager::bind_variables(Token const& token, map<std::string, int
                 }
 
                 JS_FreeValue(context_, global);
-                logw("JavaScript: Bound variable '{}' to fact ID {} (JSON: {})",
-                        js_var_name, (*current_fact_opt)->id, json_var_name);
-            } else {
-                logw("JavaScript: Fact at depth {} found in token but missing from working memory", depth);
+                logd("Bound variable '{}' to fact ID {}", js_var_name, (*current_fact_opt)->id);
             }
-        } else {
-            logw("JavaScript: No fact found at depth {} for binding '{}'", depth, binding);
         }
     }
-
-    // Check if jmespath function exists after binding variables
-    JSValue test_global_after = JS_GetGlobalObject(context_);
-    JSValue test_func_after = JS_GetPropertyStr(context_, test_global_after, "jmespath");
-    bool is_function_after = JS_IsFunction(context_, test_func_after);
-    logw("jmespath function status AFTER variable binding: {}", is_function_after ? "FUNCTION" : "NOT FUNCTION");
-    JS_FreeValue(context_, test_func_after);
-    JS_FreeValue(context_, test_global_after);
 }
 
 void JSScriptingManager::create_drools_api(Token& current_token) {
-    // Check jmespath function status at the start of create_drools_api
-    JSValue test_global_start = JS_GetGlobalObject(context_);
-    JSValue test_func_start = JS_GetPropertyStr(context_, test_global_start, "jmespath");
-    bool is_function_start = JS_IsFunction(context_, test_func_start);
-    logw("jmespath function status at START of create_drools_api: {}", is_function_start ? "FUNCTION" : "NOT FUNCTION");
-    JS_FreeValue(context_, test_func_start);
-    JS_FreeValue(context_, test_global_start);
-
     JSValue global = JS_GetGlobalObject(context_);
 
     // Store the handle ID instead of raw pointer
     JS_SetPropertyStr(context_, global, "__drools_handle_id", JS_NewInt32(context_, static_cast<int32_t>(handle_id_)));
 
-    // Check jmespath function status after setting handle ID
-    JSValue test_global_handle = JS_GetGlobalObject(context_);
-    JSValue test_func_handle = JS_GetPropertyStr(context_, test_global_handle, "jmespath");
-    bool is_function_handle = JS_IsFunction(context_, test_func_handle);
-    logw("jmespath function status after setting __drools_handle_id: {}", is_function_handle ? "FUNCTION" : "NOT FUNCTION");
-    JS_FreeValue(context_, test_func_handle);
-    JS_FreeValue(context_, test_global_handle);
-
     // Store the current token pointer for use in insertLogical
     JS_SetPropertyStr(context_, global, "__current_token", JS_NewBigUint64(context_, reinterpret_cast<uint64_t>(&current_token)));
-
-    // Check jmespath function status after setting token
-    JSValue test_global_token = JS_GetGlobalObject(context_);
-    JSValue test_func_token = JS_GetPropertyStr(context_, test_global_token, "jmespath");
-    bool is_function_token = JS_IsFunction(context_, test_func_token);
-    logw("jmespath function status after setting __current_token: {}", is_function_token ? "FUNCTION" : "NOT FUNCTION");
-    JS_FreeValue(context_, test_func_token);
-    JS_FreeValue(context_, test_global_token);
 
     // Create C++ callback function for drools.insert with exception boundary
     JSValue insert_func = JS_NewCFunction(context_, [](JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) -> JSValue {
@@ -303,7 +255,7 @@ void JSScriptingManager::create_drools_api(Token& current_token) {
                 auto fact = manager->fact_from_js_object(argv[0]);
                 if (fact) {
                     manager->callback_provider_.add_fact(fact);
-                    logw("drools.insert: Created fact ID {} type '{}'", fact->id, fact->type);
+                    logd("drools.insert: Created fact ID {} type '{}'", fact->id, fact->type);
                 }
             } else {
                 loge("Invalid handle ID: {}", handle_id);
@@ -346,7 +298,7 @@ void JSScriptingManager::create_drools_api(Token& current_token) {
                 auto fact = manager->fact_from_js_object(argv[0]);
                 if (fact) {
                     manager->callback_provider_.logical_insert(*current_token, fact);
-                    logw("drools.insertLogical: Created logical fact ID {} type '{}'", fact->id, fact->type);
+                    logd("drools.insertLogical: Created logical fact ID {} type '{}'", fact->id, fact->type);
                 }
             } else {
                 loge("Invalid handle ID: {} or token pointer", handle_id);
@@ -389,9 +341,9 @@ void JSScriptingManager::create_drools_api(Token& current_token) {
                         auto fact_opt = manager->callback_provider_.get_fact_by_id(fact_id);
                         if (fact_opt && *fact_opt) {
                             manager->callback_provider_.retract_fact(*fact_opt);
-                            logw("drools.retract: Retracted fact ID {} type '{}'", fact_id, (*fact_opt)->type);
+                            logd("drools.retract: Retracted fact ID {} type '{}'", fact_id, (*fact_opt)->type);
                         } else {
-                            logw("drools.retract: Fact ID {} not found", fact_id);
+                            logd("drools.retract: Fact ID {} not found", fact_id);
                         }
                         JS_FreeValue(ctx, id_val);
                     } else {
@@ -405,9 +357,9 @@ void JSScriptingManager::create_drools_api(Token& current_token) {
                     auto fact_opt = manager->callback_provider_.get_fact_by_id(fact_id);
                     if (fact_opt && *fact_opt) {
                         manager->callback_provider_.retract_fact(*fact_opt);
-                        logw("drools.retract: Retracted fact ID {} type '{}'", fact_id, (*fact_opt)->type);
+                        logd("drools.retract: Retracted fact ID {} type '{}'", fact_id, (*fact_opt)->type);
                     } else {
-                        logw("drools.retract: Fact ID {} not found", fact_id);
+                        logd("drools.retract: Fact ID {} not found", fact_id);
                     }
                 } else {
                     return JS_ThrowTypeError(ctx, "drools.retract argument must be a fact object or fact ID");
@@ -430,16 +382,6 @@ void JSScriptingManager::create_drools_api(Token& current_token) {
     JS_SetPropertyStr(context_, drools, "insertLogical", insert_logical_func);
     JS_SetPropertyStr(context_, drools, "retract", retract_func);
     JS_SetPropertyStr(context_, global, "drools", drools);
-
-    // Note: jmespath functions are already bound during initialization
-
-    // Check jmespath function status at the END of create_drools_api
-    JSValue test_global_end = JS_GetGlobalObject(context_);
-    JSValue test_func_end = JS_GetPropertyStr(context_, test_global_end, "jmespath");
-    bool is_function_end = JS_IsFunction(context_, test_func_end);
-    logw("jmespath function status at END of create_drools_api: {}", is_function_end ? "FUNCTION" : "NOT FUNCTION");
-    JS_FreeValue(context_, test_func_end);
-    JS_FreeValue(context_, test_global_end);
 
     JS_FreeValue(context_, global);
 }
@@ -465,13 +407,7 @@ bool JSScriptingManager::execute_eval(std::string const& code, Token const& toke
         logd("JavaScript eval result: {}", bool_result);
         return bool_result;
     } catch (std::exception const& e) {
-        loge("\n--- JAVASCRIPT EVAL ERROR ---\n"
-                  "Expression: '{}'\n"
-                  "Error: {}\n----------------------",
-                  code, e.what());
-        std::cerr << "\n--- JAVASCRIPT EVAL ERROR ---\n"
-                  << "Expression: '" << code << "'\n"
-                  << "Error: " << e.what() << "\n----------------------\n";
+        loge("JavaScript eval error - Expression: '{}', Error: {}", code, e.what());
         return false;
     } catch (...) {
         loge("Unknown exception during JavaScript eval");
@@ -481,27 +417,13 @@ bool JSScriptingManager::execute_eval(std::string const& code, Token const& toke
 
 void JSScriptingManager::execute_rhs(std::string const& rhs_code, std::string const& rule_name, Token& token,
                                      map<std::string, int> const& bindings) {
-    logw("Executing RHS for rule '{}' with {} bindings", rule_name, bindings.size());
-    logw("RHS code:\n{}", rhs_code);
+    logd("Executing RHS for rule '{}'", rule_name);
     try {
-        logd("Step 1: Binding variables");
         bind_variables(token, bindings);
-
-        logd("Step 2: Creating drools API");
         create_drools_api(token);
 
-        // Final check right before JavaScript execution
-        JSValue test_global_final = JS_GetGlobalObject(context_);
-        JSValue test_func_final = JS_GetPropertyStr(context_, test_global_final, "jmespath");
-        bool is_function_final = JS_IsFunction(context_, test_func_final);
-        logw("jmespath function status RIGHT BEFORE JS execution: {}", is_function_final ? "FUNCTION" : "NOT FUNCTION");
-        JS_FreeValue(context_, test_func_final);
-        JS_FreeValue(context_, test_global_final);
-
-        logd("Step 3: About to execute JavaScript code");
         JSValue result = JS_Eval(context_, rhs_code.c_str(), rhs_code.length(), rule_name.c_str(), JS_EVAL_TYPE_GLOBAL);
 
-        logd("Step 4: JavaScript execution completed");
         if (JS_IsException(result)) {
             JSValue exception = JS_GetException(context_);
             std::string error_msg = get_js_string(exception);
@@ -510,10 +432,8 @@ void JSScriptingManager::execute_rhs(std::string const& rhs_code, std::string co
             throw ReteExecutionException(error_msg, rule_name);
         }
         JS_FreeValue(context_, result);
-        logd("Step 5: RHS execution completed successfully");
 
     } catch (ReteExecutionException const&) {
-        // Re-throw specific exceptions
         throw;
     } catch (std::exception const& e) {
         std::string error_msg = "JavaScript execution error: " + std::string(e.what());

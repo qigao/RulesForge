@@ -96,6 +96,8 @@ namespace grammar {
 
     struct keyword_unnest : keyword<'u', 'n', 'n', 'e', 's', 't'> {};
 
+    struct keyword_no_loop : pegtl::seq<pegtl::string<'n', 'o', '-', 'l', 'o', 'o', 'p'>, pegtl::not_at<identifier_chars>> {};
+
     struct any_keyword :
         pegtl::sor<keyword_rule, keyword_when, keyword_then, keyword_end, keyword_salience, keyword_extends,
                    keyword_agenda_group, keyword_timer, keyword_from, keyword_not, keyword_exists, keyword_collect,
@@ -381,7 +383,9 @@ namespace grammar {
         pegtl::seq<keyword_timer, whitespace, timer_value,
                    pegtl::opt<pegtl::seq<opt_whitespace, pegtl::one<','>, opt_whitespace, timer_value>>> {};
 
-    struct attribute : pegtl::sor<salience_attribute, agenda_group_attribute, extends_clause, timer_attribute> {};
+    struct no_loop_attribute : keyword_no_loop {};
+
+    struct attribute : pegtl::sor<salience_attribute, agenda_group_attribute, extends_clause, timer_attribute, no_loop_attribute> {};
 
     struct attributes : pegtl::plus<pegtl::seq<attribute, opt_whitespace>> {};
 

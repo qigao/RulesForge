@@ -11,6 +11,7 @@
 #include "phmap.h"
 #include "query_result.hpp"
 #include "rule_execution_tracer.hpp"
+#include "session_arena.hpp"
 
 // Forward declarations
 class JSScriptingManager;
@@ -73,12 +74,16 @@ public:
   // Rule execution tracing
   RuleExecutionTracer& get_tracer() { return tracer_; }
   void enable_tracing(bool enabled = true) { tracer_.enable_tracing(enabled); }
-  std::string get_execution_trace(bool include_network = false) const { 
-      return tracer_.format_trace(include_network); 
+  std::string get_execution_trace(bool include_network = false) const {
+      return tracer_.format_trace(include_network);
   }
-  std::string get_rule_performance_summary() const { 
-      return tracer_.format_rule_summary(); 
+  std::string get_rule_performance_summary() const {
+      return tracer_.format_rule_summary();
   }
+
+  // Memory statistics
+  SessionArena& get_arena() { return arena_; }
+  std::string get_memory_stats() const { return arena_.format_stats(); }
 
   std::shared_ptr<KnowledgeBase const> get_knowledge_base() const
   {
@@ -163,6 +168,7 @@ private:
   std::unique_ptr<JSScriptingManager> scripting_manager_;
   std::unique_ptr<TruthMaintenanceSystem> tms_;
   RuleExecutionTracer tracer_;
+  SessionArena arena_;  // Per-session memory arena
 
   // Rete network instance state
   mutable int64_t next_fact_id_ = 1;
@@ -181,6 +187,7 @@ private:
   map<size_t, Activation> agenda_map_;
   std::priority_queue<std::pair<int, size_t>> agenda_queue_;
   std::vector<std::shared_ptr<IEngineListener>> listeners_;
+  unordered_set<size_t> no_loop_blocked_;  // Blocked activations for no-loop rules
   map<int, std::shared_ptr<ReteNode>> get_nodes() const;
   friend class ReteSerializer;
 };

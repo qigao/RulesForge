@@ -288,6 +288,8 @@ void AstBuilder::build_rule_attributes(pegtl::parse_tree::node const& n,
             rule.timer->repeat_interval = parse_long_safe(values[1]->string());
           }
         }
+      } else if (attr_node.is_type<grammar::no_loop_attribute>()) {
+        rule.no_loop = true;
       }
     }
   }

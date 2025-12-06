@@ -324,6 +324,11 @@ int StatefulSession::fire_all_rules() {
             logd("Firing rule '{}' (salience: {})", act.rule->name, act.rule->salience);
             for (auto& listener : listeners_) { listener->before_rule_fired(act.rule->name); }
 
+            // Block re-activation for no-loop rules before execution
+            if (act.rule->no_loop) {
+                no_loop_blocked_.insert(activation_to_fire->hash_value);
+            }
+
             try {
                 RuleExecutionTimer timer(tracer_, act.rule->name, involved_facts);
                 scripting_manager_->execute_rhs(act.rule->rhs_code, act.rule->name, *act.token, act.bindings);
@@ -335,6 +340,21 @@ int StatefulSession::fire_all_rules() {
             break;
         }
     }
+    no_loop_blocked_.clear();  // Reset no-loop blocking for next fire_all_rules cycle
+
+    // Compact agenda_queue_ if it has too many stale entries
+    // Threshold: queue size > 2x map size AND queue has at least 100 stale entries
+    if (agenda_queue_.size() > agenda_map_.size() * 2 &&
+        agenda_queue_.size() - agenda_map_.size() > 100) {
+        std::priority_queue<std::pair<int, size_t>> compacted;
+        for (auto const& [hash, activation] : agenda_map_) {
+            compacted.push({activation.rule->salience, hash});
+        }
+        agenda_queue_ = std::move(compacted);
+        logd("Compacted agenda queue: {} -> {} entries",
+             agenda_queue_.size() + (agenda_queue_.size() - agenda_map_.size()), agenda_map_.size());
+    }
+
     logd("Finished fire_all_rules cycle. Total fired: {}", total_fired_count);
     return total_fired_count;
 }
@@ -385,13 +405,22 @@ void StatefulSession::retract_fact(std::shared_ptr<Fact> fact) {
         alpha_it->second->right_activate(*this, fact_to_retract, PropagationType::RETRACT);
     }
 
-    std::vector<TokenWME const*> wmes_to_retract;
+    // Clean up WMEs that reference the retracted fact (directly or in parent chain)
+    std::vector<std::shared_ptr<TokenWME const>> wmes_to_retract;
     for (auto const& wme_ptr : wme_cache_) {
-        if (wme_ptr && wme_ptr->fact && wme_ptr->fact->id == fact_to_retract->id) {
-            wmes_to_retract.push_back(wme_ptr.get());
+        if (!wme_ptr) continue;
+        // Check if this WME or any ancestor references the retracted fact
+        for (auto const* current = wme_ptr.get(); current; current = current->parent.get()) {
+            if (current->fact && current->fact->id == fact_to_retract->id) {
+                wmes_to_retract.push_back(wme_ptr);
+                break;
+            }
         }
     }
-    for (auto const* wme : wmes_to_retract) { logical_retract(wme); }
+    for (auto const& wme : wmes_to_retract) {
+        logical_retract(wme.get());
+        wme_cache_.erase(wme);
+    }
 }
 
 void StatefulSession::update_fact(std::shared_ptr<Fact> fact, std::function<void(Fact&)> modifier) {
@@ -484,6 +513,13 @@ void StatefulSession::removeListener(std::shared_ptr<IEngineListener> const& lis
 }
 
 void StatefulSession::add_activation(Activation const& activation) {
+    // Check if this is a no-loop rule that has already fired with this token
+    if (activation.rule->no_loop && no_loop_blocked_.count(activation.hash_value)) {
+        logd("Skipping no-loop blocked activation for rule '{}', hash: {}",
+             activation.rule->name, activation.hash_value);
+        return;
+    }
+
     logd("Activating rule '{}' (salience: {}), hash: {}", activation.rule->name, activation.rule->salience,
               activation.hash_value);
 
