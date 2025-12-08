@@ -134,6 +134,9 @@ struct ParsedConstraint {
     std::optional<ParsedTemporalConstraint> temporal_constraint;
  };
 
+// Convert a ParsedConstraint to a human-readable string for debugging
+std::string constraint_to_string(ParsedConstraint const& constraint);
+
 struct ConstraintNode {
     NodeType type;
     ParsedConstraint constraint;

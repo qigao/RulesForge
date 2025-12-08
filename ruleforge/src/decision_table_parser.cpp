@@ -5,6 +5,7 @@
 #include <set>
 #include <tao/pegtl/contrib/unescape.hpp>
 #include <tao/pegtl/file_input.hpp>
+#include <tao/pegtl/string_input.hpp>
 #include <tao/pegtl/parse.hpp>
 
 namespace {
@@ -73,12 +74,24 @@ DecisionTable DecisionTableParser::parse(std::string const& file_path, ParsingRe
     ParserState state;
     try {
         pegtl::file_input<> in(file_path);
-        // Use a grammar that MUST consume the entire file (main_grammar ends with eoi).
         pegtl::parse<pegtl::must<dt_grammar::main_grammar>, action>(in, state);
     } catch (pegtl::parse_error const& e) {
         result.success = false;
         auto const p = e.positions().front();
         result.errors.push_back({file_path, p.line, p.column, e.what()});
+    }
+    return state.table;
+}
+
+DecisionTable DecisionTableParser::parse_string(std::string const& csv_content, std::string const& source_name, ParsingResult& result) {
+    ParserState state;
+    try {
+        pegtl::string_input<> in(csv_content, source_name);
+        pegtl::parse<pegtl::must<dt_grammar::main_grammar>, action>(in, state);
+    } catch (pegtl::parse_error const& e) {
+        result.success = false;
+        auto const p = e.positions().front();
+        result.errors.push_back({source_name, p.line, p.column, e.what()});
     }
     return state.table;
 }

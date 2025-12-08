@@ -76,4 +76,15 @@ std::shared_ptr<KnowledgeBase> build_knowledge_base(ParsingResult& result, std::
  */
 std::shared_ptr<KnowledgeBase> build_knowledge_base_from_csv(std::string const& csv_file_path, ParsingResult& result);
 
+/**
+ * @brief Parses a CSV decision table from a string, converts it to DRL, and builds a KnowledgeBase.
+ *
+ * @param csv_content The CSV content as a string.
+ * @param result Output parameter for success and errors.
+ * @param source_name The name of the source for error reporting.
+ * @return A shared_ptr to the compiled KnowledgeBase, or nullptr on failure.
+ */
+std::shared_ptr<KnowledgeBase> build_knowledge_base_from_csv_string(std::string const& csv_content, ParsingResult& result,
+                                                                     std::string const& source_name = "csv_string");
+
 #endif   // DROOLS_PARSER_HPP

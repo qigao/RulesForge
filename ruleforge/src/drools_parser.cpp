@@ -274,15 +274,36 @@ std::shared_ptr<KnowledgeBase> build_knowledge_base_from_csv(std::string const& 
     DecisionTableConverter converter(std::move(table));
     std::string generated_drl = converter.generate_drl();
 
-    // Optional: Log the generated DRL for debugging purposes.
     logd("Generated DRL from {}:\n---\n{}\n---", csv_file_path, generated_drl);
 
     if (generated_drl.empty()) {
         result.success = true;
         parser_state empty_state;
-        return KnowledgeBase::create(empty_state);   // Return empty KB if no rules generated
+        return KnowledgeBase::create(empty_state);
     }
 
     // Step 3: Use the existing DRL parser to build the knowledge base from the generated string.
     return build_knowledge_base(generated_drl, result, csv_file_path);
+}
+
+std::shared_ptr<KnowledgeBase> build_knowledge_base_from_csv_string(std::string const& csv_content, ParsingResult& result,
+                                                                     std::string const& source_name) {
+    // Step 1: Parse the CSV string into a structured DecisionTable object.
+    DecisionTable table = DecisionTableParser::parse_string(csv_content, source_name, result);
+    if (!result.success) { return nullptr; }
+
+    // Step 2: Convert the structured data into a DRL string.
+    DecisionTableConverter converter(std::move(table));
+    std::string generated_drl = converter.generate_drl();
+
+    logd("Generated DRL from {}:\n---\n{}\n---", source_name, generated_drl);
+
+    if (generated_drl.empty()) {
+        result.success = true;
+        parser_state empty_state;
+        return KnowledgeBase::create(empty_state);
+    }
+
+    // Step 3: Use the existing DRL parser to build the knowledge base from the generated string.
+    return build_knowledge_base(generated_drl, result, source_name);
 }

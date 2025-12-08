@@ -13,29 +13,13 @@
 
 // Local helper to prevent code duplication
 namespace {
-    std::string constraint_to_string_local(ParsedConstraint const& join) {
-        std::ostringstream oss;
-        if (join.temporal_constraint) {
-            auto const& tc = *join.temporal_constraint;
-            oss << "temporal " << tc.lhs_field << " " << tc.op << " " << tc.rhs_binding_and_field.first << "."
-                << tc.rhs_binding_and_field.second;
-            if (tc.op == "within") { oss << " " << tc.window_ms << "ms"; }
-            return oss.str();
+    // Compute no-loop key based on rule pointer and fact IDs (stable across WME recreation)
+    size_t compute_noloop_key(ParsedRule const* rule, std::vector<int64_t> const& fact_ids) {
+        size_t hash = reinterpret_cast<uintptr_t>(rule);
+        for (auto id : fact_ids) {
+            hash ^= static_cast<size_t>(id) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         }
-
-        if (join.left_binding) {
-            oss << *join.left_binding;
-        } else {
-            oss << "fact";
-        }
-        oss << "." << join.left_field << " " << join.op << " ";
-
-        if (join.right_bound_field) {
-            oss << join.right_bound_field->first << "." << join.right_bound_field->second;
-        } else if (join.right_literal) {
-            oss << ::to_string(*join.right_literal);
-        }
-        return oss.str();
+        return hash;
     }
 }   // namespace
 
@@ -45,7 +29,7 @@ StatefulSession::StatefulSession(private_key, std::shared_ptr<KnowledgeBase cons
     scripting_manager_ = std::make_unique<JSScriptingManager>(*this);
     tms_ = std::make_unique<TruthMaintenanceSystem>(*this);
     dummy_wme_ = std::make_shared<TokenWME>(TokenWME{nullptr, nullptr, 0, 0});
-    wme_cache_.insert(dummy_wme_);
+    wme_cache_[dummy_wme_->hash] = dummy_wme_;
 }
 
 StatefulSession::~StatefulSession() {
@@ -149,7 +133,7 @@ StatefulSession::build_alpha_chain(ConstraintNode const* node, std::vector<std::
     for (auto const& constraint_leaf : node->children) {
         auto alpha_node = create_node<AlphaNode>(constraint_leaf->constraint);
         logd("  AlphaNode ID: {}, Constraint: {}", alpha_node->id,
-             constraint_to_string_local(constraint_leaf->constraint));
+             constraint_to_string(constraint_leaf->constraint));
 
         // Connect all current tails to this new alpha node.
         for (auto& parent : current_tails) { parent->add_child(alpha_node); }
@@ -281,11 +265,17 @@ void StatefulSession::assign_nested_fact_ids(Fact& fact) {
     }
 }
 
-int StatefulSession::fire_all_rules() {
+int StatefulSession::fire_all_rules(int max_rules) {
     int total_fired_count = 0;
-    logd("Starting fire_all_rules cycle. Focus: '{}', Agenda size: {}. Fact count: {}", get_focus(),
-              agenda_queue_.size(), all_facts_.size());
+    logd("Starting fire_all_rules cycle. Focus: '{}', Agenda size: {}. Fact count: {}. Max rules: {}",
+         get_focus(), agenda_queue_.size(), all_facts_.size(), max_rules);
     while (true) {
+        // Check max firing limit to prevent infinite loops
+        if (max_rules >= 0 && total_fired_count >= max_rules) {
+            logw("Reached max rule firing limit ({}). Stopping execution. "
+                 "This may indicate an infinite loop in rules.", max_rules);
+            break;
+        }
         std::optional<Activation> activation_to_fire;
         while (!agenda_queue_.empty()) {
             auto [salience, activation_hash] = agenda_queue_.top();
@@ -326,7 +316,8 @@ int StatefulSession::fire_all_rules() {
 
             // Block re-activation for no-loop rules before execution
             if (act.rule->no_loop) {
-                no_loop_blocked_.insert(activation_to_fire->hash_value);
+                size_t noloop_key = compute_noloop_key(act.rule, involved_facts);
+                no_loop_blocked_.insert(noloop_key);
             }
 
             try {
@@ -406,20 +397,23 @@ void StatefulSession::retract_fact(std::shared_ptr<Fact> fact) {
     }
 
     // Clean up WMEs that reference the retracted fact (directly or in parent chain)
-    std::vector<std::shared_ptr<TokenWME const>> wmes_to_retract;
-    for (auto const& wme_ptr : wme_cache_) {
+    std::vector<size_t> hashes_to_retract;
+    for (auto const& [hash, wme_ptr] : wme_cache_) {
         if (!wme_ptr) continue;
         // Check if this WME or any ancestor references the retracted fact
         for (auto const* current = wme_ptr.get(); current; current = current->parent.get()) {
             if (current->fact && current->fact->id == fact_to_retract->id) {
-                wmes_to_retract.push_back(wme_ptr);
+                hashes_to_retract.push_back(hash);
                 break;
             }
         }
     }
-    for (auto const& wme : wmes_to_retract) {
-        logical_retract(wme.get());
-        wme_cache_.erase(wme);
+    for (size_t hash : hashes_to_retract) {
+        auto it = wme_cache_.find(hash);
+        if (it != wme_cache_.end()) {
+            logical_retract(it->second.get());
+            wme_cache_.erase(it);
+        }
     }
 }
 
@@ -513,17 +507,7 @@ void StatefulSession::removeListener(std::shared_ptr<IEngineListener> const& lis
 }
 
 void StatefulSession::add_activation(Activation const& activation) {
-    // Check if this is a no-loop rule that has already fired with this token
-    if (activation.rule->no_loop && no_loop_blocked_.count(activation.hash_value)) {
-        logd("Skipping no-loop blocked activation for rule '{}', hash: {}",
-             activation.rule->name, activation.hash_value);
-        return;
-    }
-
-    logd("Activating rule '{}' (salience: {}), hash: {}", activation.rule->name, activation.rule->salience,
-              activation.hash_value);
-
-    // Extract fact IDs for tracing
+    // Extract fact IDs for no-loop check and tracing
     std::vector<int64_t> involved_facts;
     if (activation.token && activation.token->wme) {
         auto token_facts = activation.token->get_facts();
@@ -531,6 +515,19 @@ void StatefulSession::add_activation(Activation const& activation) {
             if (fact) involved_facts.push_back(fact->id);
         }
     }
+
+    // Check if this is a no-loop rule that has already fired with these facts
+    if (activation.rule->no_loop) {
+        size_t noloop_key = compute_noloop_key(activation.rule, involved_facts);
+        if (no_loop_blocked_.count(noloop_key)) {
+            logd("Skipping no-loop blocked activation for rule '{}', key: {}",
+                 activation.rule->name, noloop_key);
+            return;
+        }
+    }
+
+    logd("Activating rule '{}' (salience: {}), hash: {}", activation.rule->name, activation.rule->salience,
+              activation.hash_value);
 
     tracer_.trace_rule_matched(activation.rule->name, involved_facts);
 

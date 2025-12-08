@@ -13,33 +13,9 @@
 
 // --- Helper Functions ---
 namespace {
-    std::string constraint_to_string(ParsedConstraint const& join) {
-        std::ostringstream oss;
-        if (join.temporal_constraint) {
-            auto const& tc = *join.temporal_constraint;
-            oss << "temporal " << tc.lhs_field << " " << tc.op << " " << tc.rhs_binding_and_field.first << "."
-                << tc.rhs_binding_and_field.second;
-            if (tc.op == "within") { oss << " " << tc.window_ms << "ms"; }
-            return oss.str();
-        }
-
-        if (join.left_binding) {
-            oss << *join.left_binding;
-        } else {
-            oss << "fact";
-        }
-        oss << "." << join.left_field << " " << join.op << " ";
-
-        if (join.right_bound_field) {
-            oss << join.right_bound_field->first << "." << join.right_bound_field->second;
-        } else if (join.right_literal) {
-            oss << ::to_string(*join.right_literal);
-        }
-        return oss.str();
-    }
 
     bool compare_values(ConstraintValue const& v1, std::string const& op, ConstraintValue const& v2) {
-        logi("      compare_values: {} {} {}", ::to_string(v1), op, ::to_string(v2));
+        logd("      compare_values: {} {} {}", ::to_string(v1), op, ::to_string(v2));
 
         bool result = false;
         if (std::holds_alternative<NilValue>(v1) || std::holds_alternative<NilValue>(v2)) {
@@ -167,7 +143,10 @@ namespace {
     template <typename T>
     void remove_from_vector(std::vector<T>& vec, T const& item) {
         auto it = std::find(vec.begin(), vec.end(), item);
-        if (it != vec.end()) { vec.erase(it); }
+        if (it != vec.end()) {
+            *it = std::move(vec.back());  // O(1) swap-and-pop instead of O(n) shift
+            vec.pop_back();
+        }
     }
 }   // namespace
 
@@ -392,6 +371,9 @@ void BaseJoinNode::propagate_retract(StatefulSession& session, std::shared_ptr<T
             remove_from_vector(it_right->second, child_to_retract);
             if (it_right->second.empty()) right_to_children_.erase(it_right);
         }
+
+        // Invalidate WME cache so that subsequent ASSERT can create a fresh WME
+        session.invalidate_wme_cache(child_to_retract->hash);
     }
 }
 
@@ -465,6 +447,25 @@ void HashedJoinNode::right_activate(StatefulSession& session, std::shared_ptr<Fa
         return;
     }
 
+    // For MODIFY: first retract old matches, then assert new ones
+    if (p_type == PropagationType::MODIFY) {
+        auto mem_it = right_memory_.find(key);
+        if (mem_it != right_memory_.end()) {
+            // Check if fact is in the memory for this key
+            auto fact_it = std::find(mem_it->second.begin(), mem_it->second.end(), fact);
+            if (fact_it != mem_it->second.end()) {
+                logd("  -> MODIFY: Retracting old matches before re-asserting.");
+                auto token_it = left_memory_.find(key);
+                if (token_it != left_memory_.end()) {
+                    for (auto const& wme : token_it->second) { propagate_retract(session, wme, fact); }
+                }
+                // Remove from memory - will be re-added below
+                remove_from_vector(mem_it->second, fact);
+                if (mem_it->second.empty()) right_memory_.erase(mem_it);
+            }
+        }
+    }
+
     right_memory_[key].push_back(fact);
     auto it_left = left_memory_.find(key);
     if (it_left != left_memory_.end()) {
@@ -525,6 +526,12 @@ void CrossProductJoinNode::right_activate(StatefulSession& session, std::shared_
         return;
     }
 
+    // For MODIFY: first retract old matches, then assert new ones
+    if (p_type == PropagationType::MODIFY && right_memory_.count(fact->id) > 0) {
+        logd("  -> MODIFY: Retracting old matches before re-asserting.");
+        for (auto const& [ptr, wme] : left_memory_) { propagate_retract(session, wme, fact); }
+    }
+
     right_memory_[fact->id] = fact;
     for (auto const& [ptr, wme] : left_memory_) {
         auto token = std::make_shared<Token>(wme, PropagationType::ASSERT);
@@ -541,27 +548,6 @@ void CrossProductJoinNode::print_node(std::ostream& os) const {
         for (auto const& join : join_constraints_) { os << "\\n" << constraint_to_string(join); }
     }
     os << "\", shape=box, style=filled, fillcolor=lightgrey];";
-}
-
-// --- OrderedJoinNode ---
-OrderedJoinNode::OrderedJoinNode(std::vector<ParsedConstraint> joins, map<std::string, int> bindings) :
-    BaseJoinNode(std::move(joins), std::move(bindings)) {}
-
-void OrderedJoinNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    // TBD: For now, acts as a cross-product.
-}
-
-void OrderedJoinNode::right_activate(StatefulSession& session, std::shared_ptr<Fact> fact, PropagationType p_type) {
-    // TBD
-}
-
-void OrderedJoinNode::print_node(std::ostream& os) const {
-    os << "  \"" << id << "\" [label=\"OrderedJoinNode (" << id << ", TBD)";
-    if (!join_constraints_.empty()) {
-        os << "\\nJoins:";
-        for (auto const& join : join_constraints_) { os << "\\n" << constraint_to_string(join); }
-    }
-    os << "\", shape=box, style=filled, fillcolor=moccasin];";
 }
 
 // --- NotNode ---

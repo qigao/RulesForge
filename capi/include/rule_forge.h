@@ -3,6 +3,19 @@
 
 #include <cstdint> // For int64_t
 
+// --- Version Information ---
+#define RULEFORGE_VERSION_MAJOR 0
+#define RULEFORGE_VERSION_MINOR 1
+#define RULEFORGE_VERSION_PATCH 0
+#define RULEFORGE_VERSION_STRING "0.1.0"
+
+// --- Thread Safety ---
+// RuleForge thread safety guarantees:
+//   - KnowledgeBase: Thread-safe after compilation. Can be shared across threads.
+//   - StatefulSession: NOT thread-safe. Each session must be used from a single
+//     thread at a time. Create separate sessions for concurrent rule execution.
+//   - Global init/cleanup: Call once from main thread before/after all usage.
+
 // Define export/import macros for cross-platform compatibility
 #ifndef DRILLS_CAPI_API
     #ifdef _WIN32
@@ -56,6 +69,9 @@ typedef enum {
 ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_init(void);
 ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_cleanup(void);
 
+// Returns the library version string (e.g., "0.1.0").
+DRILLS_CAPI_API const char* DRILLS_CAPI_CALL ruleforge_get_version(void);
+
 DRILLS_CAPI_API const char* DRILLS_CAPI_CALL ruleforge_get_last_error_message(void);
 
 // --- Knowledge Base (Rules) Management ---
@@ -91,8 +107,15 @@ ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_create(rul
 ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_add_fact_json(ruleforge_stateful_session_t session, const char* fact_type, const char* fact_json);
 
 // Fires all rules in the Stateful Session.
+// max_rules: Maximum number of rules to fire (-1 for unlimited).
+//            Use this to prevent infinite loops in rules.
+// out_fired_count: If not NULL, set to the number of rules fired.
 // Returns DRILLS_OK on success.
-ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_fire_all_rules(ruleforge_stateful_session_t session);
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_fire_all_rules(ruleforge_stateful_session_t session, int max_rules, int* out_fired_count);
+
+// Gets the number of facts currently in the session's working memory.
+// Returns the fact count, or -1 on error.
+int DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_get_fact_count(ruleforge_stateful_session_t session);
 
 // Executes a query on the Stateful Session.
 // query_name: The name of the query to execute.
@@ -103,6 +126,50 @@ ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_query(rule
 // Destroys a Stateful Session and frees its associated resources.
 // The handle becomes invalid after this call.
 ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_destroy(ruleforge_stateful_session_t session);
+
+// --- Session Observability ---
+// Enables or disables execution tracing for the session.
+// When enabled, rule firings, fact operations, and timing data are recorded.
+// enabled: 1 to enable, 0 to disable.
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_enable_tracing(ruleforge_stateful_session_t session, int enabled);
+
+// Gets the execution trace as a formatted string.
+// include_network: If non-zero, includes RETE network propagation events.
+// buffer: Pre-allocated buffer to copy the trace into.
+// buffer_size: The size of the buffer.
+// out_actual_length: On success, set to the actual length of the trace (excluding null terminator).
+// Returns DRILLS_OK on success. If buffer is too small, returns DRILLS_ERROR_INVALID_ARGUMENT.
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_get_execution_trace(
+    ruleforge_stateful_session_t session, int include_network,
+    char* buffer, size_t buffer_size, size_t* out_actual_length);
+
+// Gets a summary of rule performance (fire counts, timing).
+// buffer: Pre-allocated buffer to copy the summary into.
+// buffer_size: The size of the buffer.
+// out_actual_length: On success, set to the actual length of the summary.
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_get_rule_performance_summary(
+    ruleforge_stateful_session_t session,
+    char* buffer, size_t buffer_size, size_t* out_actual_length);
+
+// Clears all recorded trace events.
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_clear_trace(ruleforge_stateful_session_t session);
+
+// --- Session Memory Statistics ---
+// Gets the current memory used by the session's arena allocator (in bytes).
+// Returns the memory used, or -1 on error.
+int64_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_get_memory_used(ruleforge_stateful_session_t session);
+
+// Gets the peak memory usage of the session's arena allocator (in bytes).
+// Returns the peak memory, or -1 on error.
+int64_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_get_memory_peak(ruleforge_stateful_session_t session);
+
+// Gets formatted memory statistics string.
+// buffer: Pre-allocated buffer to copy the stats into.
+// buffer_size: The size of the buffer.
+// out_actual_length: On success, set to the actual length of the stats string.
+ruleforge_status_t DRILLS_CAPI_API DRILLS_CAPI_CALL ruleforge_session_get_memory_stats(
+    ruleforge_stateful_session_t session,
+    char* buffer, size_t buffer_size, size_t* out_actual_length);
 
 // --- Query Result Access ---
 // Gets the number of results (rows) in a query result.

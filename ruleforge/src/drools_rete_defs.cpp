@@ -29,6 +29,32 @@ std::string to_string(ConstraintValue const& val) {
         val);
 }
 
+// --- Implementation for constraint_to_string ---
+std::string constraint_to_string(ParsedConstraint const& c) {
+    std::ostringstream oss;
+    if (c.temporal_constraint) {
+        auto const& tc = *c.temporal_constraint;
+        oss << "temporal " << tc.lhs_field << " " << tc.op << " "
+            << tc.rhs_binding_and_field.first << "." << tc.rhs_binding_and_field.second;
+        if (tc.op == "within") { oss << " " << tc.window_ms << "ms"; }
+        return oss.str();
+    }
+
+    if (c.left_binding) {
+        oss << *c.left_binding;
+    } else {
+        oss << "fact";
+    }
+    oss << "." << c.left_field << " " << c.op << " ";
+
+    if (c.right_bound_field) {
+        oss << c.right_bound_field->first << "." << c.right_bound_field->second;
+    } else if (c.right_literal) {
+        oss << to_string(*c.right_literal);
+    }
+    return oss.str();
+}
+
 // --- Implementation for Hasher ---
 std::size_t ConstraintValueHasher::operator()(ConstraintValue const& v) const {
     return std::visit(

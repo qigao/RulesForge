@@ -376,11 +376,102 @@ void JSScriptingManager::create_drools_api(Token& current_token) {
         }
     }, "retract", 1);
 
-    // Create the drools object and set all three methods
+    // Create C++ callback function for drools.update with exception boundary
+    JSValue update_func = JS_NewCFunction(context_, [](JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) -> JSValue {
+        try {
+            if (argc < 1 || !JS_IsObject(argv[0])) {
+                return JS_ThrowTypeError(ctx, "drools.update requires at least one argument (fact object)");
+            }
+
+            // Get the manager instance using handle
+            JSValue global = JS_GetGlobalObject(ctx);
+            JSValue handle_val = JS_GetPropertyStr(ctx, global, "__drools_handle_id");
+            int32_t handle_id;
+            JS_ToInt32(ctx, &handle_id, handle_val);
+
+            JS_FreeValue(ctx, global);
+            JS_FreeValue(ctx, handle_val);
+
+            JSScriptingManager* manager = JSHandleManager::instance().get_manager(static_cast<uint32_t>(handle_id));
+
+            if (manager) {
+                // Get the fact by ID from the first argument
+                JSValue id_val = JS_GetPropertyStr(ctx, argv[0], "id");
+                if (!JS_IsNumber(id_val)) {
+                    JS_FreeValue(ctx, id_val);
+                    return JS_ThrowTypeError(ctx, "Fact object must have an 'id' property");
+                }
+
+                int64_t fact_id;
+                JS_ToInt64(ctx, &fact_id, id_val);
+                JS_FreeValue(ctx, id_val);
+
+                auto fact_opt = manager->callback_provider_.get_fact_by_id(fact_id);
+                if (!fact_opt || !*fact_opt) {
+                    logd("drools.update: Fact ID {} not found", fact_id);
+                    return JS_UNDEFINED;
+                }
+
+                auto fact = *fact_opt;
+
+                // If there's a second argument (update object), apply those changes
+                if (argc >= 2 && JS_IsObject(argv[1])) {
+                    JSPropertyEnum* props;
+                    uint32_t prop_count;
+                    if (JS_GetOwnPropertyNames(ctx, &props, &prop_count, argv[1], JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) >= 0) {
+                        for (uint32_t i = 0; i < prop_count; i++) {
+                            JSValue key_val = JS_AtomToValue(ctx, props[i].atom);
+                            const char* key_str = JS_ToCString(ctx, key_val);
+                            std::string key(key_str ? key_str : "");
+                            JS_FreeCString(ctx, key_str);
+                            JS_FreeValue(ctx, key_val);
+
+                            if (key == "type" || key == "id") continue;
+
+                            JSValue val = JS_GetProperty(ctx, argv[1], props[i].atom);
+                            if (JS_IsString(val)) {
+                                const char* str = JS_ToCString(ctx, val);
+                                fact->fields[key] = std::string(str ? str : "");
+                                JS_FreeCString(ctx, str);
+                            } else if (JS_IsNumber(val)) {
+                                double num;
+                                JS_ToFloat64(ctx, &num, val);
+                                if (num == std::floor(num)) {
+                                    fact->fields[key] = static_cast<int64_t>(num);
+                                } else {
+                                    fact->fields[key] = num;
+                                }
+                            } else if (JS_IsBool(val)) {
+                                fact->fields[key] = static_cast<int64_t>(JS_ToBool(ctx, val));
+                            } else if (JS_IsNull(val) || JS_IsUndefined(val)) {
+                                fact->fields[key] = NilValue{};
+                            }
+                            JS_FreeValue(ctx, val);
+                        }
+                        js_free(ctx, props);
+                    }
+                }
+
+                // Propagate the update through the RETE network
+                manager->callback_provider_.update_fact(fact, [](Fact&) {});
+                logd("drools.update: Updated fact ID {} type '{}'", fact_id, fact->type);
+            } else {
+                loge("Invalid handle ID: {}", handle_id);
+            }
+            return JS_UNDEFINED;
+        } catch (std::exception const& e) {
+            return JS_ThrowInternalError(ctx, "C++ exception: %s", e.what());
+        } catch (...) {
+            return JS_ThrowInternalError(ctx, "Unknown C++ exception");
+        }
+    }, "update", 2);
+
+    // Create the drools object and set all four methods
     JSValue drools = JS_NewObject(context_);
     JS_SetPropertyStr(context_, drools, "insert", insert_func);
     JS_SetPropertyStr(context_, drools, "insertLogical", insert_logical_func);
     JS_SetPropertyStr(context_, drools, "retract", retract_func);
+    JS_SetPropertyStr(context_, drools, "update", update_func);
     JS_SetPropertyStr(context_, global, "drools", drools);
 
     JS_FreeValue(context_, global);

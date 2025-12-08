@@ -48,7 +48,7 @@ public:
   // --- User-facing Runtime API ---
   void add_fact(std::shared_ptr<Fact> fact) override;
   void add_facts(std::vector<std::shared_ptr<Fact>> const& facts);
-  int fire_all_rules();
+  int fire_all_rules(int max_rules = -1);
   void retract_fact(std::shared_ptr<Fact> fact) override;
   void retract_facts(std::vector<std::shared_ptr<Fact>> const& facts);
   void update_fact(std::shared_ptr<Fact> fact,
@@ -119,17 +119,23 @@ public:
     size_t hash = parent_hash
         ^ (fact_hash_key + 0x9e3779b9 + (parent_hash << 6)
            + (parent_hash >> 2));
+    // Lookup by hash first - avoids creating temporary WME for cache hit
+    auto it = wme_cache_.find(hash);
+    if (it != wme_cache_.end()) {
+      return it->second;
+    }
     auto new_wme = std::make_shared<TokenWME>(
         TokenWME {parent_wme, fact, parent_wme->depth + 1, hash});
-    auto it = wme_cache_.find(new_wme);
-    if (it != wme_cache_.end()) {
-      return *it;
-    }
-    wme_cache_.insert(new_wme);
+    wme_cache_[hash] = new_wme;
     return new_wme;
   }
 
   inline std::shared_ptr<TokenWME const> get_dummy_wme() { return dummy_wme_; }
+
+  // Invalidate a WME from the cache (needed for MODIFY to work correctly)
+  inline void invalidate_wme_cache(size_t hash) {
+    wme_cache_.erase(hash);
+  }
 
   void add_activation(Activation const& activation);
   void remove_activation(size_t activation_hash);
@@ -157,9 +163,7 @@ private:
       ConstraintNode const* node,
       std::vector<std::shared_ptr<ReteNode>> parent_tails);
 
-  using TokenWMESet = unordered_set<std::shared_ptr<TokenWME const>,
-                                         TokenWMEPtrHasher,
-                                         TokenWMEPtrEquals>;
+  using TokenWMECache = map<size_t, std::shared_ptr<TokenWME const>>;  // hash -> WME
 
   // --- Immutable Reference ---
   std::shared_ptr<KnowledgeBase const> kb_;
@@ -181,7 +185,7 @@ private:
 
   // Working memory state
   std::shared_ptr<TokenWME const> dummy_wme_;
-  TokenWMESet wme_cache_;
+  TokenWMECache wme_cache_;
   map<int64_t, std::shared_ptr<Fact>> all_facts_;
   std::vector<std::string> agenda_group_focus_stack_;
   map<size_t, Activation> agenda_map_;

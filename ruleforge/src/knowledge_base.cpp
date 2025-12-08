@@ -8,33 +8,6 @@
 #include <iostream>
 #include <sstream>
 
-namespace {
-    // Duplicated from stateful_session.cpp for logging purposes.
-    std::string constraint_to_string(ParsedConstraint const& join) {
-        std::ostringstream oss;
-        if (join.temporal_constraint) {
-            auto const& tc = *join.temporal_constraint;
-            oss << "temporal " << tc.lhs_field << " " << tc.op << " " << tc.rhs_binding_and_field.first << "."
-                << tc.rhs_binding_and_field.second;
-            if (tc.op == "within") { oss << " " << tc.window_ms << "ms"; }
-            return oss.str();
-        }
-
-        if (join.left_binding) {
-            oss << *join.left_binding;
-        } else {
-            oss << "fact";
-        }
-        oss << "." << join.left_field << " " << join.op << " ";
-
-        if (join.right_bound_field) {
-            oss << join.right_bound_field->first << "." << join.right_bound_field->second;
-        } else if (join.right_literal) {
-            oss << ::to_string(*join.right_literal);
-        }
-        return oss.str();
-    }
-}   // namespace
 
 KnowledgeBase::KnowledgeBase(private_key) {
     accumulator_registry_ = std::make_shared<AccumulatorRegistry>();

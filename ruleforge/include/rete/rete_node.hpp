@@ -249,19 +249,6 @@ private:
   FactMemory right_memory_;
 };
 
-class OrderedJoinNode : public BaseJoinNode
-{
-public:
-  OrderedJoinNode(std::vector<ParsedConstraint> joins,
-                  map<std::string, int> bindings);
-  void left_activate(StatefulSession& session,
-                     std::shared_ptr<Token> token) override;
-  void right_activate(StatefulSession& session,
-                      std::shared_ptr<Fact> fact,
-                      PropagationType p_type) override;
-  void print_node(std::ostream& os) const override;
-};
-
 class NotNode : public BetaConditionNode
 {
 public:

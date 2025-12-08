@@ -13,6 +13,12 @@ TEST_CASE("CAPI: Initialization and Cleanup", "[capi]") {
     REQUIRE_DRILLS_OK(ruleforge_cleanup());
 }
 
+TEST_CASE("CAPI: Version Information", "[capi]") {
+    const char* version = ruleforge_get_version();
+    REQUIRE(version != nullptr);
+    REQUIRE(std::string(version) == RULEFORGE_VERSION_STRING);
+}
+
 TEST_CASE("CAPI: Error Handling", "[capi]") {
     ruleforge_init();
     ruleforge_knowledge_base_t kb = nullptr;
@@ -109,7 +115,9 @@ end
         const char* fact_json = R"({"id": 1})";
         REQUIRE_DRILLS_OK(ruleforge_session_add_fact_json(session, fact_type, fact_json));
 
-        REQUIRE_DRILLS_OK(ruleforge_session_fire_all_rules(session));
+        int fired_count = 0;
+        REQUIRE_DRILLS_OK(ruleforge_session_fire_all_rules(session, -1, &fired_count));
+        REQUIRE(fired_count == 1);
         REQUIRE_DRILLS_OK(ruleforge_session_destroy(session));
     }
 
@@ -143,7 +151,10 @@ end
         REQUIRE_DRILLS_OK(ruleforge_session_add_fact_json(session, "Person", R"({"name": "Charlie", "age": 17})"));
         REQUIRE_DRILLS_OK(ruleforge_session_add_fact_json(session, "Person", R"({"name": "Diana", "age": 30})"));
 
-        REQUIRE_DRILLS_OK(ruleforge_session_fire_all_rules(session));
+        // Test fact count
+        REQUIRE(ruleforge_session_get_fact_count(session) == 3);
+
+        REQUIRE_DRILLS_OK(ruleforge_session_fire_all_rules(session, -1, nullptr));
 
         ruleforge_query_result_t query_result = nullptr;
         REQUIRE_DRILLS_OK(ruleforge_session_query(session, "AdultPersons", &query_result));

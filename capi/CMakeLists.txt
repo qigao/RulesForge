@@ -1,5 +1,10 @@
 include(GenerateExportHeader)
 
+# Version information (keep in sync with rule_forge.h)
+set(RULEFORGE_VERSION_MAJOR 0)
+set(RULEFORGE_VERSION_MINOR 1)
+set(RULEFORGE_VERSION_PATCH 0)
+
 # Define the target name for the shared library
 set(CAPI_TARGET_NAME rule_forge)
 
@@ -19,22 +24,25 @@ find_package(pegtl )
 
 
 # Include directories for the CAPI.
- target_include_directories(${CAPI_TARGET_NAME} PUBLIC
+# PUBLIC: Only the C API header - this is what consumers need
+target_include_directories(${CAPI_TARGET_NAME} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include> # For installation
+    $<INSTALL_INTERFACE:include>
+)
+# PRIVATE: Internal implementation headers - not exposed to consumers
+target_include_directories(${CAPI_TARGET_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/ruleforge/include
     ${CMAKE_SOURCE_DIR}/shared/pubcxx/include
 )
 
-target_link_libraries(${CAPI_TARGET_NAME}
-     RuleForge  pubcxx
-    hashmap   taocpp::pegtl
+target_link_libraries(${CAPI_TARGET_NAME} PRIVATE
+    RuleForge pubcxx hashmap taocpp::pegtl
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     # Link against pthread for WASM if threading is used
     # Emscripten provides its own pthread library
-    target_link_libraries(${CAPI_TARGET_NAME} PUBLIC pthread)
+    target_link_libraries(${CAPI_TARGET_NAME} PRIVATE pthread)
 elseif(ANDROID)
     # Android specific settings
     # Set the C++ Standard Library to be used.
@@ -58,6 +66,7 @@ set_target_properties(${CAPI_TARGET_NAME} PROPERTIES
 
 # Install rules (optional, but good practice for a library)
 install(TARGETS ${CAPI_TARGET_NAME}
+    EXPORT RuleForgeTargets
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
@@ -66,4 +75,34 @@ install(TARGETS ${CAPI_TARGET_NAME}
 install(DIRECTORY include/
     DESTINATION include
     FILES_MATCHING PATTERN "*.h"
+)
+
+# --- CMake Package Config ---
+include(CMakePackageConfigHelpers)
+
+# Generate version file
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/RuleForgeConfigVersion.cmake"
+    VERSION ${RULEFORGE_VERSION_MAJOR}.${RULEFORGE_VERSION_MINOR}.${RULEFORGE_VERSION_PATCH}
+    COMPATIBILITY SameMajorVersion
+)
+
+# Export targets
+install(EXPORT RuleForgeTargets
+    FILE RuleForgeTargets.cmake
+    NAMESPACE RuleForge::
+    DESTINATION lib/cmake/RuleForge
+)
+
+# Configure and install the config file
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RuleForgeConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/RuleForgeConfig.cmake"
+    INSTALL_DESTINATION lib/cmake/RuleForge
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/RuleForgeConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/RuleForgeConfigVersion.cmake"
+    DESTINATION lib/cmake/RuleForge
 )

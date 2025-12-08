@@ -116,23 +116,24 @@ The Left-Hand Side (LHS) contains a set of patterns that must be satisfied for t
 
 The Right-Hand Side (RHS) contains the actions to be executed when the rule fires. The RHS is **JavaScript code**.
 
-- **Bound Variables:** Variables bound in the `when` block (e.g., `$c`) are available in JavaScript without the ` prefix (e.g., `c`). You can access their fields like `c.name`.
+- **Bound Variables:** Variables bound in the `when` block (e.g., `$c`) are available in JavaScript without the `$` prefix (e.g., `c`). You can access their fields like `c.name`.
 
 - **`drools` API:** A special `drools` object is available to interact with the engine.
-  - `drools.insert({type="...", field1=val1, ...})`: Inserts a new fact.
-  - `drools.insertLogical({...})`: Inserts a fact that is logically dependent on the facts that activated the rule. It will be automatically retracted if the rule's conditions become false.
-  - `drools.update(fact_variable, {field1=new_val, ...})`: Modifies an existing fact.
+  - `drools.insert({type: "...", field1: val1, ...})`: Inserts a new fact.
+  - `drools.insertLogical({type: "...", ...})`: Inserts a fact that is logically dependent on the facts that activated the rule. It will be automatically retracted if the rule's conditions become false.
   - `drools.retract(fact_variable)`: Retracts a fact from memory.
-  - `drools.setFocus("<GroupName>")`: Changes the active agenda group.
 
-- **`modify` Block (Syntactic Sugar):** The `modify` block is a convenient shortcut for `drools.update`.
-  ```drl
-  // This DRL:
-  modify($c) { setStatus("Platinum"); }
+**Example:**
+```javascript
+// Insert a new fact
+drools.insert({type: "Offer", message: "Welcome, " + c.name});
 
-  // Is translated to this JavaScript code:
-  drools.update(c, { status = "Platinum" })
-  ```
+// Logical insertion - auto-retracted when conditions no longer match
+drools.insertLogical({type: "Alert", reason: "High value customer"});
+
+// Retract an existing fact
+drools.retract(c);
+```
 
 ### Queries
 
