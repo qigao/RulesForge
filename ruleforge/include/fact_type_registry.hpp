@@ -48,3 +48,5 @@ private:
 };
 
 #endif   // FACT_TYPE_REGISTRY_HPP
+
+

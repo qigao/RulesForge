@@ -5,7 +5,7 @@
 ## What is a Rules Engine?
 
 Imagine you run an online store and have business rules like:
-- "Customers who spend over $1000 become VIP members"  
+- "Customers who spend over $1000 become VIP members"
 - "Send welcome email to new customers"
 - "Apply 10% discount if cart has 5+ items"
 
@@ -39,11 +39,11 @@ when
     $c: Customer(balance > 1000, orderCount > 5)
 then
     console.log(`${c.name} is now VIP!`);
-    drools.modify(c, {status: "VIP"});
+    drools.update(c, {status: "VIP"});
     drools.insert({type: "Notification", message: "Welcome to VIP!"});
 end
 
-rule "Age Verification"  
+rule "Age Verification"
 when
     $o: Order(), $c: Customer(id == $o.customerId, age < 18)
 then
@@ -54,7 +54,7 @@ rule "Account Security"
 when
     $c: Customer(failedLogins > 3)
 then
-    drools.modify(c, {accountLocked: true});
+    drools.update(c, {accountLocked: true});
 end
 ```
 
@@ -94,13 +94,13 @@ rule "Can Drive Check"
 when
     // Find a person who is 16 or older and has a license
     $person: Person(age >= 16, hasLicense == true)
-    
+
     // Make sure we haven't already processed them
     not CanDrive(name == $person.name)
 then
     // This is JavaScript code that runs when the rule matches
     console.log($person.name + " can drive!");
-    
+
     // Add new facts to the system
     drools.insert({
         type: "CanDrive",
@@ -132,15 +132,15 @@ int main() {
     std::string rules = read_file("my_first_rules.drl");
     ParsingResult result;
     auto knowledge_base = build_knowledge_base(rules, result);
-    
+
     if (!result.success) {
         std::cerr << "Rules failed to compile!" << std::endl;
         return 1;
     }
-    
+
     // 2. Create a session (think of it as your workspace)
     auto session = knowledge_base->create_session();
-    
+
     // 3. Add some people
     auto person1 = std::make_shared<Fact>();
     person1->type = "Person";
@@ -148,22 +148,22 @@ int main() {
     person1->fields["age"] = static_cast<int64_t>(17);
     person1->fields["hasLicense"] = true;
     session->add_fact(person1);
-    
-    auto person2 = std::make_shared<Fact>();  
+
+    auto person2 = std::make_shared<Fact>();
     person2->type = "Person";
     person2->fields["name"] = "Bob";
     person2->fields["age"] = static_cast<int64_t>(15);
     person2->fields["hasLicense"] = true;
     session->add_fact(person2);
-    
+
     // 4. Run the rules!
     int rules_fired = session->fire_all_rules();
     std::cout << "Executed " << rules_fired << " rules" << std::endl;
-    
+
     // 5. Check what happened
     auto drivers = session->get_facts_of_type("CanDrive");
     std::cout << "Found " << drivers.size() << " people who can drive" << std::endl;
-    
+
     return 0;
 }
 ```
@@ -196,7 +196,7 @@ Think of facts as rows in a database table:
 // This is a "Person" fact
 {
   type: "Person",
-  name: "Alice", 
+  name: "Alice",
   age: 17,
   hasLicense: true
 }
@@ -261,7 +261,7 @@ when
 then
     drools.insert({
         type: "ValidationError",
-        field: "email", 
+        field: "email",
         message: "Email is required and must contain @"
     });
 end
@@ -294,7 +294,7 @@ end
 Once you're comfortable with the basics:
 
 1. **Try More Examples**: Look in the `/drills/example/` directory
-2. **Learn More Patterns**: Check out the [Quick Start Guide](QUICKSTART.md)  
+2. **Learn More Patterns**: Check out the [Quick Start Guide](QUICKSTART.md)
 3. **Advanced Features**: Move to the [User Guide](USER_GUIDE.md)
 4. **Real Projects**: See the [Professional Guide](PROFESSIONAL_GUIDE.md)
 
@@ -314,12 +314,12 @@ declare Person
     age: int
 end
 
-rule "Good Rule"  
+rule "Good Rule"
 when
     $p: Person(age > 18)
 ```
 
-### ❌ Wrong field types  
+### ❌ Wrong field types
 ```drl
 declare Person
     age: String  // Wrong - age should be int
@@ -352,7 +352,7 @@ end
 2. Verify field types (int vs String vs boolean)
 3. Add `console.log()` statements to see what's happening
 
-### "Compilation errors"  
+### "Compilation errors"
 1. Make sure every `declare` block has matching field types
 2. Check for typos in field names
 3. Ensure DRL syntax is correct (commas between constraints)
@@ -365,7 +365,7 @@ end
 ## Help and Resources
 
 - 📖 **More Examples**: `/drills/example/` directory
-- 🐛 **Issues**: Report bugs on GitHub  
+- 🐛 **Issues**: Report bugs on GitHub
 - 💡 **Questions**: Check existing documentation first
 - ⚡ **Performance**: Worry about this later - get it working first!
 

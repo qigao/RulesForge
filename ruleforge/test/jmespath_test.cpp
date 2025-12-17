@@ -302,3 +302,4 @@ TEST_CASE("JMESPath: Real-world E-commerce Analysis", "[jmespath]") {
 
     CHECK(fired == 1);
 }
+

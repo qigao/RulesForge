@@ -112,3 +112,4 @@ std::string DecisionTableConverter::generate_drl() {
 
     return drl_ss.str();
 }
+

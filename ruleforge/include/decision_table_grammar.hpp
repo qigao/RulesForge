@@ -44,3 +44,4 @@ namespace dt_grammar {
 }   // namespace dt_grammar
 
 #endif   // DECISION_TABLE_GRAMMAR_HPP
+

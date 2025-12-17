@@ -28,3 +28,5 @@ struct parser_state {
 };
 
 #endif   // DROOLS_PARSER_STATE_HPP
+
+

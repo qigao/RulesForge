@@ -21,7 +21,7 @@
 Drills implements the **Rete algorithm**, a powerful pattern-matching technique that:
 
 - ✅ **Incremental Processing** - Only recompute what changed
-- ✅ **Memory Networks** - Store intermediate results for speed  
+- ✅ **Memory Networks** - Store intermediate results for speed
 - ✅ **Conflict Resolution** - Handle multiple rule matches intelligently
 - ✅ **Truth Maintenance** - Automatically retract derived facts when premises change
 
@@ -34,8 +34,8 @@ then
     // Only fires when BOTH conditions are met
     // Automatically retracts alert if price goes above 100
     drools.insert({
-        type: "PriceAlert", 
-        userId: user.id, 
+        type: "PriceAlert",
+        userId: user.id,
         productId: product.id
     });
 end
@@ -169,17 +169,17 @@ rule "Rule Name"
             status == "Active",  // String comparison
             balance > 1000.0     // Numeric constraint
         )
-        
+
         // Negative condition
         not VipStatus(customerId == $customer.id)
-        
+
         // Existential check
         exists Order(customerId == $customer.id)
-        
+
     then
         // Right-Hand Side (RHS) - JavaScript Actions
         console.log(`Processing customer: ${customer.name}`);
-        
+
         drools.insert({
             type: "VipStatus",
             customerId: customer.id,
@@ -189,19 +189,69 @@ rule "Rule Name"
 end
 ```
 
-### 2.4 Constraint Operators
+### 2.4 Rule Attributes
+
+| Attribute | Description | Example |
+|-----------|-------------|---------|
+| `salience` | Rule priority (higher = fires first) | `salience 100` |
+| `no-loop` | Prevents rule from re-firing on self-modified facts | `no-loop` |
+| `agenda-group` | Groups rules for focused execution | `agenda-group "validation"` |
+| `activation-group` | Only one rule in the group can fire | `activation-group "exclusive"` |
+| `lock-on-active` | Prevents re-activation while agenda-group is active | `lock-on-active` |
+| `enabled` | Enable/disable rule at parse time (default: true) | `enabled false` |
+| `auto-focus` | Auto-focus agenda-group when rule activates | `auto-focus true` |
+| `duration` | Delay rule execution by milliseconds after activation | `duration 1000` |
+| `extends` | Inherit conditions from another rule | `extends "BaseRule"` |
+
+```drl
+rule "Priority Rule"
+    salience 100              // High priority
+    agenda-group "validation" // Part of validation group
+    no-loop                   // Don't re-fire on own updates
+    when
+        $order: Order(status == "new")
+    then
+        drools.update(order, {status: "validated"});
+end
+
+rule "Exclusive Handler"
+    activation-group "handlers"  // Only one handler fires
+    auto-focus true              // Auto-focus when activated
+    when
+        $event: Event(type == "click")
+    then
+        console.log("Handling click event");
+end
+
+rule "Delayed Processing"
+    duration 5000              // Wait 5 seconds before firing
+    when
+        $alert: Alert(priority == "low")
+    then
+        console.log("Processing low priority alert after delay");
+end
+```
+
+### 2.5 Constraint Operators
 
 | Operator | Description | Example |
 |----------|-------------|---------|
 | `==` | Equality | `status == "Active"` |
 | `!=` | Inequality | `age != 0` |
 | `<`, `<=`, `>`, `>=` | Comparison | `balance > 1000` |
-| `contains` | String/array contains | `name contains "John"` |
-| `matches` | Regex match | `email matches ".*@company\\.com"` |
+| `contains` | String/collection contains value | `name contains "John"` |
+| `not contains` | Negation of contains | `tags not contains "spam"` |
+| `matches` | Regex pattern match | `email matches ".*@company\\.com"` |
+| `not matches` | Negation of matches | `name not matches "^Test.*"` |
+| `memberOf` | Value is member of collection variable | `code memberOf $validCodes` |
+| `not memberOf` | Negation of memberOf | `code not memberOf $invalidCodes` |
+| `startsWith` | String starts with prefix | `name startsWith "Dr."` |
+| `endsWith` | String ends with suffix | `email endsWith ".com"` |
+| `lengthIs` | String length equals | `code lengthIs 5` |
 | `in` | Value in list | `status in ("Active", "Pending")` |
 | `not in` | Value not in list | `country not in ("US", "CA")` |
 
-### 2.5 Pattern Matching
+### 2.6 Pattern Matching
 
 #### Basic Pattern
 ```drl
@@ -222,13 +272,36 @@ $order: Order(
 $user: User(profile.preferences.newsletter == true)
 ```
 
+#### Null-Safe Field Access (`!.`)
+Safely navigate through potentially null fields. Returns `nil` if any segment is null:
+```drl
+// Won't error if address is null - just won't match
+$user: User(address!.city == "NYC")
+
+// Chain multiple null-safe accesses
+$order: Order(customer!.preferences!.priority == "high")
+```
+
+#### Index Access (`[]`)
+Access list elements by index or map values by key:
+```drl
+// Access first item in list
+$order: Order(items[0].name == "Widget")
+
+// Negative index for last item (Python-style)
+$order: Order(items[-1].price > 100)
+
+// Map access by string key
+$config: Config(settings["theme"] == "dark")
+```
+
 #### Variable Binding
 ```drl
 $customer: Customer($customerId: id, balance > 1000)
 $orders: Order(customerId == $customerId)
 ```
 
-### 2.6 Advanced Patterns
+### 2.7 Advanced Patterns
 
 #### Accumulate - Data Aggregation
 ```drl
@@ -249,7 +322,7 @@ end
 - `count()` - Count matching items
 - `sum($field)` - Sum numeric field
 - `min($field)` - Minimum value
-- `max($field)` - Maximum value  
+- `max($field)` - Maximum value
 - `average($field)` - Average value
 
 #### Collect - Gather Facts
@@ -281,7 +354,7 @@ then
 end
 ```
 
-### 2.7 Queries
+### 2.8 Queries
 
 Parameterized queries for data retrieval:
 
@@ -290,7 +363,7 @@ query "customers_by_status"(String requiredStatus)
     $customer: Customer(status == requiredStatus)
 end
 
-query "orders_in_range"(double minAmount, double maxAmount) 
+query "orders_in_range"(double minAmount, double maxAmount)
     $order: Order(amount >= minAmount, amount <= maxAmount)
 end
 
@@ -305,7 +378,7 @@ end
 // Simple query
 auto activeCustomers = session->execute_query("customers_by_status", {"Active"});
 
-// Range query  
+// Range query
 auto midRangeOrders = session->execute_query("orders_in_range", {100.0, 500.0});
 
 // Process results
@@ -322,49 +395,94 @@ for (auto& row : activeCustomers) {
 
 The RHS (then-block) of rules uses **QuickJS** - a fast, lightweight JavaScript engine.
 
-### 3.1 Available APIs
+### 3.1 Critical: Variable Scoping
+
+> ⚠️ **IMPORTANT**: All rules share the same JavaScript context. Use `var` instead of `let` for variable declarations.
+
+```javascript
+// ✅ CORRECT - use var
+var subtotal = order.quantity * order.unitPrice;
+var discount = subtotal * 0.1;
+
+// ❌ WRONG - let causes "redeclaration" errors across rules
+let subtotal = order.quantity * order.unitPrice;  // SyntaxError on second rule!
+```
+
+**Why?** When multiple rules fire, they execute in the same QuickJS global context. `let` doesn't allow redeclaration, causing `SyntaxError: redeclaration of 'variableName'`.
+
+### 3.2 Available JavaScript APIs
 
 #### drools Object
 ```javascript
-// Fact manipulation
-drools.insert({type: "NewFact", field: "value"});
-drools.retract(existingFact);
-drools.modify(existingFact, {field: "newValue"});
+// Insert a new fact (type must be fully qualified from package declaration)
+drools.insert({type: "com.example.Customer", name: "John", balance: 1000});
 
-// Logical assertions (auto-retracted when rule no longer matches)
-drools.insertLogical({type: "DerivedFact", source: customer.id});
+// Update an existing fact
+drools.update(order, {finalPrice: 99.99, status: "processed"});
 
-// Working memory queries
-let facts = drools.getFactsOfType("Customer");
-let fact = drools.getFactById(123);
+// Retract (delete) a fact
+drools.retract(oldFact);
+
+// Logical insertion (auto-retracted when rule conditions no longer match)
+drools.insertLogical({type: "com.example.Alert", message: "Low stock"});
+
+// Stop rule execution immediately
+drools.halt();
+
+// Set agenda focus to a specific group
+drools.setFocus("cleanup");
+
+// Get information about the current rule
+var ruleName = drools.getRule().name;
+console.log("Executing rule: " + ruleName);
+```
+
+#### Modify Block Syntax
+A Drools-style structured way to update facts:
+```drl
+// Instead of drools.update(), you can use modify block:
+modify($person) {
+    setAge(30),
+    setStatus("updated"),
+    setScore(person.score + 100)
+}
+// This transforms to: drools.update(person, {age: 30, status: "updated", score: person.score + 100})
 ```
 
 #### Console Logging
 ```javascript
 console.log("Info message");
-console.warn("Warning message");  
+console.warn("Warning message");
 console.error("Error message");
 ```
 
-#### Standard JavaScript
+#### JavaScript Built-in Objects
+
+The following JavaScript globals are available in RHS:
+
+| Category | Available Objects/Functions |
+|----------|----------------------------|
+| **Math** | `Math.floor()`, `Math.ceil()`, `Math.round()`, `Math.max()`, `Math.min()`, `Math.abs()`, `Math.pow()`, `Math.sqrt()`, `Math.random()` |
+| **Date** | `Date.now()`, `new Date()`, date methods |
+| **JSON** | `JSON.parse()`, `JSON.stringify()` |
+| **Type Conversion** | `parseInt()`, `parseFloat()`, `isNaN()`, `isFinite()` |
+| **String** | `String()`, string methods, template literals |
+| **Array** | `Array()`, `Array.isArray()`, array methods |
+| **Object** | `Object.keys()`, `Object.values()`, `Object.assign()` |
+| **Other** | `Boolean()`, `Number()`, `RegExp()`, `Error()`, `Map`, `Set` |
+
 ```javascript
-// Math operations
-let score = Math.max(0, Math.min(100, balance / 1000));
-
-// Date operations
-let now = Date.now();
-let expire = now + (30 * 24 * 60 * 60 * 1000); // 30 days
-
-// String operations
-let message = `Customer ${customer.name} has balance $${customer.balance}`;
-
-// JSON operations
-let config = JSON.parse(customer.preferences);
+// Examples
+var rounded = Math.floor(order.finalPrice);
+var now = Date.now();
+var config = JSON.parse(customer.preferences);
+var total = parseInt(order.total);
+var message = `Customer ${customer.name} has ${orders.length} orders`;
 ```
 
-### 3.2 Variable Binding
+### 3.3 Variable Binding Rules
 
-DRL variables become JavaScript objects:
+DRL bindings (with `$` prefix) become JavaScript variables (without `$`):
 
 ```drl
 rule "Example"
@@ -372,68 +490,123 @@ when
     $customer: Customer($name: name, $balance: balance)
     $order: Order(customerId == $customer.id, $amount: amount)
 then
-    // DRL $customer becomes JS customer
-    console.log(`Customer: ${customer.name}`);
-    
-    // Field bindings become JS variables
-    console.log(`Name: ${name}, Balance: ${balance}`);
-    console.log(`Order amount: ${amount}`);
-    
-    // Access nested fields
+    // DRL $customer becomes JS customer ($ stripped)
+    console.log("Customer: " + customer.name);
+
+    // Field bindings also lose the $ prefix
+    console.log("Name: " + name + ", Balance: " + balance);
+    console.log("Order amount: " + amount);
+
+    // Access nested fields directly
     if (customer.profile && customer.profile.email) {
-        console.log(`Email: ${customer.profile.email}`);
+        console.log("Email: " + customer.profile.email);
     }
 end
 ```
 
-### 3.3 Complex JavaScript Actions
+**Binding Reference:**
+| DRL (LHS) | JavaScript (RHS) |
+|-----------|------------------|
+| `$customer` | `customer` |
+| `$order` | `order` |
+| `$name: name` | `name` |
+| `$totalAmount` | `totalAmount` |
+
+### 3.4 Type Names in drools.insert()
+
+When inserting facts, the `type` field must use the **fully qualified name** from the package declaration:
 
 ```drl
-rule "Complex Business Logic"
+package com.example.pricing
+
+declare Order
+    quantity: int
+    unitPrice: double
+end
+
+rule "Create Order"
 when
-    $customer: Customer()
-    $orders: List() from collect(Order(customerId == $customer.id))
+    // ...
 then
-    // Calculate metrics
-    let totalAmount = 0;
-    let orderCount = orders.length;
-    
-    for (let order of orders) {
-        totalAmount += order.amount;
-        
-        // Check for patterns
-        if (order.category === "Premium" && order.amount > 1000) {
-            drools.insert({
-                type: "PremiumPurchase",
-                customerId: customer.id,
-                orderId: order.id,
-                amount: order.amount
-            });
-        }
-    }
-    
-    // Determine customer tier
-    let tier = "Bronze";
-    if (totalAmount > 10000) tier = "Gold";
-    else if (totalAmount > 5000) tier = "Silver";
-    
-    // Update customer
-    drools.modify(customer, {
-        totalSpent: totalAmount,
-        orderCount: orderCount,
-        tier: tier,
-        lastUpdated: Date.now()
+    // ✅ CORRECT - fully qualified type name
+    drools.insert({
+        type: "com.example.pricing.Order",
+        quantity: 5,
+        unitPrice: 19.99
     });
-    
-    // Send notifications
-    if (tier !== customer.tier) {
-        drools.insert({
-            type: "TierChangeNotification",
-            customerId: customer.id,
-            oldTier: customer.tier,
-            newTier: tier
-        });
-    }
+
+    // ❌ WRONG - unqualified name won't match alpha network
+    drools.insert({
+        type: "Order",  // This fact won't trigger rules!
+        quantity: 5,
+        unitPrice: 19.99
+    });
+end
+```
+
+### 3.5 Preventing Infinite Loops
+
+When a rule updates a fact that matches its own conditions, it can trigger infinitely. Use `no-loop` to prevent this:
+
+```drl
+rule "Round Down Price"
+    no-loop  // Prevents re-triggering on self-modified facts
+    when
+        $order: Order(finalPrice > 0)
+    then
+        var rounded = Math.floor(order.finalPrice);
+        drools.update(order, {finalPrice: rounded});
+        // Without no-loop: would fire again because finalPrice > 0 still true!
+end
+```
+
+**Alternative:** Design conditions that become false after the action:
+
+```drl
+rule "Apply Discount Once"
+    when
+        $order: Order(discountApplied == false)  // Condition becomes false after update
+    then
+        var discounted = order.total * 0.9;
+        drools.update(order, {total: discounted, discountApplied: true});
+end
+```
+
+### 3.6 Complete Example
+
+```drl
+package com.example.pricing
+
+declare Order
+    quantity: int
+    unitPrice: double
+    finalPrice: double
+end
+
+// Apply 10% discount for bulk orders
+rule "Bulk Discount"
+    when
+        $order: Order(quantity >= 10, finalPrice < 0.01)
+    then
+        console.log("Applying bulk discount for qty=" + order.quantity);
+        var subtotal = order.quantity * order.unitPrice;
+        var discounted = subtotal * 0.90;
+        drools.update(order, {finalPrice: discounted});
+end
+
+// Round down final price
+rule "Round Down"
+    salience -10  // Run after discount rules
+    no-loop       // Prevent infinite loop
+    when
+        $order: Order(finalPrice > 0.01)
+    then
+        var rounded = Math.floor(order.finalPrice);
+        drools.update(order, {finalPrice: rounded});
+end
+
+query "ProcessedOrders"
+    $order: Order(finalPrice > 0)
 end
 ```
 
@@ -463,8 +636,8 @@ then
         currentState: "VALIDATION",
         data: {startTime: Date.now()}
     });
-    
-    drools.modify(request, {status: "PROCESSING"});
+
+    drools.update(request, {status: "PROCESSING"});
 end
 
 rule "Validation Complete"
@@ -472,18 +645,18 @@ when
     $state: ProcessState(currentState == "VALIDATION")
     $validation: ValidationResult(processId == $state.processId, valid == true)
 then
-    drools.modify(state, {
+    drools.update(state, {
         currentState: "APPROVAL",
         data: {...state.data, validatedAt: Date.now()}
     });
 end
 
 rule "Process Approved"
-when  
+when
     $state: ProcessState(currentState == "APPROVAL")
     $approval: ApprovalResult(processId == $state.processId, approved == true)
 then
-    drools.modify(state, {
+    drools.update(state, {
         currentState: "COMPLETE",
         data: {...state.data, completedAt: Date.now()}
     });
@@ -492,7 +665,43 @@ end
 
 ### 4.2 Complex Event Processing (CEP)
 
-Track patterns across time:
+Track patterns across time using temporal operators and entry points.
+
+#### Temporal Operators
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `after` | Event occurs after another | `timestamp after $e1.timestamp` |
+| `before` | Event occurs before another | `timestamp before $e1.timestamp` |
+| `within` | Events within time window | `within 60s of $e1` |
+| `coincides` | Events at same time | `timestamp coincides $e1.timestamp` |
+| `during` | Event during another | `timestamp during $e1.timestamp` |
+
+**Duration literals:** `300ms`, `5s`, `10m`, `1h`
+
+#### Entry Points for Event Streams
+Insert events into named entry points for stream-based processing:
+
+```cpp
+// C++ - Insert into named entry point
+auto event = std::make_shared<Fact>();
+event->type = "SensorReading";
+event->fields["value"] = 42.0;
+event->fields["timestamp"] = getCurrentTimestamp();
+
+session->insert_into("sensor-stream", event);
+```
+
+```drl
+rule "Process Sensor Events"
+when
+    // Only matches facts from the "sensor-stream" entry point
+    $reading: SensorReading(value > threshold) from entry-point "sensor-stream"
+then
+    console.log("Sensor alert: " + reading.value);
+end
+```
+
+#### Temporal Pattern Example
 
 ```drl
 declare LoginEvent
@@ -511,7 +720,7 @@ when
     $user: User()
     $failedLogins: Number() from accumulate(
         LoginEvent(
-            userId == $user.id, 
+            userId == $user.id,
             success == false,
             timestamp > (Date.now() - 300000) // Last 5 minutes
         ),
@@ -525,7 +734,7 @@ then
         userId: user.id,
         reason: `${failedLogins} failed logins in 5 minutes`
     });
-    
+
     console.warn(`SECURITY ALERT: User ${user.id} has ${failedLogins} failed logins`);
 end
 
@@ -534,16 +743,16 @@ when
     $user: User()
     $login1: LoginEvent(userId == $user.id, $ip1: ipAddress)
     $login2: LoginEvent(
-        userId == $user.id, 
+        userId == $user.id,
         ipAddress != $ip1,
         timestamp > $login1.timestamp,
         timestamp < ($login1.timestamp + 3600000) // Within 1 hour
     )
 then
     // Check if IPs are from different countries
-    let country1 = geoLookup(login1.ipAddress);
-    let country2 = geoLookup(login2.ipAddress);
-    
+    var country1 = geoLookup(login1.ipAddress);
+    var country2 = geoLookup(login2.ipAddress);
+
     if (country1 !== country2) {
         drools.insert({
             type: "SuspiciousActivity",
@@ -585,7 +794,7 @@ when
     $customer: Customer(age < 18)
 then
     drools.insert({
-        type: "ValidationError", 
+        type: "ValidationError",
         entityType: "Customer",
         entityId: customer.id,
         field: "age",
@@ -605,7 +814,7 @@ when
 then
     drools.insert({
         type: "ValidationError",
-        entityType: "Customer", 
+        entityType: "Customer",
         entityId: customer.id,
         field: "balance",
         message: `Balance mismatch: ${balance} vs calculated ${totalOrders}`,
@@ -622,7 +831,7 @@ end
 
 #### ✅ Put Selective Constraints First
 ```drl
-// Good - most selective constraint first  
+// Good - most selective constraint first
 when
     $customer: Customer(tier == "VIP", status == "Active")
 
@@ -641,7 +850,7 @@ then
     // Validate data
 end
 
-rule "Business Logic"  
+rule "Business Logic"
 salience 100   // Run after validation
 when
     $data: InputData(valid == true)
@@ -673,7 +882,7 @@ auto customer = FAST_CUSTOMER()
     .balance(5000.0)
     .build();
 
-// Standard approach  
+// Standard approach
 auto customer = std::make_shared<Fact>();
 customer->type = "Customer";
 customer->fields["id"] = static_cast<int64_t>(1001);
@@ -699,7 +908,7 @@ for (int i = 0; i < 1000; ++i) {
 ### 5.3 Monitoring Rule Performance
 
 ```cpp
-// Enable rule tracing  
+// Enable rule tracing
 session->enable_tracing(true);
 
 // Execute rules
@@ -710,7 +919,7 @@ auto trace = session->get_execution_trace();
 auto summary = session->get_rule_performance_summary();
 
 for (auto& [rule_name, stats] : summary) {
-    std::cout << rule_name << ": " 
+    std::cout << rule_name << ": "
               << stats.execution_count << " executions, "
               << stats.total_time_ms << "ms total\n";
 }
@@ -734,7 +943,150 @@ The `StatefulSession` is the engine\'s working memory, designed for efficient pa
 
 **In essence:** The rules engine processes logic, it does not store your application\'s entire dataset. Respect the engine\'s design to ensure optimal performance and maintainability.
 
---- 
+### 5.5 Thread Safety
+
+Understanding thread safety is critical for production deployments.
+
+#### KnowledgeBase: Thread-Safe (Immutable)
+
+The `KnowledgeBase` is **fully thread-safe** because it is immutable after construction:
+
+```cpp
+// Build once, share everywhere
+auto kb = build_knowledge_base(drl_source, result);
+
+// Safe: multiple threads can create sessions from the same KB
+std::thread t1([&kb]() {
+    auto session = kb->create_session();
+    // Use session...
+});
+
+std::thread t2([&kb]() {
+    auto session = kb->create_session();
+    // Use session...
+});
+```
+
+The knowledge base contains:
+- Compiled RETE network structure (read-only)
+- Parsed rule definitions (read-only)
+- Type declarations (read-only)
+
+**Key principle:** Build the `KnowledgeBase` once during application startup, then share it across all threads.
+
+#### StatefulSession: NOT Thread-Safe
+
+Each `StatefulSession` is **NOT thread-safe** and must be used from a single thread:
+
+```cpp
+// CORRECT: Each thread owns its session
+void process_request(KnowledgeBase const& kb, Request const& req) {
+    auto session = kb.create_session();  // Thread-local session
+    session->add_fact(create_fact(req));
+    session->fire_all_rules();
+    // Results...
+}
+
+// WRONG: Never share sessions between threads!
+auto shared_session = kb->create_session();
+
+std::thread t1([&]() {
+    shared_session->add_fact(fact1);  // DATA RACE!
+});
+
+std::thread t2([&]() {
+    shared_session->fire_all_rules();  // DATA RACE!
+});
+```
+
+The session contains mutable state:
+- Working memory (facts)
+- Agenda (pending activations)
+- Token/WME caches
+- Transaction state
+- Metrics counters
+
+#### Recommended Pattern: Session-per-Request
+
+For web servers and concurrent workloads:
+
+```cpp
+class RuleEngineService {
+    std::shared_ptr<KnowledgeBase const> kb_;
+
+public:
+    void initialize(std::string const& rules) {
+        ParseResult result;
+        kb_ = build_knowledge_base(rules, result);
+        if (!result.success) {
+            throw std::runtime_error("Rule compilation failed");
+        }
+    }
+
+    // Thread-safe: each request gets its own session
+    ProcessResult process(Request const& request) {
+        auto session = kb_->create_session();
+
+        // Insert request data
+        session->add_fact(create_fact(request));
+
+        // Fire rules
+        session->fire_all_rules();
+
+        // Query results
+        auto results = session->execute_query("results");
+
+        // Session destroyed at end of scope
+        return build_response(results);
+    }
+};
+```
+
+#### Metrics Collection Across Threads
+
+When collecting metrics from multiple sessions:
+
+```cpp
+#include "metrics_exporter.hpp"
+
+// Thread-safe metrics aggregation
+std::atomic<int64_t> global_rules_fired{0};
+std::atomic<int64_t> global_facts_processed{0};
+
+void process_with_metrics(KnowledgeBase const& kb, Request const& req) {
+    auto session = kb.create_session();
+    session->add_fact(create_fact(req));
+    session->fire_all_rules();
+
+    // Collect session metrics (thread-safe)
+    auto metrics = session->get_metrics();
+    global_rules_fired += metrics.rules_fired_total;
+    global_facts_processed += metrics.facts_inserted_total;
+}
+
+// Export metrics (e.g., for Prometheus endpoint)
+std::string get_prometheus_metrics() {
+    PrometheusExporter exporter("myapp");
+    SessionMetrics aggregated;
+    aggregated.rules_fired_total = global_rules_fired.load();
+    aggregated.facts_inserted_total = global_facts_processed.load();
+    return exporter.export_metrics(aggregated);
+}
+```
+
+#### Summary Table
+
+| Component | Thread-Safe | Reason |
+|-----------|-------------|--------|
+| `KnowledgeBase` | ✅ Yes | Immutable after construction |
+| `StatefulSession` | ❌ No | Contains mutable working memory |
+| `create_session()` | ✅ Yes | Creates independent session |
+| `get_metrics()` | ✅ Yes | Returns copy of metrics |
+| `fire_all_rules()` | ❌ No | Modifies session state |
+| `add_fact()` | ❌ No | Modifies working memory |
+| `execute_query()` | ❌ No | Reads session state |
+
+---
 
 ## 6. Troubleshooting
 
@@ -762,12 +1114,12 @@ end
 // Add error handling in RHS
 then
     try {
-        let result = complexCalculation(customer.data);
+        var result = complexCalculation(customer.data);
         drools.insert({type: "Result", value: result});
     } catch (error) {
         console.error("Calculation failed: " + error.message);
         drools.insert({
-            type: "ProcessingError", 
+            type: "ProcessingError",
             entityId: customer.id,
             error: error.message
         });
@@ -780,7 +1132,7 @@ then
 auto stats = PoolStatsCollector::collect();
 std::cout << PoolStatsCollector::format_stats(stats) << std::endl;
 
-// Clear unused facts periodically  
+// Clear unused facts periodically
 session->retract_facts_of_type("TemporaryData");
 
 // Use object pools for high-frequency operations
@@ -796,7 +1148,7 @@ auto start = std::chrono::high_resolution_clock::now();
 
 session->fire_all_rules();
 
-auto end = std::chrono::high_resolution_clock::now(); 
+auto end = std::chrono::high_resolution_clock::now();
 auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
 std::cout << "Rules execution took: " << duration.count() << "ms\n";
@@ -823,7 +1175,7 @@ session->add_facts(orders);
 // Better than mixed addition
 ```
 
---- 
+---
 
 ## Next Steps
 
@@ -831,7 +1183,7 @@ Ready for advanced topics?
 
 -   **[Deployment Guide](DEPLOYMENT.md)** - Production deployment, monitoring
 
---- 
+---
 
 *"Good programmers worry about data structures and their relationships. Bad programmers worry about the code."* - Linus Torvalds
 
@@ -843,7 +1195,7 @@ The Drills engine is built around elegant data structures that make complex busi
 Ready for advanced topics?
 
 - **[Developer Guide](DEVELOPER_GUIDE.md)** - Extending the engine, custom functions
-- **[API Reference](API_REFERENCE.md)** - Complete C++ API documentation  
+- **[API Reference](API_REFERENCE.md)** - Complete C++ API documentation
 - **[Deployment Guide](DEPLOYMENT.md)** - Production deployment, monitoring
 - **[Architecture Guide](ARCHITECTURE.md)** - Understanding the Rete implementation
 

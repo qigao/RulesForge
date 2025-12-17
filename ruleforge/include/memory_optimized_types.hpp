@@ -8,10 +8,7 @@
 #include <phmap.h>
 #include <optional>
 #include <sstream>
-
-// Memory pool forward declaration
-template<typename T>
-class ObjectPool;
+#include <unordered_set>
 
 // String interning for constant strings (rule names, type names, etc.)
 class StringInterner {
@@ -49,7 +46,9 @@ public:
     }
 
 private:
-    unordered_set<std::string> interned_strings_;
+    // MUST use std::unordered_set (node-based) for pointer stability.
+    // phmap::flat_hash_set moves elements on rehash, invalidating string_views.
+    std::unordered_set<std::string> interned_strings_;
 };
 
 // Fast string lookup using string_view keys
@@ -137,3 +136,4 @@ struct FastFact {
 };
 
 #endif // MEMORY_OPTIMIZED_TYPES_HPP
+

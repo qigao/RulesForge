@@ -133,3 +133,5 @@ void AstTransformer::expand_foralls_in_list(std::vector<ParsedPattern>& patterns
         }
     }
 }
+
+

@@ -14,3 +14,4 @@ struct DecisionTable {
 };
 
 #endif   // DECISION_TABLE_HPP
+

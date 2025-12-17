@@ -57,3 +57,4 @@ TEST_CASE("Engine: Listener and Auditing API", "[engine][listener]") {
     expected_log = {"RETRACT:Listen To This"};
     CHECK(listener->event_log == expected_log);
 }
+

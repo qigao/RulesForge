@@ -1,0 +1,596 @@
+package com.ecommerce
+
+// ============================================================================
+// ORDER FULFILLMENT RULES
+// E-commerce order processing with inventory, pricing, and shipping logic.
+// ============================================================================
+
+// --- Type Declarations ---
+
+declare Order
+    orderId: String
+    customerId: String
+    customerTier: String
+    orderDate: long
+    shippingCountry: String
+    shippingState: String
+    shippingCity: String
+    shippingZip: String
+    requestedDeliveryDate: long
+    giftOrder: boolean
+    expressShipping: boolean
+end
+
+declare OrderItem
+    itemId: String
+    orderId: String
+    productId: String
+    productName: String
+    quantity: int
+    unitPrice: double
+    category: String
+    weight: double
+end
+
+declare Inventory
+    warehouseId: String
+    productId: String
+    quantityAvailable: int
+    quantityReserved: int
+    reorderPoint: int
+end
+
+declare Warehouse
+    warehouseId: String
+    name: String
+    state: String
+    zipCode: String
+end
+
+declare Promotion
+    promoId: String
+    promoCode: String
+    discountType: String
+    discountValue: double
+    minOrderAmount: double
+    validCategory: String
+    active: boolean
+end
+
+declare OrderValidation
+    orderId: String
+    isValid: boolean
+    issue: String
+end
+
+declare ItemDiscount
+    itemId: String
+    orderId: String
+    discountType: String
+    discountAmount: double
+    reason: String
+end
+
+declare OrderDiscount
+    orderId: String
+    discountType: String
+    discountAmount: double
+    reason: String
+end
+
+declare PricingResult
+    orderId: String
+    subtotal: double
+    itemDiscounts: double
+    orderDiscounts: double
+    shippingCost: double
+    taxAmount: double
+    totalAmount: double
+end
+
+declare FulfillmentPlan
+    orderId: String
+    itemId: String
+    warehouseId: String
+    carrier: String
+    shippingMethod: String
+    shippingCost: double
+end
+
+declare InventoryAlert
+    warehouseId: String
+    productId: String
+    alertType: String
+    currentQuantity: int
+    threshold: int
+end
+
+declare OrderStatus
+    orderId: String
+    status: String
+    message: String
+end
+
+// ============================================================================
+// PHASE 1: ORDER VALIDATION (salience 100)
+// ============================================================================
+
+rule "Validate - Check Item Inventory"
+    salience 100
+    when
+        $item: OrderItem($orderId: orderId, $prodId: productId, $qty: quantity)
+        $totalAvailable: Number() from accumulate(
+            Inventory(productId == $prodId, $avail: quantityAvailable, $reserved: quantityReserved),
+            sum($avail - $reserved)
+        )
+        eval(totalAvailable.intValue() < $item.quantity)
+        not (OrderValidation(orderId == $orderId, issue contains $prodId))
+    then
+        console.log("VALIDATION FAILED: Insufficient stock for " + item.productName +
+                    " (need " + item.quantity + ", have " + totalAvailable + ")");
+
+        drools.insert({
+            type: "com.ecommerce.OrderValidation",
+            orderId: item.orderId,
+            isValid: false,
+            issue: "Insufficient stock for product " + item.productId
+        });
+end
+
+rule "Validate - Order Passes"
+    salience 90
+    when
+        OrderItem($orderId: orderId)
+        $order: Order(orderId == $orderId)
+        not (OrderValidation(orderId == $orderId, isValid == false))
+        not (OrderValidation(orderId == $orderId, isValid == true))
+    then
+        console.log("VALIDATION PASSED: Order " + order.orderId);
+
+        drools.insert({
+            type: "com.ecommerce.OrderValidation",
+            orderId: order.orderId,
+            isValid: true,
+            issue: ""
+        });
+end
+
+// ============================================================================
+// PHASE 2: ITEM-LEVEL DISCOUNTS (salience 80)
+// ============================================================================
+
+rule "Discount - Bulk Order Item"
+    salience 80
+    when
+        $item: OrderItem($itemId: itemId, $orderId: orderId, quantity >= 10, $price: unitPrice, $qty: quantity)
+        OrderValidation(orderId == $orderId, isValid == true)
+        not (ItemDiscount(itemId == $itemId, discountType == "BULK"))
+    then
+        var discountAmount = item.unitPrice * item.quantity * 0.10;
+        console.log("DISCOUNT: Bulk order discount on " + item.productName + " - $" + discountAmount.toFixed(2));
+
+        drools.insert({
+            type: "com.ecommerce.ItemDiscount",
+            itemId: item.itemId,
+            orderId: item.orderId,
+            discountType: "BULK",
+            discountAmount: discountAmount,
+            reason: "10% bulk order discount (10+ items)"
+        });
+end
+
+rule "Discount - Category Promotion"
+    salience 80
+    when
+        $item: OrderItem($itemId: itemId, $orderId: orderId, $cat: category, $price: unitPrice, $qty: quantity)
+        $promo: Promotion(validCategory == $cat, active == true, discountType == "percent")
+        OrderValidation(orderId == $orderId, isValid == true)
+        not (ItemDiscount(itemId == $itemId, discountType == "PROMO"))
+    then
+        var discountAmount = item.unitPrice * item.quantity * (promo.discountValue / 100);
+        console.log("DISCOUNT: " + promo.promoCode + " applied to " + item.productName + " - $" + discountAmount.toFixed(2));
+
+        drools.insert({
+            type: "com.ecommerce.ItemDiscount",
+            itemId: item.itemId,
+            orderId: item.orderId,
+            discountType: "PROMO",
+            discountAmount: discountAmount,
+            reason: promo.promoCode + " - " + promo.discountValue + "% off " + item.category
+        });
+end
+
+// ============================================================================
+// PHASE 3: ORDER-LEVEL DISCOUNTS (salience 75)
+// ============================================================================
+
+rule "Discount - Platinum Customer"
+    salience 75
+    when
+        $order: Order($orderId: orderId, customerTier == "platinum")
+        OrderValidation(orderId == $orderId, isValid == true)
+        $subtotal: Number() from accumulate(
+            OrderItem(orderId == $orderId, $price: unitPrice, $qty: quantity),
+            sum($price * $qty)
+        )
+        not (OrderDiscount(orderId == $orderId, discountType == "LOYALTY"))
+    then
+        var discountAmount = subtotal * 0.15;
+        console.log("DISCOUNT: Platinum loyalty - $" + discountAmount.toFixed(2) + " (15%)");
+
+        drools.insert({
+            type: "com.ecommerce.OrderDiscount",
+            orderId: order.orderId,
+            discountType: "LOYALTY",
+            discountAmount: discountAmount,
+            reason: "Platinum member 15% discount"
+        });
+end
+
+rule "Discount - Gold Customer"
+    salience 75
+    when
+        $order: Order($orderId: orderId, customerTier == "gold")
+        OrderValidation(orderId == $orderId, isValid == true)
+        $subtotal: Number() from accumulate(
+            OrderItem(orderId == $orderId, $price: unitPrice, $qty: quantity),
+            sum($price * $qty)
+        )
+        not (OrderDiscount(orderId == $orderId, discountType == "LOYALTY"))
+    then
+        var discountAmount = subtotal * 0.10;
+        console.log("DISCOUNT: Gold loyalty - $" + discountAmount.toFixed(2) + " (10%)");
+
+        drools.insert({
+            type: "com.ecommerce.OrderDiscount",
+            orderId: order.orderId,
+            discountType: "LOYALTY",
+            discountAmount: discountAmount,
+            reason: "Gold member 10% discount"
+        });
+end
+
+rule "Discount - Silver Customer"
+    salience 75
+    when
+        $order: Order($orderId: orderId, customerTier == "silver")
+        OrderValidation(orderId == $orderId, isValid == true)
+        $subtotal: Number() from accumulate(
+            OrderItem(orderId == $orderId, $price: unitPrice, $qty: quantity),
+            sum($price * $qty)
+        )
+        not (OrderDiscount(orderId == $orderId, discountType == "LOYALTY"))
+    then
+        var discountAmount = subtotal * 0.05;
+        console.log("DISCOUNT: Silver loyalty - $" + discountAmount.toFixed(2) + " (5%)");
+
+        drools.insert({
+            type: "com.ecommerce.OrderDiscount",
+            orderId: order.orderId,
+            discountType: "LOYALTY",
+            discountAmount: discountAmount,
+            reason: "Silver member 5% discount"
+        });
+end
+
+// ============================================================================
+// PHASE 4: SHIPPING CALCULATION (salience 70)
+// ============================================================================
+
+rule "Shipping - Free Ground Over $75"
+    salience 70
+    activation-group "shipping-cost"
+    when
+        $order: Order($orderId: orderId, shippingCountry == "US", expressShipping == false)
+        OrderValidation(orderId == $orderId, isValid == true)
+        $subtotal: Number(doubleValue >= 75) from accumulate(
+            OrderItem(orderId == $orderId, $price: unitPrice, $qty: quantity),
+            sum($price * $qty)
+        )
+        not (OrderDiscount(orderId == $orderId, discountType == "FREE_SHIPPING"))
+    then
+        console.log("SHIPPING: Free ground shipping (order over $75)");
+
+        drools.insert({
+            type: "com.ecommerce.OrderDiscount",
+            orderId: order.orderId,
+            discountType: "FREE_SHIPPING",
+            discountAmount: 0,
+            reason: "Free ground shipping on orders over $75"
+        });
+end
+
+rule "Shipping - Express Domestic"
+    salience 70
+    activation-group "shipping-cost"
+    when
+        $order: Order($orderId: orderId, shippingCountry == "US", expressShipping == true)
+        OrderValidation(orderId == $orderId, isValid == true)
+        $totalWeight: Number() from accumulate(
+            OrderItem(orderId == $orderId, $w: weight, $qty: quantity),
+            sum($w * $qty)
+        )
+        not (OrderDiscount(orderId == $orderId, discountType == "SHIPPING_CALC"))
+    then
+        var baseCost = 12.99;
+        var weightCost = totalWeight * 0.50;
+        var shippingCost = baseCost + weightCost;
+        console.log("SHIPPING: Express domestic - $" + shippingCost.toFixed(2));
+
+        drools.insert({
+            type: "com.ecommerce.OrderDiscount",
+            orderId: order.orderId,
+            discountType: "SHIPPING_CALC",
+            discountAmount: -shippingCost,
+            reason: "Express shipping: $" + shippingCost.toFixed(2)
+        });
+end
+
+rule "Shipping - Standard Domestic"
+    salience 65
+    activation-group "shipping-cost"
+    when
+        $order: Order($orderId: orderId, shippingCountry == "US")
+        OrderValidation(orderId == $orderId, isValid == true)
+        $totalWeight: Number() from accumulate(
+            OrderItem(orderId == $orderId, $w: weight, $qty: quantity),
+            sum($w * $qty)
+        )
+        not (OrderDiscount(orderId == $orderId, discountType == "FREE_SHIPPING"))
+        not (OrderDiscount(orderId == $orderId, discountType == "SHIPPING_CALC"))
+    then
+        var baseCost = 5.99;
+        var weightCost = totalWeight * 0.25;
+        var shippingCost = baseCost + weightCost;
+        console.log("SHIPPING: Standard domestic - $" + shippingCost.toFixed(2));
+
+        drools.insert({
+            type: "com.ecommerce.OrderDiscount",
+            orderId: order.orderId,
+            discountType: "SHIPPING_CALC",
+            discountAmount: -shippingCost,
+            reason: "Standard shipping: $" + shippingCost.toFixed(2)
+        });
+end
+
+rule "Shipping - International"
+    salience 70
+    activation-group "shipping-cost"
+    when
+        $order: Order($orderId: orderId, shippingCountry != "US")
+        OrderValidation(orderId == $orderId, isValid == true)
+        $totalWeight: Number() from accumulate(
+            OrderItem(orderId == $orderId, $w: weight, $qty: quantity),
+            sum($w * $qty)
+        )
+        not (OrderDiscount(orderId == $orderId, discountType == "SHIPPING_CALC"))
+    then
+        var baseCost = 24.99;
+        var weightCost = totalWeight * 1.50;
+        var shippingCost = baseCost + weightCost;
+        console.log("SHIPPING: International - $" + shippingCost.toFixed(2));
+
+        drools.insert({
+            type: "com.ecommerce.OrderDiscount",
+            orderId: order.orderId,
+            discountType: "SHIPPING_CALC",
+            discountAmount: -shippingCost,
+            reason: "International shipping: $" + shippingCost.toFixed(2)
+        });
+end
+
+// ============================================================================
+// PHASE 5: PRICING SUMMARY (salience 60)
+// ============================================================================
+
+rule "Calculate Final Pricing"
+    salience 60
+    when
+        $order: Order($orderId: orderId)
+        OrderValidation(orderId == $orderId, isValid == true)
+        $subtotal: Number() from accumulate(
+            OrderItem(orderId == $orderId, $price: unitPrice, $qty: quantity),
+            sum($price * $qty)
+        )
+        $itemDiscounts: Number() from accumulate(
+            ItemDiscount(orderId == $orderId, $amt: discountAmount),
+            sum($amt)
+        )
+        $orderDiscounts: Number() from accumulate(
+            OrderDiscount(orderId == $orderId, discountType != "SHIPPING_CALC", $amt: discountAmount),
+            sum($amt)
+        )
+        $shippingCost: Number() from accumulate(
+            OrderDiscount(orderId == $orderId, discountType == "SHIPPING_CALC", $amt: discountAmount),
+            sum($amt)
+        )
+        not (PricingResult(orderId == $orderId))
+    then
+        var sub = subtotal.doubleValue();
+        var itemDisc = itemDiscounts.doubleValue();
+        var orderDisc = orderDiscounts.doubleValue();
+        var shipping = Math.abs(shippingCost.doubleValue());
+
+        var taxableAmount = sub - itemDisc - orderDisc;
+        var tax = taxableAmount * 0.0875; // 8.75% tax
+        var total = taxableAmount + shipping + tax;
+
+        console.log("=== PRICING SUMMARY ===");
+        console.log("Subtotal:        $" + sub.toFixed(2));
+        console.log("Item Discounts:  -$" + itemDisc.toFixed(2));
+        console.log("Order Discounts: -$" + orderDisc.toFixed(2));
+        console.log("Shipping:        $" + shipping.toFixed(2));
+        console.log("Tax (8.75%):     $" + tax.toFixed(2));
+        console.log("TOTAL:           $" + total.toFixed(2));
+        console.log("=======================");
+
+        drools.insert({
+            type: "com.ecommerce.PricingResult",
+            orderId: order.orderId,
+            subtotal: sub,
+            itemDiscounts: itemDisc,
+            orderDiscounts: orderDisc,
+            shippingCost: shipping,
+            taxAmount: tax,
+            totalAmount: total
+        });
+end
+
+// ============================================================================
+// PHASE 6: FULFILLMENT PLANNING (salience 50)
+// ============================================================================
+
+rule "Fulfillment - Same State Warehouse"
+    salience 50
+    when
+        $order: Order($orderId: orderId, $state: shippingState, expressShipping == false)
+        $item: OrderItem(orderId == $orderId, $itemId: itemId, $prodId: productId, $qty: quantity)
+        OrderValidation(orderId == $orderId, isValid == true)
+        $warehouse: Warehouse($whId: warehouseId, state == $state)
+        $inv: Inventory(warehouseId == $whId, productId == $prodId, quantityAvailable >= $qty)
+        not (FulfillmentPlan(orderId == $orderId, itemId == $itemId))
+    then
+        console.log("FULFILLMENT: " + item.productName + " from " + warehouse.name + " (same state)");
+
+        drools.insert({
+            type: "com.ecommerce.FulfillmentPlan",
+            orderId: order.orderId,
+            itemId: item.itemId,
+            warehouseId: warehouse.warehouseId,
+            carrier: "UPS",
+            shippingMethod: "Ground",
+            shippingCost: 5.99
+        });
+end
+
+rule "Fulfillment - Any Available Warehouse"
+    salience 40
+    when
+        $order: Order($orderId: orderId)
+        $item: OrderItem(orderId == $orderId, $itemId: itemId, $prodId: productId, $qty: quantity)
+        OrderValidation(orderId == $orderId, isValid == true)
+        $warehouse: Warehouse($whId: warehouseId)
+        $inv: Inventory(warehouseId == $whId, productId == $prodId, quantityAvailable >= $qty)
+        not (FulfillmentPlan(orderId == $orderId, itemId == $itemId))
+    then
+        console.log("FULFILLMENT: " + item.productName + " from " + warehouse.name);
+
+        drools.insert({
+            type: "com.ecommerce.FulfillmentPlan",
+            orderId: order.orderId,
+            itemId: item.itemId,
+            warehouseId: warehouse.warehouseId,
+            carrier: "FedEx",
+            shippingMethod: "Ground",
+            shippingCost: 7.99
+        });
+end
+
+// ============================================================================
+// PHASE 7: INVENTORY ALERTS (salience 30)
+// ============================================================================
+
+rule "Alert - Low Stock"
+    salience 30
+    when
+        $inv: Inventory($whId: warehouseId, $prodId: productId, $avail: quantityAvailable, $reorder: reorderPoint)
+        eval(inv.quantityAvailable <= inv.reorderPoint && inv.quantityAvailable > 0)
+        not (InventoryAlert(warehouseId == $whId, productId == $prodId, alertType == "LOW_STOCK"))
+    then
+        console.log("ALERT: Low stock - " + inv.productId + " at " + inv.warehouseId +
+                    " (" + inv.quantityAvailable + " remaining)");
+
+        drools.insert({
+            type: "com.ecommerce.InventoryAlert",
+            warehouseId: inv.warehouseId,
+            productId: inv.productId,
+            alertType: "LOW_STOCK",
+            currentQuantity: inv.quantityAvailable,
+            threshold: inv.reorderPoint
+        });
+end
+
+rule "Alert - Out of Stock"
+    salience 30
+    when
+        $inv: Inventory($whId: warehouseId, $prodId: productId, quantityAvailable == 0)
+        not (InventoryAlert(warehouseId == $whId, productId == $prodId, alertType == "OUT_OF_STOCK"))
+    then
+        console.log("ALERT: OUT OF STOCK - " + inv.productId + " at " + inv.warehouseId);
+
+        drools.insert({
+            type: "com.ecommerce.InventoryAlert",
+            warehouseId: inv.warehouseId,
+            productId: inv.productId,
+            alertType: "OUT_OF_STOCK",
+            currentQuantity: 0,
+            threshold: 0
+        });
+end
+
+// ============================================================================
+// PHASE 8: ORDER STATUS (salience 20)
+// ============================================================================
+
+rule "Status - Order Confirmed"
+    salience 20
+    when
+        $order: Order($orderId: orderId)
+        OrderValidation(orderId == $orderId, isValid == true)
+        PricingResult(orderId == $orderId)
+        forall(
+            $item: OrderItem(orderId == $orderId)
+            FulfillmentPlan(orderId == $orderId, itemId == $item.itemId)
+        )
+        not (OrderStatus(orderId == $orderId))
+    then
+        console.log("STATUS: Order " + order.orderId + " CONFIRMED");
+
+        drools.insert({
+            type: "com.ecommerce.OrderStatus",
+            orderId: order.orderId,
+            status: "CONFIRMED",
+            message: "Order confirmed and ready for fulfillment"
+        });
+end
+
+rule "Status - Order Failed Validation"
+    salience 20
+    when
+        $order: Order($orderId: orderId)
+        $validation: OrderValidation(orderId == $orderId, isValid == false)
+        not (OrderStatus(orderId == $orderId))
+    then
+        console.log("STATUS: Order " + order.orderId + " FAILED - " + validation.issue);
+
+        drools.insert({
+            type: "com.ecommerce.OrderStatus",
+            orderId: order.orderId,
+            status: "FAILED",
+            message: "Order failed: " + validation.issue
+        });
+end
+
+// ============================================================================
+// QUERIES
+// ============================================================================
+
+query "OrderPricing"
+    $pricing: PricingResult()
+end
+
+query "FulfillmentPlans"
+    $plan: FulfillmentPlan()
+end
+
+query "InventoryAlerts"
+    $alert: InventoryAlert()
+end
+
+query "OrderStatuses"
+    $status: OrderStatus()
+end
+
+query "ConfirmedOrders"
+    $status: OrderStatus(status == "CONFIRMED")
+end

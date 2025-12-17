@@ -111,3 +111,4 @@ private:
 };
 
 #endif // RULE_EXECUTION_TRACER_HPP
+

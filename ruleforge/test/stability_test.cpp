@@ -213,3 +213,5 @@ TEST_CASE_METHOD(StabilityTestFixture, "Retract fact used by multiple rules", "[
         CHECK(session->get_fact_count() == 1);
     }
 }
+
+

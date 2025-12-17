@@ -154,6 +154,8 @@ end
         // Test fact count
         REQUIRE(ruleforge_session_get_fact_count(session) == 3);
 
+        printf("DEBUG: Added 3 facts: Bob(25), Charlie(17), Diana(30)\n");
+
         REQUIRE_DRILLS_OK(ruleforge_session_fire_all_rules(session, -1, nullptr));
 
         ruleforge_query_result_t query_result = nullptr;
@@ -161,6 +163,7 @@ end
         REQUIRE(query_result != nullptr);
 
         int result_size = ruleforge_query_result_get_size(query_result);
+        printf("DEBUG: Query result size: %d (expected: 2)\n", result_size);
         REQUIRE(result_size == 2); // Bob and Diana
 
         ruleforge_fact_t fact_bob = nullptr;

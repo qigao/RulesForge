@@ -24,3 +24,4 @@ private:
 };
 
 #endif   // DECISION_TABLE_CONVERTER_HPP
+

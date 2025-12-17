@@ -6,7 +6,7 @@ foreach(example_source ${SOURCES})
     target_link_libraries(
         ${EXAMPLE_NAME}
         PRIVATE ${TARGET_NAME}
-                pubcxx taocpp::pegtl  
+                pubcxx taocpp::pegtl
     )
     target_include_directories(${EXAMPLE_NAME} PRIVATE ../include)
 
@@ -14,5 +14,6 @@ foreach(example_source ${SOURCES})
         ${EXAMPLE_NAME} PROPERTIES FOLDER ${TARGET_NAME}/example
     )
 
-    # add_run_target(${EXAMPLE_NAME} shared/${TARGET_NAME}/example) # Removed: unknown CMake command
 endforeach()
+configure_file(valid_rules.drl ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/valid_rules.drl COPYONLY)
+configure_file(invalid_rules.drl ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/invalid_rules.drl COPYONLY)

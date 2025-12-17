@@ -16,6 +16,7 @@ class ReteNode;
 class QueryTerminalNode;
 class QueryInputNode;
 class AccumulatorRegistry;
+struct IAccumulator;
 struct ParsedRule;
 struct ParsedPattern;
 struct ConstraintNode;
@@ -46,6 +47,37 @@ public:
     FactTypeRegistry& get_fact_type_registry();
     FactTypeRegistry const& get_fact_type_registry() const;
 
+    /**
+     * @brief Register a custom accumulate function.
+     *
+     * Custom accumulators can be used in DRL rules like built-in functions:
+     * ```drl
+     * $result : Number() from accumulate(
+     *     Order($amount : amount),
+     *     myCustomFunc($amount)
+     * )
+     * ```
+     *
+     * @param name The function name to use in DRL (e.g., "myCustomFunc")
+     * @param prototype A prototype instance that will be cloned for each accumulate node
+     *
+     * Example:
+     * ```cpp
+     * class MyAccumulator : public IAccumulator {
+     *     void accumulate(ConstraintValue const& value) override { ... }
+     *     void reverse(ConstraintValue const& value) override { ... }
+     *     ConstraintValue get_result() const override { return result_; }
+     *     void clear() override { result_ = 0; }
+     *     std::unique_ptr<IAccumulator> clone() const override {
+     *         return std::make_unique<MyAccumulator>(*this);
+     *     }
+     * };
+     *
+     * kb->register_accumulator("myFunc", std::make_unique<MyAccumulator>());
+     * ```
+     */
+    void register_accumulator(std::string const& name, std::unique_ptr<IAccumulator> prototype);
+
     std::vector<ParsedRule> const& get_rules() const { return processed_rules_; }
 
     parser_state const& get_parser_state() const { return parser_state_; }
@@ -68,3 +100,5 @@ private:
 };
 
 #endif   // KNOWLEDGE_BASE_HPP
+
+

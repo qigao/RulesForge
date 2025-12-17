@@ -28,7 +28,12 @@ StatefulSession::StatefulSession(private_key, std::shared_ptr<KnowledgeBase cons
          kb_->get_rules().size(), kb_->get_parser_state().parsed_queries.size());
     scripting_manager_ = std::make_unique<JSScriptingManager>(*this);
     tms_ = std::make_unique<TruthMaintenanceSystem>(*this);
-    dummy_wme_ = std::make_shared<TokenWME>(TokenWME{nullptr, nullptr, 0, 0});
+    // Allocate dummy_wme_ from pool
+    TokenWME* raw = wme_pool_.allocate();
+    new (raw) TokenWME{nullptr, nullptr, 0, 0};
+    dummy_wme_ = std::shared_ptr<TokenWME const>(raw, [this](TokenWME const* p) {
+        wme_pool_.deallocate(const_cast<TokenWME*>(p));
+    });
     wme_cache_[dummy_wme_->hash] = dummy_wme_;
 }
 
@@ -41,12 +46,16 @@ void StatefulSession::build_network() {
     logd("StatefulSession::build_network -> Rules: {}, Queries: {}", kb_->get_rules().size(),
          kb_->get_parser_state().parsed_queries.size());
     for (auto const& rule : kb_->get_rules()) {
+        if (!rule.enabled) {
+            logd("Skipping disabled rule: '{}'", rule.name);
+            continue;
+        }
         logd("Building network for rule: '{}'", rule.name);
         if (rule.condition_groups.empty() || (rule.condition_groups.size() == 1 && rule.condition_groups[0].empty())) {
             // This is a special case for rules with no conditions. It's an immediate activation.
             logd("  -> Rule '{}' has no conditions, creating immediate activation.", rule.name);
-            auto dummy_token = std::make_shared<Token>(get_dummy_wme(), PropagationType::ASSERT);
-            size_t hash = std::hash<TokenWME const*>{}(dummy_token->wme.get()) ^ reinterpret_cast<uintptr_t>(&rule);
+            Token dummy_token{get_dummy_wme(), PropagationType::ASSERT};
+            size_t hash = std::hash<TokenWME const*>{}(dummy_token.wme.get()) ^ reinterpret_cast<uintptr_t>(&rule);
             add_activation(Activation{&rule, dummy_token, hash, {}});
             continue;
         }
@@ -88,7 +97,7 @@ void StatefulSession::build_network() {
 void StatefulSession::prime_network_state() {
     logd("Priming Rete network state...");
     logd("StatefulSession::prime_network_state -> Nodes: {}", all_nodes_.size());
-    auto dummy_token = std::make_shared<Token>(get_dummy_wme(), PropagationType::ASSERT);
+    Token dummy_token{get_dummy_wme(), PropagationType::ASSERT};
 
     for (auto const& node : all_nodes_) {
         // Is the current node a beta node that could be a root?
@@ -155,7 +164,15 @@ void StatefulSession::add_fact(std::shared_ptr<Fact> fact) {
 
     tracer_.trace_fact_added(fact->id, fact->type);
 
+    // P1-002 FIX: Increment metrics counter
+    facts_inserted_total_++;
+
     logd("Adding fact ID: {}, Type: '{}'", fact->id, fact->type);
+
+    // P1-001 FIX: Track fact insertion if in a transaction
+    if (in_rhs_transaction_) {
+        transaction_inserted_facts_.push_back(fact->id);
+    }
 
     all_facts_[fact->id] = fact;
     logd("Fact count after add: {}", all_facts_.size());
@@ -201,6 +218,37 @@ void StatefulSession::add_facts(std::vector<std::shared_ptr<Fact>> const& facts)
         } else {
             logd("No entry point found for fact type '{}'", type);
         }
+    }
+}
+void StatefulSession::insert_into(std::string const& stream_name, std::shared_ptr<Fact> fact) {
+    if (!fact) return;
+    if (fact->id == 0) { fact->id = next_fact_id_++; }
+    assign_nested_fact_ids(*fact);
+
+    tracer_.trace_fact_added(fact->id, fact->type);
+    facts_inserted_total_++;
+
+    logd("Adding fact ID: {}, Type: '{}' to entry-point '{}'", fact->id, fact->type, stream_name);
+
+    if (in_rhs_transaction_) {
+        transaction_inserted_facts_.push_back(fact->id);
+    }
+
+    all_facts_[fact->id] = fact;
+
+    // Route to named entry point
+    auto stream_it = named_entry_points_.find(stream_name);
+    if (stream_it != named_entry_points_.end()) {
+        auto type_it = stream_it->second.find(fact->type);
+        if (type_it != stream_it->second.end()) {
+            logd("Propagating fact ID {} to named entry-point '{}' for type '{}' (Node ID {})",
+                 fact->id, stream_name, fact->type, type_it->second->id);
+            type_it->second->right_activate(*this, fact, PropagationType::ASSERT);
+        } else {
+            logd("No entry point found for fact type '{}' in stream '{}'", fact->type, stream_name);
+        }
+    } else {
+        logd("No named entry-point '{}' found", stream_name);
     }
 }
 
@@ -267,9 +315,46 @@ void StatefulSession::assign_nested_fact_ids(Fact& fact) {
 
 int StatefulSession::fire_all_rules(int max_rules) {
     int total_fired_count = 0;
+
+    // P1 FIX: Reset halt flag at start of each fire_all_rules cycle
+    halt_requested_ = false;
+
+    // P1 FIX: Reset lock-on-active blocked rules at start of cycle
+    lock_on_active_blocked_.clear();
+
+    // P1 FIX: Block lock-on-active rules for the current focus group
+    std::string current_focus = get_focus();
+    for (auto const& [hash, activation] : agenda_map_) {
+        if (activation.rule->lock_on_active) {
+            std::string rule_agenda_group = activation.rule->agenda_group.value_or("MAIN");
+            if (rule_agenda_group == current_focus) {
+                lock_on_active_blocked_.insert(activation.rule);
+            }
+        }
+    }
+
     logd("Starting fire_all_rules cycle. Focus: '{}', Agenda size: {}. Fact count: {}. Max rules: {}",
          get_focus(), agenda_queue_.size(), all_facts_.size(), max_rules);
     while (true) {
+        auto now = std::chrono::steady_clock::now();
+        while (!delayed_activations_.empty() && delayed_activations_.top().fire_time <= now) {
+            auto delayed = delayed_activations_.top();
+            delayed_activations_.pop();
+            logd("Delayed activation ready for rule '{}', adding to agenda", delayed.activation.rule->name);
+            agenda_map_[delayed.activation.hash_value] = delayed.activation;
+            agenda_queue_.push({delayed.activation.rule->salience, delayed.activation.hash_value});
+            // Track activation-group membership
+            if (delayed.activation.rule->activation_group) {
+                activation_group_map_[*delayed.activation.rule->activation_group].insert(delayed.activation.hash_value);
+            }
+        }
+
+        // P1 FIX: Check if drools.halt() was called
+        if (halt_requested_) {
+            logi("Rule execution halted by drools.halt() after {} rules fired.", total_fired_count);
+            break;
+        }
+
         // Check max firing limit to prevent infinite loops
         if (max_rules >= 0 && total_fired_count >= max_rules) {
             logw("Reached max rule firing limit ({}). Stopping execution. "
@@ -300,12 +385,16 @@ int StatefulSession::fire_all_rules(int max_rules) {
 
         if (activation_to_fire) {
             total_fired_count++;
+
+            // P1-002 FIX: Increment metrics counter
+            rules_fired_total_++;
+
             Activation& act = *activation_to_fire;
 
             // Extract fact IDs from the token for tracing
             std::vector<int64_t> involved_facts;
-            if (act.token && act.token->wme) {
-                auto token_facts = act.token->get_facts();
+            if (act.token.wme) {
+                auto token_facts = act.token.get_facts();
                 for (auto const& fact : token_facts) {
                     if (fact) involved_facts.push_back(fact->id);
                 }
@@ -320,9 +409,29 @@ int StatefulSession::fire_all_rules(int max_rules) {
                 no_loop_blocked_.insert(noloop_key);
             }
 
+            // P1 FIX: activation-group - cancel all other activations in the same group
+            if (act.rule->activation_group) {
+                std::string const& group_name = *act.rule->activation_group;
+                auto group_it = activation_group_map_.find(group_name);
+                if (group_it != activation_group_map_.end()) {
+                    // Copy the set since we'll be modifying it
+                    auto activations_to_cancel = group_it->second;
+                    activations_to_cancel.erase(act.hash_value);  // Don't cancel the one we're firing
+                    for (size_t cancel_hash : activations_to_cancel) {
+                        logd("  -> Cancelling activation in group '{}', hash: {}", group_name, cancel_hash);
+                        remove_activation(cancel_hash);
+                    }
+                }
+                // Remove this activation from the group tracking since we just fired it
+                activation_group_map_[group_name].erase(act.hash_value);
+                if (activation_group_map_[group_name].empty()) {
+                    activation_group_map_.erase(group_name);
+                }
+            }
+
             try {
                 RuleExecutionTimer timer(tracer_, act.rule->name, involved_facts);
-                scripting_manager_->execute_rhs(act.rule->rhs_code, act.rule->name, *act.token, act.bindings);
+                scripting_manager_->execute_rhs(act.rule->rhs_code, act.rule->name, act.token, act.bindings);
             } catch (ReteExecutionException const& e) {
                 loge("--- RUNTIME ERROR in rule '{}': {}", e.get_rule_name(), e.what());
             }
@@ -332,6 +441,8 @@ int StatefulSession::fire_all_rules(int max_rules) {
         }
     }
     no_loop_blocked_.clear();  // Reset no-loop blocking for next fire_all_rules cycle
+    lock_on_active_blocked_.clear();  // P1 FIX: Reset lock-on-active blocking
+    activation_group_map_.clear();  // P1 FIX: Clear activation group tracking
 
     // Compact agenda_queue_ if it has too many stale entries
     // Threshold: queue size > 2x map size AND queue has at least 100 stale entries
@@ -358,6 +469,10 @@ void StatefulSession::retract_fact(std::shared_ptr<Fact> fact) {
         return;
     }
     std::shared_ptr<Fact> fact_to_retract = it->second;
+
+    // P1-002 FIX: Increment metrics counter
+    facts_retracted_total_++;
+
     logd("Fact count before retract: {}", all_facts_.size());
     all_facts_.erase(it);
     logd("Fact count after retract: {}", all_facts_.size());
@@ -365,9 +480,9 @@ void StatefulSession::retract_fact(std::shared_ptr<Fact> fact) {
     // Clean up agenda: remove activations that depend on the retracted fact
     std::vector<size_t> activations_to_remove;
     for (auto const& [hash, activation] : agenda_map_) {
-        if (activation.token && activation.token->wme) {
+        if (activation.token.wme) {
             // Check if this activation's token contains the retracted fact
-            std::vector<std::shared_ptr<Fact>> token_facts = activation.token->get_facts();
+            std::vector<std::shared_ptr<Fact>> token_facts = activation.token.get_facts();
             for (auto const& token_fact : token_facts) {
                 if (token_fact && token_fact->id == fact_to_retract->id) {
                     activations_to_remove.push_back(hash);
@@ -461,7 +576,7 @@ QueryResult StatefulSession::execute_query(std::string const& query_name,
     std::vector<map<std::string, std::shared_ptr<Fact>>> raw_results;
     for (auto const& [wme, token] : terminal_node->get_results()) {
         map<std::string, std::shared_ptr<Fact>> row;
-        auto facts = token->get_facts();
+        auto facts = token.get_facts();
         for (auto const& [binding, depth] : terminal_node->get_bindings()) {
             if (!binding.empty() && depth < facts.size()) { row[binding] = facts[depth]; }
         }
@@ -509,8 +624,8 @@ void StatefulSession::removeListener(std::shared_ptr<IEngineListener> const& lis
 void StatefulSession::add_activation(Activation const& activation) {
     // Extract fact IDs for no-loop check and tracing
     std::vector<int64_t> involved_facts;
-    if (activation.token && activation.token->wme) {
-        auto token_facts = activation.token->get_facts();
+    if (activation.token.wme) {
+        auto token_facts = activation.token.get_facts();
         for (auto const& fact : token_facts) {
             if (fact) involved_facts.push_back(fact->id);
         }
@@ -526,19 +641,51 @@ void StatefulSession::add_activation(Activation const& activation) {
         }
     }
 
+    // P1 FIX: Check lock-on-active - rule cannot be re-activated while its agenda-group is active
+    if (activation.rule->lock_on_active) {
+        if (lock_on_active_blocked_.count(activation.rule)) {
+            logd("Skipping lock-on-active blocked activation for rule '{}'", activation.rule->name);
+            return;
+        }
+    }
+
     logd("Activating rule '{}' (salience: {}), hash: {}", activation.rule->name, activation.rule->salience,
               activation.hash_value);
 
     tracer_.trace_rule_matched(activation.rule->name, involved_facts);
+    if (activation.rule->duration > 0) {
+        auto fire_time = std::chrono::steady_clock::now() + std::chrono::milliseconds(activation.rule->duration);
+        delayed_activations_.push({fire_time, activation});
+        logd("  -> Rule '{}' scheduled for delayed firing in {}ms", activation.rule->name, activation.rule->duration);
+        return;
+    }
 
     agenda_map_[activation.hash_value] = activation;
     agenda_queue_.push({activation.rule->salience, activation.hash_value});
+
+    // P1 FIX: Track activation-group membership for later cancellation
+    if (activation.rule->activation_group) {
+        activation_group_map_[*activation.rule->activation_group].insert(activation.hash_value);
+    }
 }
 
 void StatefulSession::remove_activation(size_t activation_hash) {
-    if (agenda_map_.count(activation_hash)) {
-        logd("Deactivating rule '{}', hash: {}", agenda_map_.at(activation_hash).rule->name, activation_hash);
-        agenda_map_.erase(activation_hash);
+    auto it = agenda_map_.find(activation_hash);
+    if (it != agenda_map_.end()) {
+        logd("Deactivating rule '{}', hash: {}", it->second.rule->name, activation_hash);
+
+        // P1 FIX: Clean up activation-group tracking
+        if (it->second.rule->activation_group) {
+            auto group_it = activation_group_map_.find(*it->second.rule->activation_group);
+            if (group_it != activation_group_map_.end()) {
+                group_it->second.erase(activation_hash);
+                if (group_it->second.empty()) {
+                    activation_group_map_.erase(group_it);
+                }
+            }
+        }
+
+        agenda_map_.erase(it);
     }
 }
 
@@ -547,3 +694,65 @@ map<int, std::shared_ptr<ReteNode>> StatefulSession::get_nodes() const {
     for (auto const& node : all_nodes_) { node_map[node->id] = node; }
     return node_map;
 }
+
+// P1-001 FIX: Transactional semantics implementation
+void StatefulSession::begin_rhs_transaction() {
+    logd("StatefulSession::begin_rhs_transaction");
+    in_rhs_transaction_ = true;
+    transaction_inserted_facts_.clear();
+}
+
+void StatefulSession::end_rhs_transaction(bool commit) {
+    logd("StatefulSession::end_rhs_transaction commit={}", commit);
+    if (!in_rhs_transaction_) {
+        return;  // No transaction in progress
+    }
+
+    if (!commit) {
+        // Rollback: retract all facts inserted during this transaction
+        logw("Rolling back RHS transaction: retracting {} inserted facts", transaction_inserted_facts_.size());
+        for (int64_t fact_id : transaction_inserted_facts_) {
+            auto fact_opt = get_fact_by_id(fact_id);
+            if (fact_opt) {
+                logd("  -> Rolling back fact ID {}", fact_id);
+                // Use internal remove to avoid re-triggering network propagation issues
+                all_facts_.erase(fact_id);
+            }
+        }
+        is_consistent_ = false;  // Mark session as having had a failed transaction
+    }
+
+    transaction_inserted_facts_.clear();
+    in_rhs_transaction_ = false;
+}
+
+// P1-002 FIX: Get session metrics for monitoring export
+SessionMetrics StatefulSession::get_metrics() const {
+    SessionMetrics metrics;
+
+    // Counters
+    metrics.rules_fired_total = rules_fired_total_;
+    metrics.facts_inserted_total = facts_inserted_total_;
+    metrics.facts_retracted_total = facts_retracted_total_;
+
+    // Gauges
+    metrics.facts_count = static_cast<int64_t>(all_facts_.size());
+    metrics.memory_used_bytes = arena_.memory_used();
+    metrics.memory_max_bytes = arena_.get_max_size();
+    metrics.memory_usage_percent = arena_.usage_percent();
+    metrics.activations_count = agenda_map_.size();
+
+    // Per-rule metrics from tracer
+    auto rule_stats = tracer_.get_rule_statistics();
+    for (auto const& stat : rule_stats) {
+        metrics.rule_fire_counts[stat.rule_name] = stat.fire_count;
+        metrics.rule_execution_time_us[stat.rule_name] = stat.total_execution_time_us;
+    }
+
+    // Timing
+    metrics.last_fire_time = std::chrono::steady_clock::now();
+
+    return metrics;
+}
+
+

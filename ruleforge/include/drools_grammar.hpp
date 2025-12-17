@@ -50,6 +50,9 @@ namespace grammar {
 
     struct keyword_agenda_group : keyword<'a', 'g', 'e', 'n', 'd', 'a', '-', 'g', 'r', 'o', 'u', 'p'> {};
 
+    // P1 FIX: Add activation-group keyword
+    struct keyword_activation_group : keyword<'a', 'c', 't', 'i', 'v', 'a', 't', 'i', 'o', 'n', '-', 'g', 'r', 'o', 'u', 'p'> {};
+
     struct keyword_timer : keyword<'t', 'i', 'm', 'e', 'r'> {};
 
     struct keyword_from : keyword<'f', 'r', 'o', 'm'> {};
@@ -98,12 +101,26 @@ namespace grammar {
 
     struct keyword_no_loop : pegtl::seq<pegtl::string<'n', 'o', '-', 'l', 'o', 'o', 'p'>, pegtl::not_at<identifier_chars>> {};
 
+    // P1 FIX: lock-on-active keyword
+    struct keyword_lock_on_active : pegtl::seq<pegtl::string<'l', 'o', 'c', 'k', '-', 'o', 'n', '-', 'a', 'c', 't', 'i', 'v', 'e'>, pegtl::not_at<identifier_chars>> {};
+    struct keyword_enabled : keyword<'e', 'n', 'a', 'b', 'l', 'e', 'd'> {};
+    struct keyword_duration : keyword<'d', 'u', 'r', 'a', 't', 'i', 'o', 'n'> {};
+    struct keyword_startsWith : pegtl::seq<pegtl::string<'s', 't', 'a', 'r', 't', 's', 'W', 'i', 't', 'h'>, pegtl::not_at<identifier_chars>> {};
+    struct keyword_endsWith : pegtl::seq<pegtl::string<'e', 'n', 'd', 's', 'W', 'i', 't', 'h'>, pegtl::not_at<identifier_chars>> {};
+    struct keyword_lengthIs : pegtl::seq<pegtl::string<'l', 'e', 'n', 'g', 't', 'h', 'I', 's'>, pegtl::not_at<identifier_chars>> {};
+    struct keyword_contains : pegtl::seq<pegtl::string<'c', 'o', 'n', 't', 'a', 'i', 'n', 's'>, pegtl::not_at<identifier_chars>> {};
+    struct keyword_matches : pegtl::seq<pegtl::string<'m', 'a', 't', 'c', 'h', 'e', 's'>, pegtl::not_at<identifier_chars>> {};
+    struct keyword_memberOf : pegtl::seq<pegtl::string<'m', 'e', 'm', 'b', 'e', 'r', 'O', 'f'>, pegtl::not_at<identifier_chars>> {};
+    struct keyword_not_memberOf : pegtl::seq<keyword_not, whitespace, keyword_memberOf> {};
+
     struct any_keyword :
         pegtl::sor<keyword_rule, keyword_when, keyword_then, keyword_end, keyword_salience, keyword_extends,
-                   keyword_agenda_group, keyword_timer, keyword_from, keyword_not, keyword_exists, keyword_collect,
+                   keyword_agenda_group, keyword_activation_group, keyword_timer, keyword_from, keyword_not, keyword_exists, keyword_collect,
                    keyword_accumulate, keyword_forall, keyword_eval, keyword_entry_point, keyword_in, keyword_function,
                    keyword_declare, keyword_query, keyword_global, keyword_package, keyword_import, keyword_or,
-                   keyword_modify, keyword_nil, keyword_true, keyword_false, keyword_this> {};
+                   keyword_modify, keyword_nil, keyword_true, keyword_false, keyword_this, keyword_enabled,
+                   keyword_startsWith, keyword_endsWith, keyword_lengthIs, keyword_contains, keyword_matches,
+                   keyword_memberOf> {};
 
     // ===================================================================
     // == 3. Identifiers and Literals
@@ -131,17 +148,41 @@ namespace grammar {
     struct binding : pegtl::seq<variable_binding, opt_whitespace, pegtl::string<':', '='>> {};
 
     struct simple_name_part : pegtl::seq<pegtl::not_at<any_keyword>, raw_identifier> {};
+    struct null_safe_sep : pegtl::string<'!', '.'> {};
+    struct regular_sep : pegtl::one<'.'> {};
+    struct field_sep : pegtl::sor<null_safe_sep, regular_sep> {};
+    struct index_integer : pegtl::seq<pegtl::opt<pegtl::one<'-'>>, pegtl::plus<pegtl::digit>> {};
+    struct index_string : pegtl::sor<
+        pegtl::seq<pegtl::one<'"'>, pegtl::star<pegtl::not_one<'"'>>, pegtl::one<'"'>>,
+        pegtl::seq<pegtl::one<'\''>, pegtl::star<pegtl::not_one<'\''>>, pegtl::one<'\''>>
+    > {};
+    struct index_content : pegtl::sor<index_string, index_integer> {};
+    struct index_access : pegtl::seq<pegtl::one<'['>, opt_whitespace, index_content, opt_whitespace, pegtl::one<']'>> {};
+    struct field_part : pegtl::seq<simple_name_part, pegtl::star<index_access>> {};
 
     struct constraint_field : pegtl::sor<
-        pegtl::list<simple_name_part, pegtl::one<'.'>>,
-        pegtl::seq<variable_binding, pegtl::one<'.'>, simple_name_part>,
-        simple_name_part
+        pegtl::list<field_part, field_sep>,
+        pegtl::seq<variable_binding, field_sep, field_part>,
+        pegtl::seq<variable_binding, pegtl::star<index_access>>,
+        field_part
     > {};
 
+    // Arithmetic operators for use in constraint values
+    struct arith_op : pegtl::one<'+', '-', '*', '/'> {};
+
+    // Simple arithmetic term: number, field, or binding
+    struct arith_term :
+        pegtl::sor<double_, integer, constraint_field, variable_binding> {};
+
+    // Arithmetic expression: term (op term)*
+    struct arith_expr :
+        pegtl::seq<arith_term, pegtl::star<pegtl::seq<opt_whitespace, arith_op, opt_whitespace, arith_term>>> {};
+
+    // Primary expression with arithmetic support in parentheses
     struct primary_expr :
-        pegtl::sor<double_, integer, string_literal, keyword_true, keyword_false, keyword_nil, keyword_this, 
+        pegtl::sor<double_, integer, string_literal, keyword_true, keyword_false, keyword_nil, keyword_this,
                    constraint_field, variable_binding,
-                   pegtl::seq<pegtl::one<'('>, opt_whitespace, expression, opt_whitespace, pegtl::one<')'>>> {};
+                   pegtl::seq<pegtl::one<'('>, opt_whitespace, arith_expr, opt_whitespace, pegtl::one<')'>>> {};
 
     struct not_in_op : pegtl::seq<keyword_not, whitespace, keyword_in> {};
 
@@ -151,10 +192,11 @@ namespace grammar {
 
     struct value_list :
         pegtl::seq<pegtl::one<'('>, opt_whitespace, value_list_content, opt_whitespace, pegtl::one<')'>> {};
+    struct word_cmp_op : pegtl::sor<keyword_not_memberOf, keyword_memberOf, keyword_startsWith, keyword_endsWith, keyword_lengthIs, keyword_contains, keyword_matches> {};
 
     struct cmp_op :
         pegtl::sor<pegtl::string<'<', '='>, pegtl::string<'>', '='>, pegtl::string<'!', '='>, pegtl::string<'=', '='>,
-                   pegtl::one<'<'>, pegtl::one<'>'>> {};
+                   pegtl::one<'<'>, pegtl::one<'>'>, word_cmp_op> {};
 
     struct cmp_clause : pegtl::seq<pegtl::pad<cmp_op, ignored>, primary_expr> {};
 
@@ -164,8 +206,8 @@ namespace grammar {
     struct inline_binding : pegtl::seq<variable_binding, opt_whitespace, pegtl::one<':'>, opt_whitespace> {};
 
     // `relational_expression` now includes an optional binding and an optional comparison.
-    // This single rule covers: `field`, `field > 10`, `$v : field`, and `$v : field > 10`.
-    struct relational_expression : pegtl::seq<pegtl::opt<inline_binding>, primary_expr, pegtl::opt<cmp_clause>> {};
+    // This single rule covers: `field`, `field > 10`, `$v : field`, `$v : field > 10`, and `field in (...)`.
+    struct relational_expression : pegtl::seq<pegtl::opt<inline_binding>, primary_expr, pegtl::opt<pegtl::sor<cmp_clause, in_clause>>> {};
 
     // New: Grammar for a time duration literal (e.g., "300ms", "5m", "1h")
     struct duration_literal :
@@ -180,11 +222,13 @@ namespace grammar {
     struct op_within : keyword<'w', 'i', 't', 'h', 'i', 'n'> {};
 
     struct op_of : keyword<'o', 'f'> {};
+    struct op_coincides : keyword<'c', 'o', 'i', 'n', 'c', 'i', 'd', 'e', 's'> {};
+    struct op_during : keyword<'d', 'u', 'r', 'i', 'n', 'g'> {};
 
     // Matches: `timestamp after $e1.timestamp`
     struct temporal_seq_clause :
         pegtl::seq<primary_expr,                                           // The subject (e.g., 'timestamp')
-                   pegtl::pad<pegtl::sor<op_after, op_before>, ignored>,   // The operator
+                   pegtl::pad<pegtl::sor<op_after, op_before, op_coincides, op_during>, ignored>,   // The operator
                    primary_expr                                            // The object (e.g., '$e1.timestamp')
                    > {};
 
@@ -222,13 +266,21 @@ namespace grammar {
         pegtl::seq<fact_type_name, opt_whitespace, pegtl::opt<pattern_constraints>, opt_whitespace,
                    pegtl::opt<from_clause>> {};
 
+    // Support both: `not (pattern)` and `not Pattern(...)`
     struct not_pattern_body :
-        pegtl::seq<keyword_not, opt_whitespace, pegtl::one<'('>, opt_whitespace, pattern, opt_whitespace,
-                   pegtl::one<')'>> {};
+        pegtl::seq<keyword_not, opt_whitespace,
+                   pegtl::sor<
+                       pegtl::seq<pegtl::one<'('>, opt_whitespace, pattern, opt_whitespace, pegtl::one<')'>>,
+                       standard_pattern_body
+                   >> {};
 
+    // Support both: `exists (pattern)` and `exists Pattern(...)`
     struct exists_pattern_body :
-        pegtl::seq<keyword_exists, opt_whitespace, pegtl::one<'('>, opt_whitespace, pattern, opt_whitespace,
-                   pegtl::one<')'>> {};
+        pegtl::seq<keyword_exists, opt_whitespace,
+                   pegtl::sor<
+                       pegtl::seq<pegtl::one<'('>, opt_whitespace, pattern, opt_whitespace, pegtl::one<')'>>,
+                       standard_pattern_body
+                   >> {};
     struct balanced_parens;
 
     struct balanced_content :
@@ -242,12 +294,12 @@ namespace grammar {
     struct eval_pattern_body :
         pegtl::seq<keyword_eval, opt_whitespace, pegtl::one<'('>, opt_whitespace, eval_expression, opt_whitespace,
                    pegtl::one<')'>> {};
-
-    struct forall_pattern_list : pegtl::list<pattern, pegtl::one<','>, ignored> {};
+    // Each pattern in forall is separated by comma or whitespace
+    struct forall_pattern_list : pegtl::list<pegtl::seq<pattern, opt_whitespace>, pegtl::seq<opt_whitespace, pegtl::opt<pegtl::one<','>>, opt_whitespace>> {};
 
     struct forall_pattern_body :
         pegtl::seq<keyword_forall, opt_whitespace, pegtl::one<'('>, opt_whitespace, pegtl::opt<forall_pattern_list>,
-                   opt_whitespace, pegtl::one<')'>> {};
+                   pegtl::one<')'>> {};
 
     struct query_call_name : string_literal {};
 
@@ -271,17 +323,27 @@ namespace grammar {
 
     struct accumulate_function_name : raw_identifier {};
 
+    // Entry point clause - moved here so it can be used in accumulate_source_pattern
+    struct entry_point_name : string_literal {};
+
+    struct from_entry_point_clause :
+        pegtl::seq<keyword_from, whitespace, keyword_entry_point, whitespace, entry_point_name> {};
+
     // A pattern that is the source for an accumulate/collect operation.
-    // It must not contain a 'from' clause itself, to prevent left-recursion in the grammar.
+    // It can optionally contain a 'from entry-point' clause for CEP use cases.
+    // We only allow entry-point (not arbitrary from clauses) to prevent left-recursion.
     struct standard_pattern_body_no_from :
         pegtl::seq<fact_type_name, opt_whitespace, pegtl::opt<pattern_constraints>> {};
 
     struct accumulate_source_pattern :
         pegtl::seq<pegtl::opt<pegtl::seq<variable_binding, opt_whitespace, pegtl::one<':'>, opt_whitespace>>,
-                   standard_pattern_body_no_from> {};
+                   standard_pattern_body_no_from,
+                   pegtl::opt<pegtl::seq<opt_whitespace, from_entry_point_clause>>> {};
 
-    // This now accepts `$p.value` as well as `$v`.
-    struct accumulate_source_ref : constraint_field {};
+    // This now accepts `$p.value`, `$v`, a bare variable binding like `$p`, a literal like `1` for count(1),
+    // or arithmetic expressions like `$avail - $reserved` for sum/avg functions.
+    // P1 FIX: Added variable_binding as fallback for collectList($p) syntax
+    struct accumulate_source_ref : pegtl::sor<arith_expr, constraint_field, variable_binding, integer> {};
 
     struct accumulate_function :
         pegtl::seq<accumulate_function_name, opt_whitespace, pegtl::one<'('>, opt_whitespace,
@@ -293,18 +355,13 @@ namespace grammar {
         pegtl::seq<keyword_from, whitespace, keyword_unnest, opt_whitespace, pegtl::one<'('>, opt_whitespace,
                    unnest_source, opt_whitespace, pegtl::one<')'>> {};
 
-    struct entry_point_name : string_literal {};
-
-    struct from_entry_point_clause :
-        pegtl::seq<keyword_from, whitespace, keyword_entry_point, whitespace, entry_point_name> {};
-
     struct from_collect_clause :
         pegtl::seq<keyword_from, whitespace, keyword_collect, opt_whitespace, pegtl::one<'('>, opt_whitespace, pattern,
                    opt_whitespace, pegtl::one<')'>> {};
 
     struct from_accumulate_clause :
         pegtl::seq<keyword_from, whitespace, keyword_accumulate, opt_whitespace, pegtl::one<'('>, opt_whitespace,
-                   accumulate_source_pattern, pegtl::one<','>, opt_whitespace, accumulate_function, opt_whitespace,
+                   accumulate_source_pattern, opt_whitespace, pegtl::one<','>, opt_whitespace, accumulate_function, opt_whitespace,
                    pegtl::one<')'>> {};
 
     struct from_clause :
@@ -377,6 +434,11 @@ namespace grammar {
 
     struct agenda_group_attribute : pegtl::seq<keyword_agenda_group, whitespace, agenda_group_name> {};
 
+    // P1 FIX: activation-group attribute - only one rule in the group can fire
+    struct activation_group_name : string_literal {};
+
+    struct activation_group_attribute : pegtl::seq<keyword_activation_group, whitespace, activation_group_name> {};
+
     struct timer_value : integer {};
 
     struct timer_attribute :
@@ -385,7 +447,17 @@ namespace grammar {
 
     struct no_loop_attribute : keyword_no_loop {};
 
-    struct attribute : pegtl::sor<salience_attribute, agenda_group_attribute, extends_clause, timer_attribute, no_loop_attribute> {};
+    // P1 FIX: lock-on-active attribute
+    struct lock_on_active_attribute : keyword_lock_on_active {};
+    struct enabled_value : pegtl::sor<keyword_true, keyword_false> {};
+    struct enabled_attribute : pegtl::seq<keyword_enabled, whitespace, enabled_value> {};
+    struct keyword_auto_focus : pegtl::seq<pegtl::string<'a', 'u', 't', 'o', '-', 'f', 'o', 'c', 'u', 's'>, pegtl::not_at<identifier_chars>> {};
+    struct auto_focus_value : pegtl::sor<keyword_true, keyword_false> {};
+    struct auto_focus_attribute : pegtl::seq<keyword_auto_focus, whitespace, auto_focus_value> {};
+    struct duration_value : integer {};
+    struct duration_attribute : pegtl::seq<keyword_duration, whitespace, duration_value> {};
+
+    struct attribute : pegtl::sor<salience_attribute, agenda_group_attribute, activation_group_attribute, extends_clause, timer_attribute, no_loop_attribute, lock_on_active_attribute, enabled_attribute, auto_focus_attribute, duration_attribute> {};
 
     struct attributes : pegtl::plus<pegtl::seq<attribute, opt_whitespace>> {};
 
@@ -470,3 +542,5 @@ namespace grammar {
 
 }   // namespace grammar
 #endif
+
+

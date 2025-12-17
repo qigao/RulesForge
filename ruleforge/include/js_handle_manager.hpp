@@ -55,3 +55,4 @@ private:
 };
 
 #endif // JS_HANDLE_MANAGER_HPP
+

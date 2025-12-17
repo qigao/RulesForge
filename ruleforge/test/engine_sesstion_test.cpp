@@ -196,3 +196,5 @@ TEST_CASE("StatefulSession: Query with no parameters", "[engine][session][query]
 
     REQUIRE_THAT(item_names, Catch::Matchers::UnorderedEquals(std::vector<std::string>{"Anvil", "Rocket"}));
 }
+
+

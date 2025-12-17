@@ -185,3 +185,5 @@ std::vector<T> QueryResult::getColumnFieldAs(std::string const& binding, std::st
 }
 
 #endif   // QUERY_RESULT_HPP
+
+

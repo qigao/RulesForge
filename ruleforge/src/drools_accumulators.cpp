@@ -222,3 +222,5 @@ std::unique_ptr<IAccumulator> CollectSetAccumulator::clone() const {
     logd("CollectSetAccumulator::clone");
     return std::make_unique<CollectSetAccumulator>(*this);
 }
+
+

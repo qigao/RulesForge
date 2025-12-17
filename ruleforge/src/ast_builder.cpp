@@ -279,6 +279,16 @@ void AstBuilder::build_rule_attributes(pegtl::parse_tree::node const& n,
             rule.agenda_group = name_str.substr(1, name_str.length() - 2);
           }
         }
+      // P1 FIX: Parse activation-group attribute
+      } else if (attr_node.is_type<grammar::activation_group_attribute>()) {
+        if (auto const* name_node =
+                find_descendant<grammar::activation_group_name>(attr_node))
+        {
+          std::string name_str = name_node->string();
+          if (name_str.length() >= 2) {
+            rule.activation_group = name_str.substr(1, name_str.length() - 2);
+          }
+        }
       } else if (attr_node.is_type<grammar::timer_attribute>()) {
         auto values = find_all_descendants<grammar::timer_value>(attr_node);
         if (!values.empty()) {
@@ -290,6 +300,21 @@ void AstBuilder::build_rule_attributes(pegtl::parse_tree::node const& n,
         }
       } else if (attr_node.is_type<grammar::no_loop_attribute>()) {
         rule.no_loop = true;
+      // P1 FIX: Parse lock-on-active attribute
+      } else if (attr_node.is_type<grammar::lock_on_active_attribute>()) {
+        rule.lock_on_active = true;
+      } else if (attr_node.is_type<grammar::enabled_attribute>()) {
+        auto enabled_value = attr_node.children[0].get();
+        rule.enabled = enabled_value->is_type<grammar::keyword_true>();
+      } else if (attr_node.is_type<grammar::auto_focus_attribute>()) {
+        auto auto_focus_value = attr_node.children[0].get();
+        rule.auto_focus = auto_focus_value->is_type<grammar::keyword_true>();
+      } else if (attr_node.is_type<grammar::duration_attribute>()) {
+        if (auto const* value_node =
+                find_descendant<grammar::duration_value>(attr_node))
+        {
+          rule.duration = parse_long_safe(value_node->string());
+        }
       }
     }
   }
@@ -446,18 +471,52 @@ ParsedPattern AstBuilder::build_pattern(pegtl::parse_tree::node const& n)
   }
   if (auto const* not_body = find_descendant<grammar::not_pattern_body>(n)) {
     pattern.type = PatternType::NOT;
+    // Try parenthesized form first: not (pattern)
     if (auto const* nested_node = find_descendant<grammar::pattern>(*not_body))
     {
       pattern.nested_patterns.push_back(build_pattern(*nested_node));
+    }
+    // Fallback to bare form: not Pattern(...)
+    else if (auto const* std_body = find_descendant<grammar::standard_pattern_body>(*not_body))
+    {
+      ParsedPattern nested;
+      nested.pos = std_body->begin();
+      nested.type = PatternType::STANDARD;
+      if (auto const* fact_type_node = find_descendant<grammar::fact_type_name>(*std_body)) {
+        nested.fact_type = fact_type_node->string();
+      }
+      if (auto const* constraints = find_descendant<grammar::pattern_constraints>(*std_body)) {
+        if (auto const* expr = find_descendant<grammar::expression>(*constraints)) {
+          nested.constraint_root = build_constraint_expression(*expr);
+        }
+      }
+      pattern.nested_patterns.push_back(std::move(nested));
     }
   } else if (auto const* exists_body =
                  find_descendant<grammar::exists_pattern_body>(n))
   {
     pattern.type = PatternType::EXISTS;
+    // Try parenthesized form first: exists (pattern)
     if (auto const* nested_node =
             find_descendant<grammar::pattern>(*exists_body))
     {
       pattern.nested_patterns.push_back(build_pattern(*nested_node));
+    }
+    // Fallback to bare form: exists Pattern(...)
+    else if (auto const* std_body = find_descendant<grammar::standard_pattern_body>(*exists_body))
+    {
+      ParsedPattern nested;
+      nested.pos = std_body->begin();
+      nested.type = PatternType::STANDARD;
+      if (auto const* fact_type_node = find_descendant<grammar::fact_type_name>(*std_body)) {
+        nested.fact_type = fact_type_node->string();
+      }
+      if (auto const* constraints = find_descendant<grammar::pattern_constraints>(*std_body)) {
+        if (auto const* expr = find_descendant<grammar::expression>(*constraints)) {
+          nested.constraint_root = build_constraint_expression(*expr);
+        }
+      }
+      pattern.nested_patterns.push_back(std::move(nested));
     }
   } else if (auto const* forall_body =
                  find_descendant<grammar::forall_pattern_body>(n))
@@ -489,16 +548,48 @@ ParsedPattern AstBuilder::build_pattern(pegtl::parse_tree::node const& n)
     {
       pattern.fact_type = fact_type_node->string();
     }
-    if (auto const* constraints =
-            find_descendant<grammar::pattern_constraints>(*body))
-    {
+
+    // Debug: Log children of standard_pattern_body
+    logd("build_pattern: standard_pattern_body for '{}' has {} direct children",
+         pattern.fact_type, body->children.size());
+    for (size_t i = 0; i < body->children.size(); ++i) {
+      logd("  child[{}]: type={}", i, body->children[i]->type);
+    }
+
+    // Try find_child first (direct child), then fallback to find_descendant
+    // but only if there's no from_clause (to avoid picking up accumulate source pattern's constraints)
+    pegtl::parse_tree::node const* constraints = find_child<grammar::pattern_constraints>(*body);
+    logd("build_pattern: find_child<pattern_constraints> = {}", constraints ? "FOUND" : "NOT FOUND");
+    if (!constraints) {
+      // Fallback: check if pattern_constraints is a descendant but NOT inside from_clause
+      auto const* from_node_check = find_descendant<grammar::from_clause>(*body);
+      auto const* desc_constraints = find_descendant<grammar::pattern_constraints>(*body);
+      logd("build_pattern: fallback - from_node_check={}, desc_constraints={}",
+           from_node_check ? "FOUND" : "NOT FOUND",
+           desc_constraints ? "FOUND" : "NOT FOUND");
+      if (desc_constraints && (!from_node_check || !find_descendant<grammar::pattern_constraints>(*from_node_check))) {
+        constraints = desc_constraints;
+        logd("build_pattern: using fallback desc_constraints");
+      }
+    }
+    if (constraints) {
       if (auto const* expr = find_descendant<grammar::expression>(*constraints))
       {
         pattern.constraint_root = build_constraint_expression(*expr);
       }
     }
-    if (auto const* from_node = find_descendant<grammar::from_clause>(*body)) {
+    // Try find_child first, then fallback to find_descendant for from_clause
+    auto const* from_node = find_child<grammar::from_clause>(*body);
+    logd("build_pattern: find_child<from_clause> = {}", from_node ? "FOUND" : "NOT FOUND");
+    if (!from_node) {
+      from_node = find_descendant<grammar::from_clause>(*body);
+      logd("build_pattern: find_descendant<from_clause> = {}", from_node ? "FOUND" : "NOT FOUND");
+    }
+    if (from_node) {
+      logd("build_pattern: calling build_from_clause");
       build_from_clause(*from_node, pattern);
+    } else {
+      logd("build_pattern: NO from_clause found!");
     }
   }
   logd(
@@ -513,14 +604,19 @@ ParsedPattern AstBuilder::build_pattern(pegtl::parse_tree::node const& n)
 void AstBuilder::build_from_clause(pegtl::parse_tree::node const& n,
                                    ParsedPattern& pattern)
 {
+  logd("build_from_clause: node type={}, has {} children", n.type, n.children.size());
   if (n.children.empty()) {
+    logd("build_from_clause: returning early - no children");
     return;
   }
   auto const* from_body = n.children.front().get();
   if (!from_body) {
+    logd("build_from_clause: returning early - null from_body");
     return;
   }
+  logd("build_from_clause: from_body type={}", from_body->type);
   if (from_body->is_type<grammar::from_accumulate_clause>()) {
+    logd("build_from_clause: detected from_accumulate_clause");
     ParsedAccumulate acc_info;
     if (auto const* source_pattern_node =
             find_descendant<grammar::accumulate_source_pattern>(*from_body))
@@ -540,6 +636,9 @@ void AstBuilder::build_from_clause(pegtl::parse_tree::node const& n,
               find_descendant<grammar::accumulate_source_ref>(*func_node))
       {
         acc_info.field = field_node->string();
+        if (acc_info.field.find_first_of("+-*/") != std::string::npos) {
+          acc_info.accumulate_expr_ast = parse_arith_expr_string(acc_info.field);
+        }
       }
     }
     pattern.source = std::move(acc_info);
@@ -648,11 +747,99 @@ ConstraintValue AstBuilder::build_literal(pegtl::parse_tree::node const& n)
   // identifiers that aren't bound variables. We treat them as strings.
   return n.string();
 }
+// This parses expressions like "$avail - $reserved" or "$price * $qty"
+ArithExprValue AstBuilder::parse_arith_expr_string(std::string const& expr_str) {
+    // Tokenize the expression
+    std::vector<std::string> tokens;
+    std::string current_token;
+
+    for (size_t i = 0; i < expr_str.size(); ++i) {
+        char c = expr_str[i];
+        if (c == ' ' || c == '\t' || c == '\n') {
+            if (!current_token.empty()) {
+                tokens.push_back(current_token);
+                current_token.clear();
+            }
+        } else if (c == '+' || c == '-' || c == '*' || c == '/') {
+            if (!current_token.empty()) {
+                tokens.push_back(current_token);
+                current_token.clear();
+            }
+            tokens.push_back(std::string(1, c));
+        } else {
+            current_token += c;
+        }
+    }
+    if (!current_token.empty()) {
+        tokens.push_back(current_token);
+    }
+
+    if (tokens.empty()) {
+        return 0.0;
+    }
+
+    // Simple recursive descent parser for binary expressions
+    // Handles: term ((+|-|*|/) term)*
+    // For now, evaluate left-to-right (no operator precedence within this simple parser)
+
+    auto parse_term = [](std::string const& t) -> ArithExprValue {
+        // Check if it's a number
+        bool is_number = true;
+        bool has_dot = false;
+        for (size_t i = 0; i < t.size(); ++i) {
+            char c = t[i];
+            if (c == '-' && i == 0) continue;
+            if (c == '.' && !has_dot) { has_dot = true; continue; }
+            if (!std::isdigit(c)) { is_number = false; break; }
+        }
+        if (is_number && !t.empty()) {
+            return std::stod(t);
+        }
+        // It's a variable reference or field name
+        return t;
+    };
+
+    if (tokens.size() == 1) {
+        return parse_term(tokens[0]);
+    }
+
+    // Build AST from left to right
+    ArithExprValue result = parse_term(tokens[0]);
+
+    for (size_t i = 1; i + 1 < tokens.size(); i += 2) {
+        std::string const& op_str = tokens[i];
+        std::string const& right_str = tokens[i + 1];
+
+        ArithOp op;
+        if (op_str == "+") op = ArithOp::ADD;
+        else if (op_str == "-") op = ArithOp::SUB;
+        else if (op_str == "*") op = ArithOp::MUL;
+        else if (op_str == "/") op = ArithOp::DIV;
+        else continue;  // Unknown operator, skip
+
+        ArithExprValue right_val = parse_term(right_str);
+
+        auto node = std::make_unique<ArithExprNode>(op, std::move(result), std::move(right_val));
+        result = std::move(node);
+    }
+
+    return result;
+}
 
 std::vector<ConstraintValue> AstBuilder::build_value_list(
     pegtl::parse_tree::node const& n)
 {
-  return {};
+  std::vector<ConstraintValue> values;
+  // Find the value_list_content which contains the comma-separated primary_expr nodes
+  if (auto const* content_node = find_descendant<grammar::value_list_content>(n)) {
+    for (auto const& child : content_node->children) {
+      if (child->is_type<grammar::primary_expr>()) {
+        values.push_back(build_literal(*child));
+      }
+    }
+  }
+  logd("AstBuilder::build_value_list -> Extracted {} values", values.size());
+  return values;
 }
 
 ParsedDeclaration AstBuilder::build_declaration(
@@ -716,7 +903,7 @@ std::unique_ptr<ConstraintNode> AstBuilder::build_constraint_item(
   // Handles: `timestamp after $e1.timestamp`
   if (auto const* seq_node = find_descendant<grammar::temporal_seq_clause>(n)) {
     ParsedTemporalConstraint tc;
-    tc.op = find_descendant<pegtl::sor<grammar::op_after, grammar::op_before>>(
+    tc.op = find_descendant<pegtl::sor<grammar::op_after, grammar::op_before, grammar::op_coincides, grammar::op_during>>(
                 *seq_node)
                 ->string();
     tc.lhs_field = extract_field_name(
@@ -735,6 +922,7 @@ std::unique_ptr<ConstraintNode> AstBuilder::build_constraint_item(
   auto const* binding_node = find_descendant<grammar::inline_binding>(n);
   auto const* primary_expr_node = find_descendant<grammar::primary_expr>(n);
   auto const* clause_node = find_descendant<grammar::cmp_clause>(n);
+  auto const* in_clause_node = find_descendant<grammar::in_clause>(n);
 
   // Handle inline bindings like `$v : field`
   if (binding_node) {
@@ -748,25 +936,71 @@ std::unique_ptr<ConstraintNode> AstBuilder::build_constraint_item(
   // The LHS of the constraint is always the first primary expression
   leaf_node->constraint.left_field = extract_field_name(primary_expr_node);
 
+  // Check if there is an IN clause (e.g., `status in ("Gold", "Platinum")`)
+  if (in_clause_node) {
+    // Determine if it's "in" or "not in"
+    if (find_descendant<grammar::not_in_op>(*in_clause_node)) {
+      leaf_node->constraint.op = "not in";
+    } else {
+      leaf_node->constraint.op = "in";
+    }
+    // Extract the value list
+    if (auto const* value_list_node = find_descendant<grammar::value_list>(*in_clause_node)) {
+      leaf_node->constraint.right_value_list = build_value_list(*value_list_node);
+    }
+  }
   // Check if there is a comparison clause (e.g., `> 18`)
-  if (clause_node) {
+  else if (clause_node) {
     leaf_node->constraint.op =
         find_descendant<grammar::cmp_op>(*clause_node)->string();
     auto* rhs_node = find_descendant<grammar::primary_expr>(*clause_node);
     if (rhs_node) {
-      // Check if the RHS is a bound variable (e.g., field == $other.field)
+      // This must come before arith_expr check because arith_expr greedily matches single terms
       if (auto* cf_node = find_descendant<grammar::constraint_field>(*rhs_node))
       {
         std::string rhs_full_name = cf_node->string();
         if (!rhs_full_name.empty() && rhs_full_name[0] == '$') {
-          size_t pos = rhs_full_name.find('.');
-          if (pos != std::string::npos) {
-            leaf_node->constraint.right_bound_field = {
-                {rhs_full_name.substr(0, pos), rhs_full_name.substr(pos + 1)}};
+          // Check if this is actually an arithmetic expression (contains operators)
+          if (auto* arith_node = find_descendant<grammar::arith_expr>(*rhs_node)) {
+            std::string arith_str = arith_node->string();
+            // Only treat as arithmetic if it contains operators
+            if (arith_str.find_first_of("+-*/") != std::string::npos) {
+              leaf_node->constraint.right_arith_expr = arith_str;
+              leaf_node->constraint.right_arith_ast = parse_arith_expr_string(arith_str); 
+            } else {
+              // It's a simple variable reference
+              size_t pos = rhs_full_name.find('.');
+              if (pos != std::string::npos) {
+                leaf_node->constraint.right_bound_field = {
+                    {rhs_full_name.substr(0, pos), rhs_full_name.substr(pos + 1)}};
+              } else {
+                // A bare variable like '$p' refers to the whole fact
+                leaf_node->constraint.right_bound_field = {{rhs_full_name, "this"}};
+              }
+            }
           } else {
-            // A bare variable like '$p' refers to the whole fact
-            leaf_node->constraint.right_bound_field = {{rhs_full_name, "this"}};
+            size_t pos = rhs_full_name.find('.');
+            if (pos != std::string::npos) {
+              leaf_node->constraint.right_bound_field = {
+                  {rhs_full_name.substr(0, pos), rhs_full_name.substr(pos + 1)}};
+            } else {
+              // A bare variable like '$p' refers to the whole fact
+              leaf_node->constraint.right_bound_field = {{rhs_full_name, "this"}};
+            }
           }
+        } else {
+          leaf_node->constraint.right_literal = build_literal(*rhs_node);
+        }
+      }
+      // Check if the RHS contains an arithmetic expression (e.g., `$ts - 60000`)
+      else if (auto* arith_node = find_descendant<grammar::arith_expr>(*rhs_node)) {
+        std::string arith_str = arith_node->string();
+        // Only treat as arithmetic if it contains operators
+        if (arith_str.find_first_of("+-*/") != std::string::npos) {
+          leaf_node->constraint.right_arith_expr = arith_str;
+          leaf_node->constraint.right_arith_ast = parse_arith_expr_string(arith_str); 
+        } else {
+          leaf_node->constraint.right_literal = build_literal(*rhs_node);
         }
       } else {
         leaf_node->constraint.right_literal = build_literal(*rhs_node);
@@ -968,5 +1202,16 @@ ParsedPattern AstBuilder::build_source_pattern(pegtl::parse_tree::node const& n)
       }
     }
   }
+  // Handle nested from entry-point clause (for CEP within accumulate)
+  if (auto const* entry_point_clause = find_descendant<grammar::from_entry_point_clause>(n)) {
+    if (auto const* entry_point_name_node = find_descendant<grammar::entry_point_name>(*entry_point_clause)) {
+      std::string name_str = entry_point_name_node->string();
+      if (name_str.length() >= 2) {
+        p.source = name_str.substr(1, name_str.length() - 2);  // Remove quotes
+      }
+    }
+  }
   return p;
 }
+
+

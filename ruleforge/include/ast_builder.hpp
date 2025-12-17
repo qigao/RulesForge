@@ -3,6 +3,7 @@
 
 #include "drools_grammar.hpp"
 #include "drools_parser_state.hpp"
+#include "drools_rete_defs.hpp"
 #include "errors.hpp"
 
 #include <memory>
@@ -17,7 +18,6 @@ struct ParsedDeclaration;
 struct ParsedQuery;
 struct ParsedFunction;
 struct ParsedGlobal;
-using ConstraintValue = std::variant<std::string, int64_t, double, struct FactList, struct NilValue>;
 
 class AstBuilder {
 public:
@@ -38,6 +38,7 @@ private:
     std::unique_ptr<ConstraintNode> build_constraint_item(pegtl::parse_tree::node const& n);
     ConstraintValue build_literal(pegtl::parse_tree::node const& n);
     std::vector<ConstraintValue> build_value_list(pegtl::parse_tree::node const& n);
+    ArithExprValue parse_arith_expr_string(std::string const& expr_str); 
     ParsedDeclaration build_declaration(pegtl::parse_tree::node const& n);
     ParsedQuery build_query(pegtl::parse_tree::node const& n);
     ParsedFunction build_function(pegtl::parse_tree::node const& n);
@@ -53,3 +54,5 @@ private:
 };
 
 #endif   // AST_BUILDER_HPP
+
+

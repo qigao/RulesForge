@@ -33,6 +33,36 @@ enum class PatternType { STANDARD, NOT, EXISTS, FORALL, EVAL, QUERY_CALL };
 enum class NodeType { LEAF, AND, OR };
 enum class PropagationType { ASSERT, RETRACT, MODIFY };
 
+// --- Arithmetic Expression AST ---
+enum class ArithOp { ADD, SUB, MUL, DIV };
+
+struct ArithExprNode;
+
+using ArithExprValue = std::variant<
+    double,                                    // Numeric literal
+    std::string,                               // Variable binding ($var) or field reference
+    std::unique_ptr<ArithExprNode>             // Nested expression
+>;
+
+struct ArithExprNode {
+    ArithOp op;
+    ArithExprValue left;
+    ArithExprValue right;
+
+    ArithExprNode() : op(ArithOp::ADD) {}
+    ArithExprNode(ArithOp o, ArithExprValue l, ArithExprValue r)
+        : op(o), left(std::move(l)), right(std::move(r)) {}
+
+    // Deep copy support
+    ArithExprNode(ArithExprNode const& other);
+    ArithExprNode& operator=(ArithExprNode const& other);
+    ArithExprNode(ArithExprNode&&) = default;
+    ArithExprNode& operator=(ArithExprNode&&) = default;
+};
+
+// Helper to deep copy ArithExprValue
+ArithExprValue clone_arith_expr_value(ArithExprValue const& v);
+
 // --- Debug Info Structs ---
 
 struct FactList {
@@ -81,7 +111,8 @@ struct TokenWMEPtrEquals {
 
 struct Token {
     std::shared_ptr<TokenWME const> wme;
-    PropagationType type;
+    PropagationType type = PropagationType::ASSERT;
+    Token() = default;
     Token(std::shared_ptr<TokenWME const> w, PropagationType pt);
     std::shared_ptr<Fact const> get_fact() const;
     int get_depth() const;
@@ -91,7 +122,7 @@ struct Token {
 
 struct Activation {
     ParsedRule const* rule;
-    std::shared_ptr<Token> token;
+    Token token;
     size_t hash_value;
     map<std::string, int> bindings;
     bool operator<(Activation const& other) const;
@@ -132,6 +163,13 @@ struct ParsedConstraint {
     std::optional<std::pair<std::string, std::string>> right_bound_field;
     std::optional<std::vector<ConstraintValue>> right_value_list;
     std::optional<ParsedTemporalConstraint> temporal_constraint;
+    std::optional<std::string> right_arith_expr;  // Legacy: string form (deprecated)
+    std::optional<ArithExprValue> right_arith_ast; 
+    ParsedConstraint() = default;
+    ParsedConstraint(ParsedConstraint&&) = default;
+    ParsedConstraint& operator=(ParsedConstraint&&) = default;
+    ParsedConstraint(ParsedConstraint const& other);
+    ParsedConstraint& operator=(ParsedConstraint const& other);
  };
 
 // Convert a ParsedConstraint to a human-readable string for debugging
@@ -153,8 +191,10 @@ struct ConstraintNode {
 struct ParsedAccumulate {
     std::unique_ptr<ParsedPattern> source_pattern;
     std::string function;
-    std::string field;
-    std::string accumulate_field_name;
+    std::string field;  // Original field string from parser
+    std::string accumulate_field_name;  // Simple field name (for non-arithmetic)
+    std::optional<ArithExprValue> accumulate_expr_ast; 
+    map<std::string, std::string> inline_binding_to_field; 
     ParsedAccumulate();
     ParsedAccumulate(ParsedAccumulate&&) = default;
     ParsedAccumulate& operator=(ParsedAccumulate&&) = default;
@@ -241,8 +281,13 @@ struct ParsedRule {
     int salience = 0;
     bool salience_explicitly_set = false;
     bool no_loop = false;
+    bool lock_on_active = false;  // P1 FIX: lock-on-active attribute
+    bool enabled = true;         
+    bool auto_focus = false;     
+    int64_t duration = 0;        
     std::optional<std::string> parent_rule_name;
     std::optional<std::string> agenda_group;
+    std::optional<std::string> activation_group;  // P1 FIX: activation-group attribute
     std::optional<ParsedTimer> timer;
     std::vector<std::vector<ParsedPattern>> condition_groups;
     std::string rhs_code;
@@ -262,3 +307,5 @@ inline bool operator==(NilValue const&, NilValue const&) { return true; }
 inline bool operator!=(NilValue const&, NilValue const&) { return false; }
 
 #endif   // DROOLS_RETE_DEFS_HPP
+
+

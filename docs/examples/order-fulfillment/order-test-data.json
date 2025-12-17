@@ -1,0 +1,201 @@
+{
+  "name": "Order Fulfillment Test Data",
+  "description": "Sample orders, inventory, and warehouses for testing fulfillment rules",
+  "warehouses": [
+    {
+      "warehouseId": "WH-WEST",
+      "name": "West Coast Distribution",
+      "state": "CA",
+      "zipCode": "90001"
+    },
+    {
+      "warehouseId": "WH-EAST",
+      "name": "East Coast Distribution",
+      "state": "NJ",
+      "zipCode": "07001"
+    },
+    {
+      "warehouseId": "WH-CENTRAL",
+      "name": "Central Distribution",
+      "state": "TX",
+      "zipCode": "75001"
+    }
+  ],
+  "inventory": [
+    {"warehouseId": "WH-WEST", "productId": "PROD-001", "quantityAvailable": 100, "quantityReserved": 5, "reorderPoint": 20},
+    {"warehouseId": "WH-WEST", "productId": "PROD-002", "quantityAvailable": 50, "quantityReserved": 2, "reorderPoint": 10},
+    {"warehouseId": "WH-WEST", "productId": "PROD-003", "quantityAvailable": 5, "quantityReserved": 0, "reorderPoint": 10},
+    {"warehouseId": "WH-EAST", "productId": "PROD-001", "quantityAvailable": 75, "quantityReserved": 10, "reorderPoint": 15},
+    {"warehouseId": "WH-EAST", "productId": "PROD-002", "quantityAvailable": 0, "quantityReserved": 0, "reorderPoint": 10},
+    {"warehouseId": "WH-EAST", "productId": "PROD-004", "quantityAvailable": 200, "quantityReserved": 0, "reorderPoint": 50},
+    {"warehouseId": "WH-CENTRAL", "productId": "PROD-001", "quantityAvailable": 150, "quantityReserved": 20, "reorderPoint": 30},
+    {"warehouseId": "WH-CENTRAL", "productId": "PROD-003", "quantityAvailable": 80, "quantityReserved": 5, "reorderPoint": 15}
+  ],
+  "products": [
+    {"productId": "PROD-001", "name": "Wireless Headphones", "category": "electronics", "unitPrice": 79.99, "weight": 0.5},
+    {"productId": "PROD-002", "name": "Laptop Stand", "category": "electronics", "unitPrice": 49.99, "weight": 2.5},
+    {"productId": "PROD-003", "name": "USB-C Hub", "category": "electronics", "unitPrice": 39.99, "weight": 0.3},
+    {"productId": "PROD-004", "name": "Ergonomic Keyboard", "category": "electronics", "unitPrice": 129.99, "weight": 1.8}
+  ],
+  "promotions": [
+    {
+      "promoId": "PROMO-001",
+      "promoCode": "ELECTRONICS20",
+      "discountType": "percent",
+      "discountValue": 20,
+      "minOrderAmount": 50,
+      "validCategory": "electronics",
+      "active": true
+    },
+    {
+      "promoId": "PROMO-002",
+      "promoCode": "SUMMER10",
+      "discountType": "percent",
+      "discountValue": 10,
+      "minOrderAmount": 100,
+      "validCategory": "all",
+      "active": false
+    }
+  ],
+  "testOrders": [
+    {
+      "scenario": "Standard Order - Gold Customer",
+      "order": {
+        "orderId": "ORD-001",
+        "customerId": "CUST-001",
+        "customerTier": "gold",
+        "shippingCountry": "US",
+        "shippingState": "CA",
+        "shippingCity": "Los Angeles",
+        "shippingZip": "90001",
+        "giftOrder": false,
+        "expressShipping": false
+      },
+      "items": [
+        {"itemId": "ITEM-001", "productId": "PROD-001", "quantity": 2, "unitPrice": 79.99, "weight": 0.5, "category": "electronics"},
+        {"itemId": "ITEM-002", "productId": "PROD-002", "quantity": 1, "unitPrice": 49.99, "weight": 2.5, "category": "electronics"}
+      ],
+      "_expectedResult": {
+        "valid": true,
+        "discounts": ["Gold loyalty 10%", "Electronics 20%", "Free shipping"],
+        "warehouse": "WH-WEST",
+        "notes": "Same state warehouse, gold discount, promo discount, free shipping over $75"
+      }
+    },
+    {
+      "scenario": "Bulk Order - Platinum Customer",
+      "order": {
+        "orderId": "ORD-002",
+        "customerId": "CUST-002",
+        "customerTier": "platinum",
+        "shippingCountry": "US",
+        "shippingState": "NY",
+        "shippingCity": "New York",
+        "shippingZip": "10001",
+        "giftOrder": false,
+        "expressShipping": true
+      },
+      "items": [
+        {"itemId": "ITEM-003", "productId": "PROD-001", "quantity": 15, "unitPrice": 79.99, "weight": 0.5, "category": "electronics"}
+      ],
+      "_expectedResult": {
+        "valid": true,
+        "discounts": ["Platinum loyalty 15%", "Bulk order 10%", "Electronics 20%"],
+        "shippingMethod": "Express",
+        "notes": "Bulk discount + platinum + promo, express shipping"
+      }
+    },
+    {
+      "scenario": "International Order",
+      "order": {
+        "orderId": "ORD-003",
+        "customerId": "CUST-003",
+        "customerTier": "standard",
+        "shippingCountry": "CA",
+        "shippingState": "ON",
+        "shippingCity": "Toronto",
+        "shippingZip": "M5V 1J1",
+        "giftOrder": true,
+        "expressShipping": false
+      },
+      "items": [
+        {"itemId": "ITEM-004", "productId": "PROD-004", "quantity": 1, "unitPrice": 129.99, "weight": 1.8, "category": "electronics"}
+      ],
+      "_expectedResult": {
+        "valid": true,
+        "shippingMethod": "International",
+        "shippingCost": "~$27.69",
+        "notes": "International shipping rates apply"
+      }
+    },
+    {
+      "scenario": "Insufficient Stock",
+      "order": {
+        "orderId": "ORD-004",
+        "customerId": "CUST-004",
+        "customerTier": "silver",
+        "shippingCountry": "US",
+        "shippingState": "FL",
+        "shippingCity": "Miami",
+        "shippingZip": "33101",
+        "giftOrder": false,
+        "expressShipping": false
+      },
+      "items": [
+        {"itemId": "ITEM-005", "productId": "PROD-003", "quantity": 100, "unitPrice": 39.99, "weight": 0.3, "category": "electronics"}
+      ],
+      "_expectedResult": {
+        "valid": false,
+        "reason": "Insufficient stock - only 85 available across all warehouses",
+        "notes": "Order should fail validation"
+      }
+    },
+    {
+      "scenario": "Low Stock Alert Trigger",
+      "order": {
+        "orderId": "ORD-005",
+        "customerId": "CUST-005",
+        "customerTier": "gold",
+        "shippingCountry": "US",
+        "shippingState": "CA",
+        "shippingCity": "San Diego",
+        "shippingZip": "92101",
+        "giftOrder": false,
+        "expressShipping": false
+      },
+      "items": [
+        {"itemId": "ITEM-006", "productId": "PROD-003", "quantity": 3, "unitPrice": 39.99, "weight": 0.3, "category": "electronics"}
+      ],
+      "_expectedResult": {
+        "valid": true,
+        "alerts": ["LOW_STOCK for PROD-003 at WH-WEST"],
+        "notes": "Order succeeds but triggers low stock alert (5-3=2, below reorder point of 10)"
+      }
+    }
+  ],
+  "discountMatrix": {
+    "loyalty": {
+      "platinum": "15%",
+      "gold": "10%",
+      "silver": "5%",
+      "standard": "0%"
+    },
+    "bulk": {
+      "threshold": 10,
+      "discount": "10%"
+    },
+    "freeShipping": {
+      "threshold": 75,
+      "applies": "Ground shipping only"
+    }
+  },
+  "shippingRates": {
+    "domestic": {
+      "ground": {"base": 5.99, "perLb": 0.25},
+      "express": {"base": 12.99, "perLb": 0.50}
+    },
+    "international": {
+      "standard": {"base": 24.99, "perLb": 1.50}
+    }
+  }
+}

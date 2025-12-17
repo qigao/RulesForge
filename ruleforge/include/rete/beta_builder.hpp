@@ -44,3 +44,5 @@ private:
 };
 
 #endif   // BETA_BUILDER_HPP
+
+

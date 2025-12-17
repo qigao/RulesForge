@@ -46,22 +46,10 @@ set(MEMORY_PUBLIC_HEADERS
 
 set_target_properties(${TARGET_NAME} PROPERTIES
     PUBLIC_HEADER "${MEMORY_PUBLIC_HEADERS}"
-)
-
-# Install library
-install(
-    TARGETS ${TARGET_NAME}
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin
-    PUBLIC_HEADER DESTINATION include/turbonet/memory
+    FOLDER "vendor/memory"
 )
 
 # Tests
 if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
-
-message(STATUS "TurboMemory module configured")
-message(STATUS "  - memory_pool.h: Simple bump allocator")
-message(STATUS "  - arena_buffer.h: Zero-copy buffer management")

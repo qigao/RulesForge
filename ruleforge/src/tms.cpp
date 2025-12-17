@@ -74,3 +74,5 @@ void TruthMaintenanceSystem::on_fact_retracted(Fact const* fact) {
         justifications_.erase(it);
     }
 }
+
+

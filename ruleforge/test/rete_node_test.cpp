@@ -135,3 +135,5 @@ TEST_CASE_METHOD(QueryTestFixture, "Query: Parameterized with a join", "[query][
         REQUIRE(results.empty());
     }
 }
+
+

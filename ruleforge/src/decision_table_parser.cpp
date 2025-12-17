@@ -95,3 +95,4 @@ DecisionTable DecisionTableParser::parse_string(std::string const& csv_content, 
     }
     return state.table;
 }
+

@@ -107,10 +107,26 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::create_node_for_pattern(ParsedPatt
     }
 
     if (pattern_for_alpha && !pattern_for_alpha->fact_type.empty()) {
-        auto& entry = session_.alpha_entry_points_[pattern_for_alpha->fact_type];
-        if (!entry) {
-            entry = session_.create_node<EntryPointNode>();
-            logd("  -> Created new EntryPointNode (ID {}) for type '{}'", entry->id, pattern_for_alpha->fact_type);
+        std::string const* entry_point_name = std::get_if<std::string>(&pattern_for_alpha->source);
+
+        std::shared_ptr<ReteNode> entry;
+        if (entry_point_name && !entry_point_name->empty()) {
+            // Use named entry point for CEP streams
+            auto& named_entry = session_.named_entry_points_[*entry_point_name][pattern_for_alpha->fact_type];
+            if (!named_entry) {
+                named_entry = session_.create_node<EntryPointNode>();
+                logd("  -> Created new named EntryPointNode (ID {}) for type '{}' in entry-point '{}'",
+                     named_entry->id, pattern_for_alpha->fact_type, *entry_point_name);
+            }
+            entry = named_entry;
+        } else {
+            // Use default entry point
+            auto& default_entry = session_.alpha_entry_points_[pattern_for_alpha->fact_type];
+            if (!default_entry) {
+                default_entry = session_.create_node<EntryPointNode>();
+                logd("  -> Created new EntryPointNode (ID {}) for type '{}'", default_entry->id, pattern_for_alpha->fact_type);
+            }
+            entry = default_entry;
         }
         auto alpha_root = session_.kb_->partition_and_get_alpha_root(*pattern_for_alpha, join_constraints);
         alpha_tails = session_.build_alpha_chain(alpha_root.get(), {entry});
@@ -239,3 +255,5 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::create_unnest_node(ParsedPattern& 
     }
     return node;
 }
+
+

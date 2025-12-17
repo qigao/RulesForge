@@ -32,6 +32,24 @@ public:
     virtual void logical_insert(Token& token, std::shared_ptr<Fact> fact) = 0;
     virtual void set_focus(std::string const& group_name) = 0;
     virtual map<std::string, JSValue> const& get_global_values() const = 0;
+
+    // P1 FIX: drools.halt() support
+    virtual void halt() = 0;
+
+    // P1-001 FIX: Transactional semantics for RHS execution
+    /**
+     * @brief Begin a transaction for tracking fact changes during RHS execution.
+     * Facts inserted/retracted after this call will be tracked for potential rollback.
+     */
+    virtual void begin_rhs_transaction() = 0;
+
+    /**
+     * @brief End the current RHS transaction.
+     * @param commit If true, changes are kept. If false, all tracked changes are rolled back.
+     */
+    virtual void end_rhs_transaction(bool commit) = 0;
 };
 
 #endif   // I_NETWORK_CALLBACK_HPP
+
+

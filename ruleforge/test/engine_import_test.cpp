@@ -137,3 +137,5 @@ TEST_CASE_METHOD(ImportTestFixture, "Parser: Import Resolution", "[parser][impor
     CHECK(main_rule_it->condition_groups[0][0].fact_type == "com.example.model.Customer");   // From parent
     CHECK(main_rule_it->condition_groups[0][1].fact_type == "com.example.model.Customer");   // From child
 }
+
+

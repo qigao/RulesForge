@@ -88,3 +88,5 @@ std::shared_ptr<KnowledgeBase> build_knowledge_base_from_csv_string(std::string 
                                                                      std::string const& source_name = "csv_string");
 
 #endif   // DROOLS_PARSER_HPP
+
+

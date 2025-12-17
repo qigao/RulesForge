@@ -8,6 +8,75 @@
 #include <tao/pegtl/parse.hpp>
 #include <tao/pegtl/string_input.hpp>
 
+ArithExprValue clone_arith_expr_value(ArithExprValue const& v) {
+    return std::visit(
+        [](auto const& arg) -> ArithExprValue {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, double>) {
+                return arg;
+            } else if constexpr (std::is_same_v<T, std::string>) {
+                return arg;
+            } else if constexpr (std::is_same_v<T, std::unique_ptr<ArithExprNode>>) {
+                if (arg) {
+                    return std::make_unique<ArithExprNode>(*arg);
+                }
+                return std::unique_ptr<ArithExprNode>(nullptr);
+            }
+            return double{0};  // Should never reach here
+        },
+        v);
+}
+
+ArithExprNode::ArithExprNode(ArithExprNode const& other)
+    : op(other.op),
+      left(clone_arith_expr_value(other.left)),
+      right(clone_arith_expr_value(other.right)) {}
+
+ArithExprNode& ArithExprNode::operator=(ArithExprNode const& other) {
+    if (this != &other) {
+        op = other.op;
+        left = clone_arith_expr_value(other.left);
+        right = clone_arith_expr_value(other.right);
+    }
+    return *this;
+}
+
+ParsedConstraint::ParsedConstraint(ParsedConstraint const& other)
+    : field_binding(other.field_binding),
+      left_binding(other.left_binding),
+      left_field(other.left_field),
+      op(other.op),
+      right_literal(other.right_literal),
+      right_bound_field(other.right_bound_field),
+      right_value_list(other.right_value_list),
+      temporal_constraint(other.temporal_constraint),
+      right_arith_expr(other.right_arith_expr)
+{
+    if (other.right_arith_ast.has_value()) {
+        right_arith_ast = clone_arith_expr_value(*other.right_arith_ast);
+    }
+}
+
+ParsedConstraint& ParsedConstraint::operator=(ParsedConstraint const& other) {
+    if (this != &other) {
+        field_binding = other.field_binding;
+        left_binding = other.left_binding;
+        left_field = other.left_field;
+        op = other.op;
+        right_literal = other.right_literal;
+        right_bound_field = other.right_bound_field;
+        right_value_list = other.right_value_list;
+        temporal_constraint = other.temporal_constraint;
+        right_arith_expr = other.right_arith_expr;
+        if (other.right_arith_ast.has_value()) {
+            right_arith_ast = clone_arith_expr_value(*other.right_arith_ast);
+        } else {
+            right_arith_ast.reset();
+        }
+    }
+    return *this;
+}
+
 // --- Implementation for to_string free function ---
 std::string to_string(ConstraintValue const& val) {
     return std::visit(
@@ -70,11 +139,271 @@ std::size_t ConstraintValueHasher::operator()(ConstraintValue const& v) const {
 }
 
 // --- Implementation for Core Struct Methods ---
+namespace {
+    struct IndexAccess {
+        bool is_integer;
+        int64_t int_index;
+        std::string str_index;
+    };
+
+    struct PathSegment {
+        std::string name;
+        bool null_safe;  // true if this segment was preceded by !.
+        std::vector<IndexAccess> indices;  // index accesses like [0] or ["key"]
+    };
+
+    // Parse index access expressions from a segment (e.g., "items[0][1]" -> name="items", indices=[0,1])
+    PathSegment parse_segment_with_indices(std::string const& segment, bool null_safe) {
+        PathSegment result;
+        result.null_safe = null_safe;
+
+        size_t bracket_pos = segment.find('[');
+        if (bracket_pos == std::string::npos) {
+            result.name = segment;
+            return result;
+        }
+
+        result.name = segment.substr(0, bracket_pos);
+        size_t pos = bracket_pos;
+
+        while (pos < segment.length() && segment[pos] == '[') {
+            size_t close_pos = segment.find(']', pos);
+            if (close_pos == std::string::npos) break;
+
+            std::string index_str = segment.substr(pos + 1, close_pos - pos - 1);
+
+            IndexAccess idx;
+            // Check if it's a string index (starts with " or ')
+            if (!index_str.empty() && (index_str[0] == '"' || index_str[0] == '\'')) {
+                idx.is_integer = false;
+                // Remove quotes
+                idx.str_index = index_str.substr(1, index_str.length() - 2);
+            } else {
+                idx.is_integer = true;
+                try {
+                    idx.int_index = std::stoll(index_str);
+                } catch (...) {
+                    idx.int_index = 0;  // Default to 0 on parse error
+                }
+            }
+            result.indices.push_back(idx);
+
+            pos = close_pos + 1;
+        }
+
+        return result;
+    }
+
+    std::vector<PathSegment> parse_field_path(std::string const& path) {
+        std::vector<PathSegment> segments;
+        size_t pos = 0;
+        bool next_null_safe = false;
+
+        while (pos < path.length()) {
+            // Find next separator (either !. or .)
+            // But skip separators inside brackets
+            size_t bracket_depth = 0;
+            size_t sep_pos = std::string::npos;
+            bool is_null_safe_sep = false;
+
+            for (size_t i = pos; i < path.length(); ++i) {
+                if (path[i] == '[') {
+                    bracket_depth++;
+                } else if (path[i] == ']') {
+                    if (bracket_depth > 0) bracket_depth--;
+                } else if (bracket_depth == 0) {
+                    if (i + 1 < path.length() && path[i] == '!' && path[i + 1] == '.') {
+                        sep_pos = i;
+                        is_null_safe_sep = true;
+                        break;
+                    } else if (path[i] == '.' && (i == 0 || path[i - 1] != '!')) {
+                        sep_pos = i;
+                        is_null_safe_sep = false;
+                        break;
+                    }
+                }
+            }
+
+            if (sep_pos == std::string::npos) {
+                // No more separators, take the rest
+                std::string segment = path.substr(pos);
+                if (!segment.empty()) {
+                    segments.push_back(parse_segment_with_indices(segment, next_null_safe));
+                }
+                break;
+            }
+
+            // Extract segment before separator
+            std::string segment = path.substr(pos, sep_pos - pos);
+            if (!segment.empty()) {
+                segments.push_back(parse_segment_with_indices(segment, next_null_safe));
+            }
+
+            // Determine if next segment uses null-safe access
+            if (is_null_safe_sep) {
+                next_null_safe = true;
+                pos = sep_pos + 2;  // Skip "!."
+            } else {
+                next_null_safe = false;
+                pos = sep_pos + 1;  // Skip "."
+            }
+        }
+
+        return segments;
+    }
+
+    // Apply index access to a ConstraintValue
+    std::optional<ConstraintValue> apply_index(ConstraintValue const& val, IndexAccess const& idx, bool null_safe) {
+        if (std::holds_alternative<FactList>(val)) {
+            FactList const& fl = std::get<FactList>(val);
+            if (idx.is_integer) {
+                int64_t index = idx.int_index;
+                // Handle negative indices (Python-style)
+                if (index < 0) {
+                    index = static_cast<int64_t>(fl.facts.size()) + index;
+                }
+                if (index < 0 || static_cast<size_t>(index) >= fl.facts.size()) {
+                    return null_safe ? std::optional(ConstraintValue{NilValue{}}) : std::nullopt;
+                }
+                // For FactList, return the fact at index as a FactList containing single fact
+                // (so further field access can traverse into it)
+                FactList result;
+                result.facts.push_back(fl.facts[static_cast<size_t>(index)]);
+                return result;
+            } else {
+                // String key on FactList - look for fact with matching 'key' or 'name' field
+                for (auto const& fact : fl.facts) {
+                    if (!fact) continue;
+                    auto key_field = fact->fields.find("key");
+                    if (key_field != fact->fields.end() &&
+                        std::holds_alternative<std::string>(key_field->second) &&
+                        std::get<std::string>(key_field->second) == idx.str_index) {
+                        FactList result;
+                        result.facts.push_back(fact);
+                        return result;
+                    }
+                }
+                return null_safe ? std::optional(ConstraintValue{NilValue{}}) : std::nullopt;
+            }
+        } else if (std::holds_alternative<std::string>(val)) {
+            // String indexing - return character at position
+            std::string const& str = std::get<std::string>(val);
+            if (idx.is_integer) {
+                int64_t index = idx.int_index;
+                if (index < 0) {
+                    index = static_cast<int64_t>(str.length()) + index;
+                }
+                if (index < 0 || static_cast<size_t>(index) >= str.length()) {
+                    return null_safe ? std::optional(ConstraintValue{NilValue{}}) : std::nullopt;
+                }
+                return std::string(1, str[static_cast<size_t>(index)]);
+            }
+        }
+        return null_safe ? std::optional(ConstraintValue{NilValue{}}) : std::nullopt;
+    }
+}  // namespace
+
 std::optional<ConstraintValue> Fact::get_field(std::string const& name) const {
     logd("Fact::get_field(this={}, id={}, name='{}')", (void*)this, this->id, name);
+
     // "this" is the special keyword to refer to the fact's identity (its internal ID).
     if (name == "this") { return this->id; }
-    // All other names, including "id", must be looked for exclusively in the fields map.
+    bool has_path_sep = name.find('.') != std::string::npos;
+    bool has_index = name.find('[') != std::string::npos;
+
+    if (has_path_sep || has_index) {
+        auto segments = parse_field_path(name);
+
+        if (!segments.empty()) {
+            logd("  > Path traversal with {} segments", segments.size());
+
+            Fact const* current_fact = this;
+            std::optional<ConstraintValue> current_value;
+
+            for (size_t i = 0; i < segments.size(); ++i) {
+                auto const& seg = segments[i];
+                logd("  > Segment {}: '{}' (null_safe={}, indices={})", i, seg.name, seg.null_safe, seg.indices.size());
+
+                // Get the field from current fact
+                if (!seg.name.empty()) {
+                    auto it = current_fact->fields.find(seg.name);
+                    if (it == current_fact->fields.end()) {
+                        // Field not found
+                        if (seg.null_safe) {
+                            logd("  > Field '{}' not found, null-safe returning NilValue", seg.name);
+                            return NilValue{};
+                        }
+                        logd("  > Field '{}' not found, returning nullopt", seg.name);
+                        return std::nullopt;
+                    }
+                    current_value = it->second;
+                }
+
+                // Apply any index accesses
+                for (auto const& idx : seg.indices) {
+                    if (!current_value) {
+                        return seg.null_safe ? std::optional(ConstraintValue{NilValue{}}) : std::nullopt;
+                    }
+                    auto indexed_result = apply_index(*current_value, idx, seg.null_safe);
+                    if (!indexed_result) {
+                        return std::nullopt;
+                    }
+                    current_value = *indexed_result;
+                    logd("  > Applied index access, result type: {}", current_value->index());
+                }
+
+                // If this is the last segment, return the value
+                if (i == segments.size() - 1) {
+                    logd("  > Reached final segment, returning value");
+                    // If final value is a FactList with single fact and we need a scalar,
+                    // this will be handled by the comparison logic
+                    return current_value;
+                }
+
+                // Need to traverse further - check if value is a FactList
+                if (!current_value) {
+                    return seg.null_safe ? std::optional(ConstraintValue{NilValue{}}) : std::nullopt;
+                }
+
+                if (std::holds_alternative<FactList>(*current_value)) {
+                    FactList const& fl = std::get<FactList>(*current_value);
+                    if (fl.facts.empty()) {
+                        bool next_null_safe = (i + 1 < segments.size()) && segments[i + 1].null_safe;
+                        if (seg.null_safe || next_null_safe) {
+                            logd("  > FactList is empty, null-safe returning NilValue");
+                            return NilValue{};
+                        }
+                        logd("  > FactList is empty, returning nullopt");
+                        return std::nullopt;
+                    }
+                    // Use first fact for traversal
+                    current_fact = fl.facts[0].get();
+                    if (!current_fact) {
+                        bool next_null_safe = (i + 1 < segments.size()) && segments[i + 1].null_safe;
+                        if (seg.null_safe || next_null_safe) {
+                            return NilValue{};
+                        }
+                        return std::nullopt;
+                    }
+                } else if (std::holds_alternative<NilValue>(*current_value)) {
+                    // Current value is nil, check null-safety
+                    bool next_null_safe = (i + 1 < segments.size()) && segments[i + 1].null_safe;
+                    if (seg.null_safe || next_null_safe) {
+                        logd("  > Value is nil, null-safe returning NilValue");
+                        return NilValue{};
+                    }
+                    logd("  > Value is nil, returning nullopt");
+                    return std::nullopt;
+                } else {
+                    // Cannot traverse into non-object value
+                    logd("  > Cannot traverse into non-FactList value");
+                    return std::nullopt;
+                }
+            }
+        }
+    }
+
+    // Simple field lookup (original behavior)
     auto it = fields.find(name);
     if (it != fields.end()) {
         logd("  > Found key '{}' in fields map.", name);
@@ -213,3 +542,5 @@ ParsedPattern& ParsedPattern::operator=(ParsedPattern const& other) {
     source = other.source;
     return *this;
 }
+
+

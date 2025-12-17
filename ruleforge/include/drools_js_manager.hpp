@@ -5,6 +5,7 @@
 #include "drools_rete_defs.hpp"
 #include "i_network_callback.hpp"
 #include "js_handle_manager.hpp"
+#include "token_handle_manager.hpp"
 
 #include <map>
 #include <quickjs.h>
@@ -46,6 +47,7 @@ public:
     void execute_rhs(std::string const& rhs_code, std::string const& rule_name, Token& token,
                      map<std::string, int> const& bindings);
     void set_global(std::string const& name, JSValue obj);
+    std::string const& get_current_rule_name() const { return current_rule_name_; }
 
 private:
     void create_drools_api(Token& current_token);
@@ -77,6 +79,9 @@ private:
     JSRuntime* runtime_;
     JSContext* context_;
     JSHandleManager::HandleId handle_id_ = 0;  // Handle for this manager instance
+    TokenHandleManager::HandleId current_token_handle_ = TokenHandleManager::INVALID_HANDLE;  // P0-001: Safe token handle
+    std::string current_rule_name_; 
 };
 
 #endif   // DROOLS_JS_MANAGER_HPP
+

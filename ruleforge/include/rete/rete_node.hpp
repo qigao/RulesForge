@@ -59,10 +59,10 @@ public:
    *
    * @param session Reference to the current StatefulSession, providing context
    * for activation.
-   * @param token Shared pointer to the Token being activated on the left input.
+   * @param token Reference to the Token being activated on the left input.
    */
   virtual void left_activate(StatefulSession& session,
-                             std::shared_ptr<Token> token) = 0;
+                             Token const& token) = 0;
   /**
    * @brief Activates the right input of the node with the given fact.
    *
@@ -108,7 +108,7 @@ public:
   BetaConditionNode(std::vector<ParsedConstraint> const& joins,
                     map<std::string, int> const& bindings);
   void left_activate(StatefulSession& session,
-                     std::shared_ptr<Token> token) override;
+                     Token const& token) override;
   void right_activate(StatefulSession& session,
                       std::shared_ptr<Fact> fact,
                       PropagationType p_type) override;
@@ -136,7 +136,7 @@ class AlphaNode : public ReteNode
 public:
   AlphaNode() = default;
   explicit AlphaNode(ParsedConstraint const& constraint);
-  void left_activate(StatefulSession&, std::shared_ptr<Token>) override;
+  void left_activate(StatefulSession&, Token const&) override;
   void right_activate(StatefulSession&,
                       std::shared_ptr<Fact>,
                       PropagationType) override;
@@ -150,7 +150,7 @@ private:
 class EntryPointNode : public ReteNode
 {
 public:
-  void left_activate(StatefulSession&, std::shared_ptr<Token>) override;
+  void left_activate(StatefulSession&, Token const&) override;
   void right_activate(StatefulSession&,
                       std::shared_ptr<Fact>,
                       PropagationType) override;
@@ -169,14 +169,14 @@ public:
   BaseJoinNode(std::vector<ParsedConstraint> joins,
                map<std::string, int> bindings);
   void left_activate(StatefulSession& session,
-                     std::shared_ptr<Token> token) override = 0;
+                     Token const& token) override = 0;
   void right_activate(StatefulSession& session,
                       std::shared_ptr<Fact> fact,
                       PropagationType p_type) override = 0;
 
 protected:
   void propagate_assert(StatefulSession& session,
-                        std::shared_ptr<Token> token,
+                        Token const& token,
                         std::shared_ptr<Fact> fact);
   void propagate_retract(StatefulSession& session,
                          std::shared_ptr<TokenWME const> wme,
@@ -208,7 +208,7 @@ public:
                  std::pair<std::string, int> left_hash_key,
                  std::string right_hash_key);
   void left_activate(StatefulSession& session,
-                     std::shared_ptr<Token> token) override;
+                     Token const& token) override;
   void right_activate(StatefulSession& session,
                       std::shared_ptr<Fact> fact,
                       PropagationType p_type) override;
@@ -218,7 +218,7 @@ public:
 
 private:
   std::optional<ConstraintValue> get_key(
-      std::shared_ptr<Token> const& token) const;
+      Token const& token) const;
   std::optional<ConstraintValue> get_key(
       std::shared_ptr<Fact> const& fact) const;
   HashedTokenMemory left_memory_;
@@ -237,7 +237,7 @@ public:
   CrossProductJoinNode(std::vector<ParsedConstraint> joins,
                        map<std::string, int> bindings);
   void left_activate(StatefulSession& session,
-                     std::shared_ptr<Token> token) override;
+                     Token const& token) override;
   void right_activate(StatefulSession& session,
                       std::shared_ptr<Fact> fact,
                       PropagationType p_type) override;
@@ -298,7 +298,7 @@ public:
                  std::string res_fact_type,
                  map<std::string, int> bindings,
                  std::vector<ParsedConstraint> joins);
-  void left_activate(StatefulSession&, std::shared_ptr<Token>) override;
+  void left_activate(StatefulSession&, Token const&) override;
   void right_activate(StatefulSession&,
                       std::shared_ptr<Fact>,
                       PropagationType) override;
@@ -333,7 +333,7 @@ class UnnestNode : public ReteNode
 public:
   UnnestNode() = default;
   UnnestNode(ParsedUnnest const&, map<std::string, int> const&);
-  void left_activate(StatefulSession&, std::shared_ptr<Token>) override;
+  void left_activate(StatefulSession&, Token const&) override;
 
   void right_activate(StatefulSession&,
                       std::shared_ptr<Fact>,
@@ -359,7 +359,7 @@ public:
   EvalNode() = default;
   EvalNode(std::string expression, map<std::string, int> bindings);
   void left_activate(StatefulSession& session,
-                     std::shared_ptr<Token> token) override;
+                     Token const& token) override;
 
   void right_activate(StatefulSession&,
                       std::shared_ptr<Fact>,
@@ -381,7 +381,7 @@ class TerminalNode : public ReteNode
 public:
   TerminalNode() = default;
   TerminalNode(ParsedRule const& rule, map<std::string, int> bindings);
-  void left_activate(StatefulSession&, std::shared_ptr<Token>) override;
+  void left_activate(StatefulSession&, Token const&) override;
 
   void right_activate(StatefulSession&,
                       std::shared_ptr<Fact>,
@@ -403,7 +403,7 @@ class QueryTerminalNode : public ReteNode
 public:
   QueryTerminalNode() = default;
   explicit QueryTerminalNode(map<std::string, int> bindings);
-  void left_activate(StatefulSession&, std::shared_ptr<Token>) override;
+  void left_activate(StatefulSession&, Token const&) override;
 
   void right_activate(StatefulSession&,
                       std::shared_ptr<Fact>,
@@ -411,7 +411,7 @@ public:
   {
   }
 
-  map<TokenWME const*, std::shared_ptr<Token>> const& get_results()
+  map<TokenWME const*, Token> const& get_results()
   {
     return results;
   }
@@ -428,7 +428,7 @@ public:
   friend class ReteSerializer;
 
 private:
-  map<TokenWME const*, std::shared_ptr<Token>> results;
+  map<TokenWME const*, Token> results;
   map<std::string, int> binding_to_token_idx;
 };
 
@@ -438,7 +438,7 @@ public:
   QueryInputNode() = default;
   explicit QueryInputNode(std::shared_ptr<QueryTerminalNode> terminal_node);
 
-  void left_activate(StatefulSession&, std::shared_ptr<Token>) override {}
+  void left_activate(StatefulSession&, Token const&) override {}
 
   void right_activate(StatefulSession&,
                       std::shared_ptr<Fact>,
@@ -457,3 +457,5 @@ private:
 };
 
 #endif  // RETE_NODE_HPP
+
+

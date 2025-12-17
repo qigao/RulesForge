@@ -1,0 +1,229 @@
+{
+  "name": "Loan Eligibility Test Data",
+  "description": "Sample loan applications for testing the loan eligibility rules",
+  "applications": [
+    {
+      "applicantId": "APP-2024-001",
+      "applicantName": "Alice Johnson",
+      "requestedAmount": 250000,
+      "requestedTermMonths": 360,
+      "purpose": "home",
+      "creditScore": 780,
+      "annualIncome": 120000,
+      "monthlyDebt": 800,
+      "employmentYears": 8,
+      "employmentType": "full-time",
+      "hasCollateral": true,
+      "collateralValue": 320000,
+      "existingCustomer": true,
+      "_expectedResult": {
+        "approved": true,
+        "riskLevel": "Low",
+        "creditCategory": "Excellent",
+        "notes": "Prime applicant with excellent credit, low DTI, stable employment"
+      }
+    },
+    {
+      "applicantId": "APP-2024-002",
+      "applicantName": "Bob Martinez",
+      "requestedAmount": 35000,
+      "requestedTermMonths": 60,
+      "purpose": "auto",
+      "creditScore": 715,
+      "annualIncome": 65000,
+      "monthlyDebt": 1200,
+      "employmentYears": 3,
+      "employmentType": "full-time",
+      "hasCollateral": true,
+      "collateralValue": 38000,
+      "existingCustomer": false,
+      "_expectedResult": {
+        "approved": true,
+        "riskLevel": "Low",
+        "creditCategory": "Good",
+        "notes": "Good credit, reasonable DTI, secured auto loan"
+      }
+    },
+    {
+      "applicantId": "APP-2024-003",
+      "applicantName": "Carol Williams",
+      "requestedAmount": 15000,
+      "requestedTermMonths": 36,
+      "purpose": "personal",
+      "creditScore": 680,
+      "annualIncome": 55000,
+      "monthlyDebt": 1800,
+      "employmentYears": 2,
+      "employmentType": "full-time",
+      "hasCollateral": false,
+      "collateralValue": 0,
+      "existingCustomer": true,
+      "_expectedResult": {
+        "approved": true,
+        "riskLevel": "Medium",
+        "creditCategory": "Fair",
+        "notes": "Fair credit, moderate DTI, unsecured personal loan"
+      }
+    },
+    {
+      "applicantId": "APP-2024-004",
+      "applicantName": "David Chen",
+      "requestedAmount": 500000,
+      "requestedTermMonths": 360,
+      "purpose": "home",
+      "creditScore": 620,
+      "annualIncome": 95000,
+      "monthlyDebt": 3500,
+      "employmentYears": 1.5,
+      "employmentType": "full-time",
+      "hasCollateral": true,
+      "collateralValue": 550000,
+      "existingCustomer": false,
+      "_expectedResult": {
+        "approved": true,
+        "riskLevel": "High",
+        "creditCategory": "Poor",
+        "approvedAmount": 400000,
+        "notes": "High risk but secured - approved at reduced amount"
+      }
+    },
+    {
+      "applicantId": "APP-2024-005",
+      "applicantName": "Emma Thompson",
+      "requestedAmount": 20000,
+      "requestedTermMonths": 48,
+      "purpose": "personal",
+      "creditScore": 580,
+      "annualIncome": 42000,
+      "monthlyDebt": 1900,
+      "employmentYears": 0.5,
+      "employmentType": "part-time",
+      "hasCollateral": false,
+      "collateralValue": 0,
+      "existingCustomer": false,
+      "_expectedResult": {
+        "approved": false,
+        "riskLevel": "Very High",
+        "creditCategory": "Poor",
+        "notes": "Poor credit, high DTI, unstable employment, no collateral"
+      }
+    },
+    {
+      "applicantId": "APP-2024-006",
+      "applicantName": "Frank Rodriguez",
+      "requestedAmount": 100000,
+      "requestedTermMonths": 120,
+      "purpose": "business",
+      "creditScore": 450,
+      "annualIncome": 75000,
+      "monthlyDebt": 500,
+      "employmentYears": 10,
+      "employmentType": "self-employed",
+      "hasCollateral": true,
+      "collateralValue": 150000,
+      "existingCustomer": true,
+      "_expectedResult": {
+        "approved": false,
+        "riskLevel": "Very High",
+        "creditCategory": "Very Poor",
+        "rejectionCode": "CREDIT_TOO_LOW",
+        "notes": "Credit score below minimum threshold despite good DTI"
+      }
+    },
+    {
+      "applicantId": "APP-2024-007",
+      "applicantName": "Grace Kim",
+      "requestedAmount": 300000,
+      "requestedTermMonths": 360,
+      "purpose": "home",
+      "creditScore": 740,
+      "annualIncome": 85000,
+      "monthlyDebt": 4200,
+      "employmentYears": 5,
+      "employmentType": "full-time",
+      "hasCollateral": true,
+      "collateralValue": 350000,
+      "existingCustomer": false,
+      "_expectedResult": {
+        "approved": false,
+        "riskLevel": "High",
+        "creditCategory": "Good",
+        "rejectionCode": "DTI_TOO_HIGH",
+        "notes": "Good credit but DTI (59%) exceeds 50% threshold"
+      }
+    },
+    {
+      "applicantId": "APP-2024-008",
+      "applicantName": "Henry Patel",
+      "requestedAmount": 25000,
+      "requestedTermMonths": 60,
+      "purpose": "auto",
+      "creditScore": 695,
+      "annualIncome": 15000,
+      "monthlyDebt": 200,
+      "employmentYears": 2,
+      "employmentType": "part-time",
+      "hasCollateral": true,
+      "collateralValue": 28000,
+      "existingCustomer": false,
+      "_expectedResult": {
+        "approved": false,
+        "creditCategory": "Fair",
+        "rejectionCode": "INCOME_TOO_LOW",
+        "notes": "Income below $20,000 minimum threshold"
+      }
+    },
+    {
+      "applicantId": "APP-2024-009",
+      "applicantName": "Isabella Brown",
+      "requestedAmount": 50000,
+      "requestedTermMonths": 84,
+      "purpose": "personal",
+      "creditScore": 705,
+      "annualIncome": 0,
+      "monthlyDebt": 0,
+      "employmentYears": 0,
+      "employmentType": "unemployed",
+      "hasCollateral": false,
+      "collateralValue": 0,
+      "existingCustomer": true,
+      "_expectedResult": {
+        "approved": false,
+        "creditCategory": "Good",
+        "rejectionCode": "NO_INCOME_NO_COLLATERAL",
+        "notes": "Unemployed without collateral"
+      }
+    },
+    {
+      "applicantId": "APP-2024-010",
+      "applicantName": "James Wilson",
+      "requestedAmount": 75000,
+      "requestedTermMonths": 84,
+      "purpose": "personal",
+      "creditScore": 725,
+      "annualIncome": 0,
+      "monthlyDebt": 0,
+      "employmentYears": 0,
+      "employmentType": "unemployed",
+      "hasCollateral": true,
+      "collateralValue": 200000,
+      "existingCustomer": true,
+      "_expectedResult": {
+        "approved": true,
+        "riskLevel": "Medium",
+        "creditCategory": "Good",
+        "notes": "Unemployed but has substantial collateral (asset-based lending)"
+      }
+    }
+  ],
+  "testScenarios": {
+    "bulkProcessing": "Insert all applications and verify batch processing",
+    "ruleOrderVerification": "Confirm rules fire in correct salience order",
+    "decisionConsistency": "Same application should always produce same decision",
+    "edgeCases": [
+      "Credit score exactly at threshold (700, 650, etc.)",
+      "DTI exactly at 43% threshold",
+      "Employment years exactly at 2 year threshold"
+    ]
+  }
+}

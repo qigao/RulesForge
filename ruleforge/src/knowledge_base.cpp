@@ -44,6 +44,10 @@ AccumulatorRegistry const& KnowledgeBase::get_accumulator_registry() const { ret
 FactTypeRegistry& KnowledgeBase::get_fact_type_registry() { return fact_type_registry_; }
 
 FactTypeRegistry const& KnowledgeBase::get_fact_type_registry() const { return fact_type_registry_; }
+void KnowledgeBase::register_accumulator(std::string const& name, std::unique_ptr<IAccumulator> prototype) {
+    logd("KnowledgeBase::register_accumulator -> Registering custom accumulator '{}'", name);
+    accumulator_registry_->register_accumulator(name, std::move(prototype));
+}
 
 void KnowledgeBase::build(parser_state& state) {
     logd("KnowledgeBase::build -> Building from parser state with {} rules.", state.parsed_rules.size());
@@ -108,3 +112,5 @@ ParsedRule const* KnowledgeBase::find_rule_by_name(std::string const& name) cons
     }
     return nullptr;
 }
+
+

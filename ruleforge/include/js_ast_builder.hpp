@@ -6,6 +6,7 @@
 #include <vector>
 #include <memory>
 #include <optional>
+#include <set>
 
 // Forward declarations
 struct JSFunctionCall {
@@ -59,6 +60,9 @@ public:
     // Extract variable references like $p.name
     std::vector<JSVariableRef> extract_variables(const std::string& js_code);
 
+    // Extract locally declared variables (var, let, const)
+    std::set<std::string> extract_local_declarations(const std::string& js_code);
+
 private:
     JSContext* context_;
     JSRuntime* runtime_;
@@ -69,3 +73,4 @@ private:
 };
 
 #endif // JS_AST_BUILDER_HPP
+

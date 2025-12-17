@@ -134,14 +134,14 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
                && std::holds_alternative<std::string>(
                    *constraint.right_literal))
     {
-      logw("analyze_constraint_node_recursive: Processing right_literal as potential binding");
+      logd("analyze_constraint_node_recursive: Processing right_literal as potential binding");
       // This handles cases where a binding was parsed as a literal string,
       // e.g., "field == $p"
       auto const& potential_binding =
           std::get<std::string>(*constraint.right_literal);
-      logw("analyze_constraint_node_recursive: potential_binding='{}'", potential_binding);
+      logd("analyze_constraint_node_recursive: potential_binding='{}'", potential_binding);
       if (potential_binding.rfind('$', 0) == 0) {
-        logw("analyze_constraint_node_recursive: Found potential binding '{}'", potential_binding);
+        logd("analyze_constraint_node_recursive: Found potential binding '{}'", potential_binding);
         auto it = existing_symbols.find(potential_binding);
         bool found_in_existing = (it != existing_symbols.end());
 
@@ -150,7 +150,7 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
         }
 
         if (found_in_existing || it != new_symbols.end()) {
-          logw("analyze_constraint_node_recursive: Binding '{}' found, converting to bound_field", potential_binding);
+          logd("analyze_constraint_node_recursive: Binding '{}' found, converting to bound_field", potential_binding);
           constraint.right_bound_field = {{potential_binding, "this"}};
           constraint.right_literal = std::nullopt;
 
@@ -160,7 +160,7 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
             constraint.right_bound_field = *info.source_field_of_binding;
           }
         } else {
-          logw("analyze_constraint_node_recursive: Binding '{}' NOT FOUND, should add error", potential_binding);
+          logd("analyze_constraint_node_recursive: Binding '{}' NOT FOUND, should add error", potential_binding);
           analyzer.add_error(pos,
                              "In rule '" + rule.name
                                  + "', constraint uses undeclared binding '"
@@ -194,6 +194,11 @@ void SemanticAnalyzer::build_schema()
             state_.parsed_declarations.size(),
             state_.package_name);
   type_schemas_.clear();
+
+  // Add built-in Number type schema for accumulate results
+  // Number supports intValue, doubleValue, longValue, floatValue accessors
+  type_schemas_["Number"] = {"intValue", "doubleValue", "longValue", "floatValue", "value"};
+
   for (auto& decl : state_.parsed_declarations) {
     std::set<std::string> fields;
     for (auto const& field : decl.fields) {
@@ -220,9 +225,11 @@ std::optional<std::string> SemanticAnalyzer::resolve_type(
     return type_name;
   }
 
+  // Built-in types that don't need declaration
+  // Number is used for accumulate results (count, sum, etc.)
   if (type_name == "String" || type_name == "int" || type_name == "long"
       || type_name == "double" || type_name == "boolean"
-      || type_name == "java.util.List")
+      || type_name == "List" || type_name == "Number")
   {
     return type_name;
   }
@@ -332,9 +339,15 @@ void SemanticAnalyzer::analyze_pattern_list(
     ParsedRule const& rule)
 {
   for (auto& pattern : patterns) {
+    // A pattern adds a fact to the token if it's:
+    // - A standard pattern with no source (monostate)
+    // - A standard pattern with entry-point source (std::string)
+    // - A pattern with accumulate source
+    // - A pattern with unnest source
     bool adds_fact_to_token =
         (pattern.type == PatternType::STANDARD
-         && std::holds_alternative<std::monostate>(pattern.source))
+         && (std::holds_alternative<std::monostate>(pattern.source)
+             || std::holds_alternative<std::string>(pattern.source)))
         || std::holds_alternative<ParsedAccumulate>(pattern.source)
         || std::holds_alternative<ParsedUnnest>(pattern.source);
 
@@ -402,6 +415,15 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
             return;
           }
 
+          // Resolve the source pattern's fact type
+          if (!arg.source_pattern->fact_type.empty()) {
+            if (auto resolved = resolve_type(arg.source_pattern->fact_type,
+                                             rule.source_package,
+                                             rule.source_imports)) {
+              arg.source_pattern->fact_type = *resolved;
+            }
+          }
+
           SymbolTable source_symbols = symbols;
           if (!arg.source_pattern->binding.empty()) {
             source_symbols[arg.source_pattern->binding] =
@@ -429,46 +451,90 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
 
           std::string field_to_accumulate;
           std::string type_to_check_against = arg.source_pattern->fact_type;
+          bool is_arithmetic_expr = arg.field.find_first_of("+-*/") != std::string::npos;
 
-          size_t dot_pos = arg.field.find('.');
+          if (is_arithmetic_expr) {
+            // For arithmetic expressions like "$avail - $reserved", validate all bindings
+            // and keep the expression as-is for code generation
+            std::regex binding_regex(R"(\$[a-zA-Z_][a-zA-Z0-9_]*)");
+            std::sregex_iterator iter(arg.field.begin(), arg.field.end(), binding_regex);
+            std::sregex_iterator end;
 
-          if (dot_pos != std::string::npos && arg.field[0] == '$') {
-            std::string binding_name = arg.field.substr(0, dot_pos);
-            field_to_accumulate = arg.field.substr(dot_pos + 1);
-            auto it = source_symbols.find(binding_name);
-            if (it == source_symbols.end()) {
-              add_error(pattern_pos,
-                        "In rule '" + rule.name
-                            + "', accumulate uses undeclared binding '"
-                            + binding_name + "'.");
+            bool all_bindings_valid = true;
+            while (iter != end) {
+              std::string binding_name = iter->str();
+              auto it = combined_source_scope.find(binding_name);
+              if (it == combined_source_scope.end()) {
+                add_error(pattern_pos,
+                          "In rule '" + rule.name
+                              + "', accumulate expression uses undeclared binding '"
+                              + binding_name + "'.");
+                all_bindings_valid = false;
+              } else {
+                auto const& symbol_info = it->second;
+                if (symbol_info.source_field_of_binding) {
+                  arg.inline_binding_to_field[binding_name] = symbol_info.source_field_of_binding->second;
+                }
+              }
+              ++iter;
+            }
+            if (!all_bindings_valid) {
               return;
             }
-            type_to_check_against = it->second.pattern->fact_type;
-
-          } else if (arg.field[0] == '$') {
-            auto it = source_symbols.find(arg.field);
-            if (it == source_symbols.end()) {
-              add_error(pattern_pos,
-                        "In rule '" + rule.name
-                            + "', accumulate function uses undeclared binding '"
-                            + arg.field + "'.");
-              return;
-            }
-
-            auto const& symbol_info = it->second;
-            if (symbol_info.source_field_of_binding) {
-              field_to_accumulate = symbol_info.source_field_of_binding->second;
-            } else {
-              field_to_accumulate = "this";
-            }
+            // Keep the arithmetic expression as the field to accumulate
+            field_to_accumulate = arg.field;
             type_to_check_against = arg.source_pattern->fact_type;
 
           } else {
-            field_to_accumulate = arg.field;
-            type_to_check_against = arg.source_pattern->fact_type;
+            size_t dot_pos = arg.field.find('.');
+
+            if (dot_pos != std::string::npos && arg.field[0] == '$') {
+              std::string binding_name = arg.field.substr(0, dot_pos);
+              field_to_accumulate = arg.field.substr(dot_pos + 1);
+              auto it = combined_source_scope.find(binding_name);
+              if (it == combined_source_scope.end()) {
+                add_error(pattern_pos,
+                          "In rule '" + rule.name
+                              + "', accumulate uses undeclared binding '"
+                              + binding_name + "'.");
+                return;
+              }
+              type_to_check_against = it->second.pattern->fact_type;
+
+            } else if (arg.field[0] == '$') {
+              auto it = combined_source_scope.find(arg.field);
+              if (it == combined_source_scope.end()) {
+                add_error(pattern_pos,
+                          "In rule '" + rule.name
+                              + "', accumulate function uses undeclared binding '"
+                              + arg.field + "'.");
+                return;
+              }
+
+              auto const& symbol_info = it->second;
+              if (symbol_info.source_field_of_binding) {
+                field_to_accumulate = symbol_info.source_field_of_binding->second;
+              } else {
+                field_to_accumulate = "this";
+              }
+              type_to_check_against = arg.source_pattern->fact_type;
+
+            } else {
+              // Check if it's a numeric literal like "1" in count(1)
+              // In this case, treat it as counting all matches (field = "this")
+              bool is_numeric = !arg.field.empty() &&
+                  std::all_of(arg.field.begin(), arg.field.end(), ::isdigit);
+              if (is_numeric) {
+                field_to_accumulate = "this";
+              } else {
+                field_to_accumulate = arg.field;
+              }
+              type_to_check_against = arg.source_pattern->fact_type;
+            }
           }
 
-          if (field_to_accumulate != "this") {
+          // Skip schema validation for arithmetic expressions - the bindings were already validated
+          if (field_to_accumulate != "this" && !is_arithmetic_expr) {
             auto schema_it = get_type_schemas().find(type_to_check_against);
             if (schema_it == get_type_schemas().end()
                 || !schema_it->second.count(field_to_accumulate))
@@ -528,14 +594,19 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
 
     for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
       std::smatch match = *i;
-      std::string full_binding = "$" + match[1].str();
+      std::string captured = match[1].str();  // e.g., "profile.avgTransactionAmount"
 
-      if (symbols.find(full_binding) == symbols.end()) {
-        unbound_variables.push_back(full_binding);
+      // Extract just the base binding (before the first dot)
+      size_t dot_pos = captured.find('.');
+      std::string base_binding = "$" + (dot_pos != std::string::npos ? captured.substr(0, dot_pos) : captured);
+
+      if (symbols.find(base_binding) == symbols.end()) {
+        unbound_variables.push_back(base_binding);
       } else {
-        // Replace $var with var
+        // Replace $var.field with var.field (just remove the $)
         substituted_code = std::regex_replace(substituted_code,
-          std::regex("\\$" + match[1].str()), match[1].str());
+          std::regex("\\$" + captured),
+          (dot_pos != std::string::npos ? captured : captured));
       }
     }
 
@@ -595,7 +666,7 @@ void SemanticAnalyzer::analyze_rhs(ParsedRule& rule, SymbolTable const& symbols)
 void SemanticAnalyzer::add_error(tao::pegtl::position const& pos,
                                  std::string const& message)
 {
-  logw("Semantic Error Added: file={}, line={}, col={}, message='{}'",
+  logd("Semantic Error Added: file={}, line={}, col={}, message='{}'",
            source_name_,
            pos.line,
            pos.column,
@@ -631,3 +702,5 @@ bool SemanticAnalyzer::analyze_rules_and_queries()
             errors_.size());
   return errors_.empty();
 }
+
+

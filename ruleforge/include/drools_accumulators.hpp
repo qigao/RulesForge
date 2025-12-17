@@ -156,3 +156,5 @@ public:
 };
 
 #endif   // DROOLS_ACCUMULATORS_HPP
+
+

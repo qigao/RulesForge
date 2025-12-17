@@ -39,7 +39,7 @@ when
     $c: Customer(balance > 1000, orderCount > 5)
 then
     console.log(`${c.name} is now VIP!`);
-    drools.modify(c, {status: "VIP"});
+    drools.update(c, {status: "VIP"});
     drools.insert({type: "Notification", message: "Welcome to VIP!"});
 end
 
@@ -54,7 +54,7 @@ rule "Account Security"
 when
     $c: Customer(failedLogins > 3)
 then
-    drools.modify(c, {accountLocked: true});
+    drools.update(c, {accountLocked: true});
 end
 ```
 
@@ -94,13 +94,13 @@ rule "Can Drive Check"
 when
     // 找到一个 16 岁或以上且有驾照的人
     $person: Person(age >= 16, hasLicense == true)
-    
+
     // 确保我们尚未处理过他们
     not CanDrive(name == $person.name)
 then
     // 这是规则匹配时运行的 JavaScript 代码
     console.log($person.name + " 可以开车！");
-    
+
     // 向系统添加新事实
     drools.insert({
         type: "CanDrive",
@@ -132,15 +132,15 @@ int main() {
     std::string rules = read_file("my_first_rules.drl");
     ParsingResult result;
     auto knowledge_base = build_knowledge_base(rules, result);
-    
+
     if (!result.success) {
         std::cerr << "规则编译失败！" << std::endl;
         return 1;
     }
-    
+
     // 2. 创建一个会话 (将其视为您的工作区)
     auto session = knowledge_base->create_session();
-    
+
     // 3. 添加一些人
     auto person1 = std::make_shared<Fact>();
     person1->type = "Person";
@@ -148,22 +148,22 @@ int main() {
     person1->fields["age"] = static_cast<int64_t>(17);
     person1->fields["hasLicense"] = true;
     session->add_fact(person1);
-    
-    auto person2 = std::make_shared<Fact>();  
+
+    auto person2 = std::make_shared<Fact>();
     person2->type = "Person";
     person2->fields["name"] = "Bob";
     person2->fields["age"] = static_cast<int64_t>(15);
     person2->fields["hasLicense"] = true;
     session->add_fact(person2);
-    
+
     // 4. 运行规则！
     int rules_fired = session->fire_all_rules();
     std::cout << "执行了 " << rules_fired << " 条规则" << std::endl;
-    
+
     // 5. 检查发生了什么
     auto drivers = session->get_facts_of_type("CanDrive");
     std::cout << "找到了 " << drivers.size() << " 个可以开车的人" << std::endl;
-    
+
     return 0;
 }
 ```
@@ -196,7 +196,7 @@ Bob 不符合条件，因为他只有 15 岁！
 // 这是一个“Person”事实
 {
   type: "Person",
-  name: "Alice", 
+  name: "Alice",
   age: 17,
   hasLicense: true
 }
@@ -261,7 +261,7 @@ when
 then
     drools.insert({
         type: "ValidationError",
-        field: "email", 
+        field: "email",
         message: "电子邮件是必需的，并且必须包含 @"
     });
 end
@@ -314,7 +314,7 @@ declare Person
     age: int
 end
 
-rule "Good Rule"  
+rule "Good Rule"
 when
     $p: Person(age > 18)
 ```

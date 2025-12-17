@@ -155,3 +155,4 @@ namespace grammar {
 }
 
 #endif // DROOLS_GRAMMAR_OPTIMIZED_HPP
+

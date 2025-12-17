@@ -1,0 +1,323 @@
+{
+  "name": "Fraud Detection Test Data",
+  "description": "Sample transactions and account profiles for testing fraud detection rules",
+  "accountProfiles": [
+    {
+      "accountId": "ACC-001",
+      "accountType": "checking",
+      "avgMonthlySpend": 2500,
+      "avgTransactionAmount": 85,
+      "primaryCountry": "US",
+      "lastKnownLatitude": 37.7749,
+      "lastKnownLongitude": -122.4194,
+      "lastTransactionTime": 1704067200000
+    },
+    {
+      "accountId": "ACC-002",
+      "accountType": "credit",
+      "avgMonthlySpend": 5000,
+      "avgTransactionAmount": 150,
+      "primaryCountry": "US",
+      "lastKnownLatitude": 40.7128,
+      "lastKnownLongitude": -74.0060,
+      "lastTransactionTime": 1704063600000
+    },
+    {
+      "accountId": "ACC-003",
+      "accountType": "business",
+      "avgMonthlySpend": 25000,
+      "avgTransactionAmount": 500,
+      "primaryCountry": "US",
+      "lastKnownLatitude": 34.0522,
+      "lastKnownLongitude": -118.2437,
+      "lastTransactionTime": 1704060000000
+    }
+  ],
+  "testScenarios": [
+    {
+      "name": "Normal Transaction",
+      "description": "Legitimate purchase matching customer profile",
+      "transactions": [
+        {
+          "transactionId": "TXN-NORM-001",
+          "accountId": "ACC-001",
+          "amount": 75.50,
+          "merchantCountry": "US",
+          "merchantCity": "San Francisco",
+          "channel": "pos",
+          "timestamp": 1704070800000,
+          "latitude": 37.7849,
+          "longitude": -122.4094
+        }
+      ],
+      "_expectedResult": {
+        "alertGenerated": false,
+        "notes": "Amount within normal range, same location"
+      }
+    },
+    {
+      "name": "Card Testing Attack",
+      "description": "Fraudster testing stolen card with small amounts",
+      "transactions": [
+        {
+          "transactionId": "TXN-TEST-001",
+          "accountId": "ACC-001",
+          "amount": 1.00,
+          "merchantCountry": "US",
+          "channel": "online",
+          "timestamp": 1704070800000
+        },
+        {
+          "transactionId": "TXN-TEST-002",
+          "accountId": "ACC-001",
+          "amount": 1.00,
+          "merchantCountry": "US",
+          "channel": "online",
+          "timestamp": 1704070810000
+        },
+        {
+          "transactionId": "TXN-TEST-003",
+          "accountId": "ACC-001",
+          "amount": 1.00,
+          "merchantCountry": "US",
+          "channel": "online",
+          "timestamp": 1704070820000
+        },
+        {
+          "transactionId": "TXN-TEST-004",
+          "accountId": "ACC-001",
+          "amount": 1.00,
+          "merchantCountry": "US",
+          "channel": "online",
+          "timestamp": 1704070830000
+        },
+        {
+          "transactionId": "TXN-TEST-005",
+          "accountId": "ACC-001",
+          "amount": 1.00,
+          "merchantCountry": "US",
+          "channel": "online",
+          "timestamp": 1704070840000
+        },
+        {
+          "transactionId": "TXN-TEST-006",
+          "accountId": "ACC-001",
+          "amount": 500.00,
+          "merchantCountry": "US",
+          "channel": "online",
+          "timestamp": 1704070850000
+        }
+      ],
+      "_expectedResult": {
+        "alertGenerated": true,
+        "signals": ["RAPID_FIRE", "ROUND_AMOUNT", "LARGE_AMOUNT"],
+        "riskLevel": "High",
+        "action": "review"
+      }
+    },
+    {
+      "name": "Impossible Travel",
+      "description": "Transaction from geographically impossible location",
+      "transactions": [
+        {
+          "transactionId": "TXN-TRAVEL-001",
+          "accountId": "ACC-001",
+          "amount": 200.00,
+          "merchantCountry": "GB",
+          "merchantCity": "London",
+          "channel": "pos",
+          "timestamp": 1704069000000,
+          "latitude": 51.5074,
+          "longitude": -0.1278
+        }
+      ],
+      "_expectedResult": {
+        "alertGenerated": true,
+        "signals": ["IMPOSSIBLE_TRAVEL", "NEW_COUNTRY"],
+        "notes": "5,300 miles from San Francisco to London in 30 minutes",
+        "riskLevel": "Very High",
+        "action": "block"
+      }
+    },
+    {
+      "name": "High Risk Country",
+      "description": "Transaction from known fraud hotspot",
+      "transactions": [
+        {
+          "transactionId": "TXN-COUNTRY-001",
+          "accountId": "ACC-002",
+          "amount": 3000.00,
+          "merchantCountry": "NG",
+          "merchantCity": "Lagos",
+          "channel": "online",
+          "timestamp": 1704074400000,
+          "latitude": 6.5244,
+          "longitude": 3.3792
+        }
+      ],
+      "_expectedResult": {
+        "alertGenerated": true,
+        "signals": ["HIGH_RISK_COUNTRY", "NEW_COUNTRY", "LARGE_AMOUNT"],
+        "riskLevel": "Very High",
+        "action": "block"
+      }
+    },
+    {
+      "name": "ATM Hammering",
+      "description": "Multiple ATM withdrawals in short period",
+      "transactions": [
+        {
+          "transactionId": "TXN-ATM-001",
+          "accountId": "ACC-001",
+          "amount": 400.00,
+          "merchantCountry": "US",
+          "channel": "atm",
+          "timestamp": 1704070800000
+        },
+        {
+          "transactionId": "TXN-ATM-002",
+          "accountId": "ACC-001",
+          "amount": 400.00,
+          "merchantCountry": "US",
+          "channel": "atm",
+          "timestamp": 1704071100000
+        },
+        {
+          "transactionId": "TXN-ATM-003",
+          "accountId": "ACC-001",
+          "amount": 400.00,
+          "merchantCountry": "US",
+          "channel": "atm",
+          "timestamp": 1704071400000
+        },
+        {
+          "transactionId": "TXN-ATM-004",
+          "accountId": "ACC-001",
+          "amount": 400.00,
+          "merchantCountry": "US",
+          "channel": "atm",
+          "timestamp": 1704071700000
+        }
+      ],
+      "_expectedResult": {
+        "alertGenerated": true,
+        "signals": ["ATM_HAMMERING", "ROUND_AMOUNT"],
+        "riskLevel": "High",
+        "action": "review"
+      }
+    },
+    {
+      "name": "Structuring",
+      "description": "Amounts just under reporting threshold",
+      "transactions": [
+        {
+          "transactionId": "TXN-STRUCT-001",
+          "accountId": "ACC-003",
+          "amount": 9500.00,
+          "merchantCountry": "US",
+          "channel": "pos",
+          "timestamp": 1704070800000
+        },
+        {
+          "transactionId": "TXN-STRUCT-002",
+          "accountId": "ACC-003",
+          "amount": 9800.00,
+          "merchantCountry": "US",
+          "channel": "pos",
+          "timestamp": 1704074400000
+        },
+        {
+          "transactionId": "TXN-STRUCT-003",
+          "accountId": "ACC-003",
+          "amount": 9999.00,
+          "merchantCountry": "US",
+          "channel": "pos",
+          "timestamp": 1704078000000
+        }
+      ],
+      "_expectedResult": {
+        "alertGenerated": true,
+        "signals": ["STRUCTURING"],
+        "notes": "Multiple transactions just under $10,000 reporting limit",
+        "riskLevel": "High",
+        "action": "review"
+      }
+    },
+    {
+      "name": "Account Takeover",
+      "description": "Complete profile deviation indicating stolen credentials",
+      "transactions": [
+        {
+          "transactionId": "TXN-ATO-001",
+          "accountId": "ACC-001",
+          "amount": 2500.00,
+          "merchantCountry": "RO",
+          "merchantCity": "Bucharest",
+          "channel": "online",
+          "timestamp": 1704070800000,
+          "latitude": 44.4268,
+          "longitude": 26.1025
+        },
+        {
+          "transactionId": "TXN-ATO-002",
+          "accountId": "ACC-001",
+          "amount": 2500.00,
+          "merchantCountry": "RO",
+          "merchantCity": "Bucharest",
+          "channel": "online",
+          "timestamp": 1704070920000,
+          "latitude": 44.4268,
+          "longitude": 26.1025
+        },
+        {
+          "transactionId": "TXN-ATO-003",
+          "accountId": "ACC-001",
+          "amount": 2500.00,
+          "merchantCountry": "RO",
+          "merchantCity": "Bucharest",
+          "channel": "online",
+          "timestamp": 1704071040000,
+          "latitude": 44.4268,
+          "longitude": 26.1025
+        }
+      ],
+      "_expectedResult": {
+        "alertGenerated": true,
+        "signals": ["IMPOSSIBLE_TRAVEL", "HIGH_RISK_COUNTRY", "NEW_COUNTRY", "VERY_LARGE_AMOUNT", "HIGH_FREQUENCY", "ROUND_AMOUNT"],
+        "riskLevel": "Critical",
+        "action": "block_and_freeze"
+      }
+    }
+  ],
+  "highRiskCountries": [
+    {"code": "NG", "name": "Nigeria", "reason": "High fraud incidence"},
+    {"code": "RO", "name": "Romania", "reason": "Card skimming hotspot"},
+    {"code": "RU", "name": "Russia", "reason": "Cybercrime origin"},
+    {"code": "UA", "name": "Ukraine", "reason": "Carding forums"},
+    {"code": "BY", "name": "Belarus", "reason": "Money laundering"},
+    {"code": "KP", "name": "North Korea", "reason": "Sanctions"},
+    {"code": "IR", "name": "Iran", "reason": "Sanctions"},
+    {"code": "VE", "name": "Venezuela", "reason": "Economic instability"}
+  ],
+  "riskScoring": {
+    "thresholds": {
+      "low": {"min": 0, "max": 25, "action": "allow"},
+      "medium": {"min": 26, "max": 50, "action": "allow_and_log"},
+      "high": {"min": 51, "max": 75, "action": "review"},
+      "veryHigh": {"min": 76, "max": 100, "action": "block"},
+      "critical": {"min": 101, "max": 999, "action": "block_and_freeze"}
+    },
+    "signalScores": {
+      "LARGE_AMOUNT": 20,
+      "VERY_LARGE_AMOUNT": 35,
+      "ROUND_AMOUNT": 15,
+      "STRUCTURING": 30,
+      "HIGH_RISK_COUNTRY": 45,
+      "NEW_COUNTRY": 25,
+      "IMPOSSIBLE_TRAVEL": 50,
+      "RAPID_FIRE": 40,
+      "HIGH_FREQUENCY": 30,
+      "ATM_HAMMERING": 35
+    }
+  }
+}

@@ -25,4 +25,4 @@ target_link_libraries(
 )
 set_target_properties(fmtlog PROPERTIES LINKER_LANGUAGE CXX)
 
-set_target_properties(fmtlog PROPERTIES FOLDER "shared/fmtlog")
+set_target_properties(fmtlog PROPERTIES FOLDER "vendor/fmtlog")

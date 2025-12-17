@@ -1,0 +1,106 @@
+{
+  "testOrders": [
+    {
+      "description": "Order with 1 item - should get No Discount",
+      "quantity": 1,
+      "unitPrice": 25.99,
+      "finalPrice": 0.01
+    },
+    {
+      "description": "Order with 2 items - should get No Discount",
+      "quantity": 2,
+      "unitPrice": 15.50,
+      "finalPrice": 0.01
+    },
+    {
+      "description": "Order with 3 items - should get Medium Discount (5%)",
+      "quantity": 3,
+      "unitPrice": 30.00,
+      "finalPrice": 0.01
+    },
+    {
+      "description": "Order with 4 items - should get Medium Discount (5%)",
+      "quantity": 4,
+      "unitPrice": 12.75,
+      "finalPrice": 0.01
+    },
+    {
+      "description": "Order with 5 items - should get Medium Discount (5%)",
+      "quantity": 5,
+      "unitPrice": 45.99,
+      "finalPrice": 0.01
+    },
+    {
+      "description": "Order with 6 items - should get High Discount (10%)",
+      "quantity": 6,
+      "unitPrice": 20.00,
+      "finalPrice": 0.01
+    },
+    {
+      "description": "Order with 10 items - should get High Discount (10%)",
+      "quantity": 10,
+      "unitPrice": 18.99,
+      "finalPrice": 0.01
+    },
+    {
+      "description": "Order with 3 items and finalPrice already set - should trigger Round Down rule",
+      "quantity": 3,
+      "unitPrice": 15.50,
+      "finalPrice": 44.18
+    },
+    {
+      "description": "Order with 1 item and finalPrice already set - should not trigger Round Down rule",
+      "quantity": 1,
+      "unitPrice": 25.99,
+      "finalPrice": 25.99
+    },
+    {
+      "description": "Order with 7 items - should get High Discount and then Round Down",
+      "quantity": 7,
+      "unitPrice": 16.50,
+      "finalPrice": 0.01
+    }
+  ],
+  "expectedResults": {
+    "noDiscount": {
+      "quantities": [1, 2],
+      "calculation": "quantity * unitPrice"
+    },
+    "mediumDiscount": {
+      "quantities": [3, 4, 5],
+      "discount": 0.05,
+      "calculation": "quantity * unitPrice * 0.95"
+    },
+    "highDiscount": {
+      "quantities": [6, 7, 10],
+      "discount": 0.10,
+      "calculation": "quantity * unitPrice * 0.90"
+    },
+    "roundDown": {
+      "condition": "quantity > 2 AND finalPrice > 0.01",
+      "calculation": "Math.floor(finalPrice)"
+    }
+  },
+  "testScenarios": [
+    {
+      "scenario": "Small Order (1-2 items)",
+      "orders": [1, 2],
+      "expectedBehavior": "No discount applied"
+    },
+    {
+      "scenario": "Medium Order (3-5 items)",
+      "orders": [3, 4, 5],
+      "expectedBehavior": "5% discount applied"
+    },
+    {
+      "scenario": "Large Order (6+ items)",
+      "orders": [6, 7, 10],
+      "expectedBehavior": "10% discount applied, then round down"
+    },
+    {
+      "scenario": "Pre-calculated Orders",
+      "orders": [8, 9],
+      "expectedBehavior": "Round down rule triggered for quantity > 2"
+    }
+  ]
+}

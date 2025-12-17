@@ -2,7 +2,6 @@
 #define OPTIMIZED_FACT_BUILDER_HPP
 
 #include "memory_optimized_types.hpp"
-#include "object_pool.hpp"
 #include "fact_builder.hpp"
 
 #include <string_view>
@@ -111,49 +110,8 @@ private:
     std::unique_ptr<FastFact> fast_fact_;
 };
 
-// Pool-allocated fact builder for maximum performance
-class PooledFactBuilder : public OptimizedFactBuilderBase<PooledFactBuilder> {
-public:
-    static PooledFactBuilder create(std::string_view type_name) {
-        return PooledFactBuilder(type_name);
-    }
-    
-    // Build using object pool allocation
-    auto build_pooled() && {
-        // Use object pool for allocation
-        auto pooled_fact = GlobalPools::make_pooled_fact();
-        pooled_fact->id = fast_fact_->id;
-        pooled_fact->type = std::string(fast_fact_->type);
-        
-        // Copy fields
-        for (auto const& [key, value] : fast_fact_->fields) {
-            pooled_fact->fields[std::string(key)] = value;
-        }
-        
-        return pooled_fact;
-    }
-    
-    // Build standard shared_ptr for compatibility
-    std::shared_ptr<Fact> build() && {
-        return fast_fact_->to_fact();
-    }
-    
-    std::shared_ptr<Fact> build() const& {
-        return fast_fact_->to_fact();
-    }
-
-private:
-    friend class OptimizedFactBuilderBase<PooledFactBuilder>;
-    
-    explicit PooledFactBuilder(std::string_view type_name) 
-        : fast_fact_(std::make_unique<FastFact>(type_name)) {}
-    
-    std::unique_ptr<FastFact> fast_fact_;
-};
-
-// Convenience macros for optimized builders
+// Convenience macro for optimized builders
 #define FAST_FACT(type_name) OptimizedFactBuilder::create(type_name)
-#define POOLED_FACT(type_name) PooledFactBuilder::create(type_name)
 
 // Optimized typed builders
 namespace OptimizedBuilders {
@@ -240,3 +198,4 @@ private:
 #define FAST_CUSTOMER() OptimizedBuilders::FastCustomerBuilder::create()
 
 #endif // OPTIMIZED_FACT_BUILDER_HPP
+

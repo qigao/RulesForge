@@ -1,0 +1,274 @@
+{
+  "name": "Travel Booking Test Data",
+  "description": "Sample travel requests, flights, hotels, and visa requirements for testing booking rules",
+  "visaRequirements": [
+    {"nationality": "US", "destinationCountry": "FR", "required": false, "visaType": "none", "processingDays": 0, "cost": 0},
+    {"nationality": "US", "destinationCountry": "UK", "required": false, "visaType": "ETA", "processingDays": 3, "cost": 10},
+    {"nationality": "US", "destinationCountry": "JP", "required": false, "visaType": "none", "processingDays": 0, "cost": 0},
+    {"nationality": "US", "destinationCountry": "CN", "required": true, "visaType": "Tourist L", "processingDays": 10, "cost": 140},
+    {"nationality": "US", "destinationCountry": "IN", "required": true, "visaType": "Tourist", "processingDays": 7, "cost": 82},
+    {"nationality": "US", "destinationCountry": "AU", "required": true, "visaType": "eVisitor", "processingDays": 1, "cost": 20},
+    {"nationality": "UK", "destinationCountry": "US", "required": true, "visaType": "ESTA", "processingDays": 3, "cost": 21},
+    {"nationality": "IN", "destinationCountry": "US", "required": true, "visaType": "B1/B2", "processingDays": 30, "cost": 185}
+  ],
+  "flightOptions": [
+    {"flightId": "AA100", "airline": "American Airlines", "origin": "JFK", "destination": "CDG", "departureTime": 1704067200000, "cabinClass": "business", "basePrice": 2500.0, "seatsAvailable": 12},
+    {"flightId": "AA101", "airline": "American Airlines", "origin": "JFK", "destination": "CDG", "departureTime": 1704067200000, "cabinClass": "economy", "basePrice": 650.0, "seatsAvailable": 45},
+    {"flightId": "UA200", "airline": "United Airlines", "origin": "LAX", "destination": "NRT", "departureTime": 1704153600000, "cabinClass": "economy", "basePrice": 1200.0, "seatsAvailable": 80},
+    {"flightId": "UA201", "airline": "United Airlines", "origin": "LAX", "destination": "NRT", "departureTime": 1704153600000, "cabinClass": "business", "basePrice": 4500.0, "seatsAvailable": 8},
+    {"flightId": "DL300", "airline": "Delta", "origin": "ATL", "destination": "LHR", "departureTime": 1704240000000, "cabinClass": "economy", "basePrice": 750.0, "seatsAvailable": 60},
+    {"flightId": "DL301", "airline": "Delta", "origin": "ATL", "destination": "LHR", "departureTime": 1704240000000, "cabinClass": "first", "basePrice": 8000.0, "seatsAvailable": 4},
+    {"flightId": "BA400", "airline": "British Airways", "origin": "JFK", "destination": "PEK", "departureTime": 1704326400000, "cabinClass": "business", "basePrice": 5200.0, "seatsAvailable": 6},
+    {"flightId": "BA401", "airline": "British Airways", "origin": "JFK", "destination": "PEK", "departureTime": 1704326400000, "cabinClass": "economy", "basePrice": 1100.0, "seatsAvailable": 2}
+  ],
+  "hotelOptions": [
+    {"hotelId": "HTL-PAR-001", "name": "Le Grand Paris", "destinationCity": "CDG", "stars": 5, "pricePerNight": 450.0, "availableRooms": 10},
+    {"hotelId": "HTL-PAR-002", "name": "Hotel Montmartre", "destinationCity": "CDG", "stars": 4, "pricePerNight": 250.0, "availableRooms": 25},
+    {"hotelId": "HTL-PAR-003", "name": "Budget Inn Paris", "destinationCity": "CDG", "stars": 2, "pricePerNight": 89.0, "availableRooms": 50},
+    {"hotelId": "HTL-TYO-001", "name": "Tokyo Imperial", "destinationCity": "NRT", "stars": 5, "pricePerNight": 500.0, "availableRooms": 8},
+    {"hotelId": "HTL-TYO-002", "name": "Shinjuku Garden Hotel", "destinationCity": "NRT", "stars": 4, "pricePerNight": 180.0, "availableRooms": 30},
+    {"hotelId": "HTL-LON-001", "name": "The Ritz London", "destinationCity": "LHR", "stars": 5, "pricePerNight": 650.0, "availableRooms": 5},
+    {"hotelId": "HTL-LON-002", "name": "Westminster Hotel", "destinationCity": "LHR", "stars": 4, "pricePerNight": 220.0, "availableRooms": 20},
+    {"hotelId": "HTL-BEI-001", "name": "Beijing Grand", "destinationCity": "PEK", "stars": 5, "pricePerNight": 280.0, "availableRooms": 15}
+  ],
+  "testScenarios": [
+    {
+      "scenario": "Business Trip to Paris - Gold Member",
+      "request": {
+        "requestId": "REQ-001",
+        "customerId": "CUST-001",
+        "loyaltyTier": "gold",
+        "loyaltyPoints": 25000,
+        "origin": "JFK",
+        "destination": "CDG",
+        "departureDate": 1704067200000,
+        "returnDate": 1704499200000,
+        "travelers": 2,
+        "cabinClass": "business",
+        "hotelStars": 4,
+        "includeInsurance": true,
+        "nationality": "US"
+      },
+      "_expectedResult": {
+        "flightQuote": {
+          "basePrice": 2500.0,
+          "loyaltyDiscount": "10%",
+          "totalPerPerson": 2250.0,
+          "totalAllTravelers": 4500.0
+        },
+        "hotelQuote": {
+          "hotel": "Hotel Montmartre",
+          "nights": 5,
+          "loyaltyDiscount": "10%",
+          "packageDiscount": "10%"
+        },
+        "visaAlert": "No visa required",
+        "pointsRedemption": "$250 credit (25000 points)",
+        "notes": "Gold member gets 10% off flight and hotel, package discount, points redemption"
+      }
+    },
+    {
+      "scenario": "Family Vacation to Tokyo - Silver Member",
+      "request": {
+        "requestId": "REQ-002",
+        "customerId": "CUST-002",
+        "loyaltyTier": "silver",
+        "loyaltyPoints": 8500,
+        "origin": "LAX",
+        "destination": "NRT",
+        "departureDate": 1704153600000,
+        "returnDate": 1704758400000,
+        "travelers": 4,
+        "cabinClass": "economy",
+        "hotelStars": 4,
+        "includeInsurance": true,
+        "nationality": "US"
+      },
+      "_expectedResult": {
+        "flightQuote": {
+          "basePrice": 1200.0,
+          "loyaltyDiscount": "5%",
+          "totalAllTravelers": 4560.0
+        },
+        "hotelQuote": {
+          "hotel": "Shinjuku Garden Hotel",
+          "nights": 7,
+          "loyaltyDiscount": "5%"
+        },
+        "visaAlert": "No visa required for Japan",
+        "pointsRedemption": "None (need 1500 more points)",
+        "notes": "Family of 4, silver discount, no visa needed, not enough points to redeem"
+      }
+    },
+    {
+      "scenario": "Executive Trip to China - Platinum Member",
+      "request": {
+        "requestId": "REQ-003",
+        "customerId": "CUST-003",
+        "loyaltyTier": "platinum",
+        "loyaltyPoints": 75000,
+        "origin": "JFK",
+        "destination": "PEK",
+        "departureDate": 1704326400000,
+        "returnDate": 1704672000000,
+        "travelers": 1,
+        "cabinClass": "business",
+        "hotelStars": 5,
+        "includeInsurance": true,
+        "nationality": "US"
+      },
+      "_expectedResult": {
+        "flightQuote": {
+          "basePrice": 5200.0,
+          "loyaltyDiscount": "15%",
+          "totalPerPerson": 4420.0
+        },
+        "hotelQuote": {
+          "hotel": "Beijing Grand",
+          "nights": 4,
+          "loyaltyDiscount": "15%"
+        },
+        "visaAlert": {
+          "required": true,
+          "visaType": "Tourist L",
+          "processingDays": 10,
+          "cost": 140
+        },
+        "bookingIssue": "VISA_TIME - Visa processing takes 10 days",
+        "pointsRedemption": "$500 credit (max redemption)",
+        "notes": "Platinum gets max discounts, visa required with warning, max points redemption"
+      }
+    },
+    {
+      "scenario": "Weekend London Trip - Standard Member",
+      "request": {
+        "requestId": "REQ-004",
+        "customerId": "CUST-004",
+        "loyaltyTier": "member",
+        "loyaltyPoints": 500,
+        "origin": "ATL",
+        "destination": "LHR",
+        "departureDate": 1704240000000,
+        "returnDate": 1704412800000,
+        "travelers": 2,
+        "cabinClass": "economy",
+        "hotelStars": 4,
+        "includeInsurance": false,
+        "nationality": "US"
+      },
+      "_expectedResult": {
+        "flightQuote": {
+          "basePrice": 750.0,
+          "loyaltyDiscount": "0%",
+          "totalAllTravelers": 1500.0
+        },
+        "hotelQuote": {
+          "hotel": "Westminster Hotel",
+          "nights": 2,
+          "loyaltyDiscount": "0%"
+        },
+        "visaAlert": "No visa required (UK ETA)",
+        "insuranceQuote": "Declined",
+        "notes": "Standard member, no discounts, no insurance, short trip"
+      }
+    },
+    {
+      "scenario": "Oversold Flight - No Seats Available",
+      "request": {
+        "requestId": "REQ-005",
+        "customerId": "CUST-005",
+        "loyaltyTier": "gold",
+        "loyaltyPoints": 15000,
+        "origin": "JFK",
+        "destination": "PEK",
+        "departureDate": 1704326400000,
+        "returnDate": 1704672000000,
+        "travelers": 5,
+        "cabinClass": "economy",
+        "hotelStars": 4,
+        "includeInsurance": true,
+        "nationality": "US"
+      },
+      "_expectedResult": {
+        "bookingIssue": {
+          "type": "NO_FLIGHTS",
+          "message": "No economy class flights available with 5 seats",
+          "blocking": true
+        },
+        "notes": "Only 2 economy seats available on BA401, booking should fail validation"
+      }
+    },
+    {
+      "scenario": "Luxury First Class to London",
+      "request": {
+        "requestId": "REQ-006",
+        "customerId": "CUST-006",
+        "loyaltyTier": "platinum",
+        "loyaltyPoints": 120000,
+        "origin": "ATL",
+        "destination": "LHR",
+        "departureDate": 1704240000000,
+        "returnDate": 1704672000000,
+        "travelers": 2,
+        "cabinClass": "first",
+        "hotelStars": 5,
+        "includeInsurance": true,
+        "nationality": "US"
+      },
+      "_expectedResult": {
+        "flightQuote": {
+          "basePrice": 8000.0,
+          "loyaltyDiscount": "15%",
+          "totalPerPerson": 6800.0,
+          "totalAllTravelers": 13600.0,
+          "pointsEarned": 40800
+        },
+        "hotelQuote": {
+          "hotel": "The Ritz London",
+          "nights": 5,
+          "pricePerNight": 650.0
+        },
+        "pointsRedemption": "$500 credit (max)",
+        "notes": "Luxury booking, platinum perks, high points earned due to 3x multiplier"
+      }
+    },
+    {
+      "scenario": "Indian National Visiting US - Visa Required",
+      "request": {
+        "requestId": "REQ-007",
+        "customerId": "CUST-007",
+        "loyaltyTier": "gold",
+        "loyaltyPoints": 5000,
+        "origin": "DEL",
+        "destination": "JFK",
+        "departureDate": 1704326400000,
+        "returnDate": 1704931200000,
+        "travelers": 1,
+        "cabinClass": "business",
+        "hotelStars": 4,
+        "includeInsurance": true,
+        "nationality": "IN"
+      },
+      "_expectedResult": {
+        "visaAlert": {
+          "required": true,
+          "visaType": "B1/B2",
+          "processingDays": 30,
+          "cost": 185
+        },
+        "bookingIssue": "VISA_TIME - 30 days processing required",
+        "notes": "No matching flights in test data (origin DEL), demonstrates visa requirement check for Indian nationals"
+      }
+    }
+  ],
+  "loyaltyTiers": {
+    "platinum": {"flightDiscount": "15%", "hotelDiscount": "15%", "pointsMultiplier": 3},
+    "gold": {"flightDiscount": "10%", "hotelDiscount": "10%", "pointsMultiplier": 2},
+    "silver": {"flightDiscount": "5%", "hotelDiscount": "5%", "pointsMultiplier": 1.5},
+    "member": {"flightDiscount": "0%", "hotelDiscount": "0%", "pointsMultiplier": 1}
+  },
+  "pointsRedemption": {
+    "rate": "10,000 points = $100 credit",
+    "maxRedemption": "$500 per booking"
+  }
+}

@@ -4,6 +4,7 @@
 #include "drools_rete_defs.hpp"
 #include "i_network_callback.hpp"
 #include "js_handle_manager.hpp"
+#include "token_handle_manager.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -230,8 +231,11 @@ void JSScriptingManager::create_drools_api(Token& current_token) {
     // Store the handle ID instead of raw pointer
     JS_SetPropertyStr(context_, global, "__drools_handle_id", JS_NewInt32(context_, static_cast<int32_t>(handle_id_)));
 
-    // Store the current token pointer for use in insertLogical
-    JS_SetPropertyStr(context_, global, "__current_token", JS_NewBigUint64(context_, reinterpret_cast<uint64_t>(&current_token)));
+    // P0-001 FIX: Use handle-based token management instead of raw pointer
+    // Register token and store handle ID (not raw pointer) - safer lifetime management
+    auto token_handle = TokenHandleManager::instance().register_token(&current_token);
+    JS_SetPropertyStr(context_, global, "__current_token_handle", JS_NewInt32(context_, static_cast<int32_t>(token_handle)));
+    current_token_handle_ = token_handle;  // Store for cleanup
 
     // Create C++ callback function for drools.insert with exception boundary
     JSValue insert_func = JS_NewCFunction(context_, [](JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) -> JSValue {
@@ -279,20 +283,21 @@ void JSScriptingManager::create_drools_api(Token& current_token) {
             // Get the manager instance using handle
             JSValue global = JS_GetGlobalObject(ctx);
             JSValue handle_val = JS_GetPropertyStr(ctx, global, "__drools_handle_id");
-            JSValue token_val = JS_GetPropertyStr(ctx, global, "__current_token");
+            JSValue token_handle_val = JS_GetPropertyStr(ctx, global, "__current_token_handle");
 
             int32_t handle_id;
             JS_ToInt32(ctx, &handle_id, handle_val);
 
-            uint64_t token_ptr;
-            JS_ToBigUint64(ctx, &token_ptr, token_val);
+            // P0-001 FIX: Use TokenHandleManager instead of raw pointer
+            int32_t token_handle;
+            JS_ToInt32(ctx, &token_handle, token_handle_val);
 
             JS_FreeValue(ctx, global);
             JS_FreeValue(ctx, handle_val);
-            JS_FreeValue(ctx, token_val);
+            JS_FreeValue(ctx, token_handle_val);
 
             JSScriptingManager* manager = JSHandleManager::instance().get_manager(static_cast<uint32_t>(handle_id));
-            Token* current_token = reinterpret_cast<Token*>(token_ptr);
+            Token* current_token = TokenHandleManager::instance().get_token(static_cast<uint32_t>(token_handle));
 
             if (manager && current_token) {
                 auto fact = manager->fact_from_js_object(argv[0]);
@@ -301,7 +306,12 @@ void JSScriptingManager::create_drools_api(Token& current_token) {
                     logd("drools.insertLogical: Created logical fact ID {} type '{}'", fact->id, fact->type);
                 }
             } else {
-                loge("Invalid handle ID: {} or token pointer", handle_id);
+                if (!manager) {
+                    loge("drools.insertLogical: Invalid manager handle ID: {}", handle_id);
+                }
+                if (!current_token) {
+                    loge("drools.insertLogical: Invalid or expired token handle: {}", token_handle);
+                }
             }
             return JS_UNDEFINED;
         } catch (std::exception const& e) {
@@ -466,12 +476,110 @@ void JSScriptingManager::create_drools_api(Token& current_token) {
         }
     }, "update", 2);
 
-    // Create the drools object and set all four methods
+    // P1 FIX: Create C++ callback function for drools.halt()
+    JSValue halt_func = JS_NewCFunction(context_, [](JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) -> JSValue {
+        try {
+            // Get the manager instance using handle
+            JSValue global = JS_GetGlobalObject(ctx);
+            JSValue handle_val = JS_GetPropertyStr(ctx, global, "__drools_handle_id");
+            int32_t handle_id;
+            JS_ToInt32(ctx, &handle_id, handle_val);
+
+            JS_FreeValue(ctx, global);
+            JS_FreeValue(ctx, handle_val);
+
+            JSScriptingManager* manager = JSHandleManager::instance().get_manager(static_cast<uint32_t>(handle_id));
+
+            if (manager) {
+                manager->callback_provider_.halt();
+                logd("drools.halt: Rule execution halt requested");
+            } else {
+                loge("drools.halt: Invalid handle ID: {}", handle_id);
+            }
+            return JS_UNDEFINED;
+        } catch (std::exception const& e) {
+            return JS_ThrowInternalError(ctx, "C++ exception: %s", e.what());
+        } catch (...) {
+            return JS_ThrowInternalError(ctx, "Unknown C++ exception");
+        }
+    }, "halt", 0);
+    JSValue set_focus_func = JS_NewCFunction(context_, [](JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) -> JSValue {
+        try {
+            if (argc < 1) {
+                return JS_ThrowTypeError(ctx, "setFocus requires 1 argument (group name)");
+            }
+
+            // Get the group name string
+            char const* group_name_cstr = JS_ToCString(ctx, argv[0]);
+            if (!group_name_cstr) {
+                return JS_ThrowTypeError(ctx, "setFocus argument must be a string");
+            }
+            std::string group_name(group_name_cstr);
+            JS_FreeCString(ctx, group_name_cstr);
+
+            // Get the manager instance using handle
+            JSValue global = JS_GetGlobalObject(ctx);
+            JSValue handle_val = JS_GetPropertyStr(ctx, global, "__drools_handle_id");
+            int32_t handle_id;
+            JS_ToInt32(ctx, &handle_id, handle_val);
+
+            JS_FreeValue(ctx, global);
+            JS_FreeValue(ctx, handle_val);
+
+            JSScriptingManager* manager = JSHandleManager::instance().get_manager(static_cast<uint32_t>(handle_id));
+
+            if (manager) {
+                manager->callback_provider_.set_focus(group_name);
+                logd("drools.setFocus: Setting focus to agenda-group '{}'", group_name);
+            } else {
+                loge("drools.setFocus: Invalid handle ID: {}", handle_id);
+            }
+            return JS_UNDEFINED;
+        } catch (std::exception const& e) {
+            return JS_ThrowInternalError(ctx, "C++ exception: %s", e.what());
+        } catch (...) {
+            return JS_ThrowInternalError(ctx, "Unknown C++ exception");
+        }
+    }, "setFocus", 1);
+    JSValue get_rule_func = JS_NewCFunction(context_, [](JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) -> JSValue {
+        try {
+            // Get the manager instance using handle
+            JSValue global = JS_GetGlobalObject(ctx);
+            JSValue handle_val = JS_GetPropertyStr(ctx, global, "__drools_handle_id");
+            int32_t handle_id;
+            JS_ToInt32(ctx, &handle_id, handle_val);
+
+            JS_FreeValue(ctx, global);
+            JS_FreeValue(ctx, handle_val);
+
+            JSScriptingManager* manager = JSHandleManager::instance().get_manager(static_cast<uint32_t>(handle_id));
+
+            if (manager) {
+                // Create a rule info object
+                JSValue rule_obj = JS_NewObject(ctx);
+                JS_SetPropertyStr(ctx, rule_obj, "name", JS_NewString(ctx, manager->get_current_rule_name().c_str()));
+                logd("drools.getRule: Returning rule name '{}'", manager->get_current_rule_name());
+                return rule_obj;
+            } else {
+                loge("drools.getRule: Invalid handle ID: {}", handle_id);
+                return JS_NULL;
+            }
+        } catch (std::exception const& e) {
+            return JS_ThrowInternalError(ctx, "C++ exception: %s", e.what());
+        } catch (...) {
+            return JS_ThrowInternalError(ctx, "Unknown C++ exception");
+        }
+    }, "getRule", 0);
+
+    // Create the drools object and set all methods
     JSValue drools = JS_NewObject(context_);
     JS_SetPropertyStr(context_, drools, "insert", insert_func);
     JS_SetPropertyStr(context_, drools, "insertLogical", insert_logical_func);
     JS_SetPropertyStr(context_, drools, "retract", retract_func);
     JS_SetPropertyStr(context_, drools, "update", update_func);
+    JS_SetPropertyStr(context_, drools, "halt", halt_func);  // P1 FIX: Add halt
+    JS_SetPropertyStr(context_, drools, "setFocus", set_focus_func); 
+    JS_SetPropertyStr(context_, drools, "getRule", get_rule_func); 
     JS_SetPropertyStr(context_, global, "drools", drools);
 
     JS_FreeValue(context_, global);
@@ -509,28 +617,72 @@ bool JSScriptingManager::execute_eval(std::string const& code, Token const& toke
 void JSScriptingManager::execute_rhs(std::string const& rhs_code, std::string const& rule_name, Token& token,
                                      map<std::string, int> const& bindings) {
     logd("Executing RHS for rule '{}'", rule_name);
+
+    // P0-001 FIX: Reset token handle before execution
+    current_token_handle_ = TokenHandleManager::INVALID_HANDLE;
+    current_rule_name_ = rule_name;
+
+    // P1-001 FIX: Begin transaction for rollback on exception
+    callback_provider_.begin_rhs_transaction();
+
     try {
         bind_variables(token, bindings);
         create_drools_api(token);
 
         JSValue result = JS_Eval(context_, rhs_code.c_str(), rhs_code.length(), rule_name.c_str(), JS_EVAL_TYPE_GLOBAL);
 
+        // P0-001 FIX: Unregister token handle after JS execution completes
+        // This ensures the handle becomes invalid and any stale JS references
+        // will get nullptr instead of accessing freed memory
+        if (current_token_handle_ != TokenHandleManager::INVALID_HANDLE) {
+            TokenHandleManager::instance().unregister(current_token_handle_);
+            current_token_handle_ = TokenHandleManager::INVALID_HANDLE;
+        }
+
         if (JS_IsException(result)) {
             JSValue exception = JS_GetException(context_);
             std::string error_msg = get_js_string(exception);
             JS_FreeValue(context_, exception);
             JS_FreeValue(context_, result);
+
+            // P1-001 FIX: Rollback transaction on exception
+            callback_provider_.end_rhs_transaction(false);
+
             throw ReteExecutionException(error_msg, rule_name);
         }
         JS_FreeValue(context_, result);
 
+        // P1-001 FIX: Commit transaction on success
+        callback_provider_.end_rhs_transaction(true);
+
     } catch (ReteExecutionException const&) {
+        // P0-001 FIX: Ensure cleanup on exception
+        if (current_token_handle_ != TokenHandleManager::INVALID_HANDLE) {
+            TokenHandleManager::instance().unregister(current_token_handle_);
+            current_token_handle_ = TokenHandleManager::INVALID_HANDLE;
+        }
+        // P1-001 FIX: Rollback already called above for JS exceptions, but ensure for re-throws
+        callback_provider_.end_rhs_transaction(false);
         throw;
     } catch (std::exception const& e) {
+        // P0-001 FIX: Ensure cleanup on exception
+        if (current_token_handle_ != TokenHandleManager::INVALID_HANDLE) {
+            TokenHandleManager::instance().unregister(current_token_handle_);
+            current_token_handle_ = TokenHandleManager::INVALID_HANDLE;
+        }
+        // P1-001 FIX: Rollback transaction on exception
+        callback_provider_.end_rhs_transaction(false);
         std::string error_msg = "JavaScript execution error: " + std::string(e.what());
         loge("Error executing RHS for rule '{}': {}", rule_name, error_msg);
         throw ReteExecutionException(error_msg, rule_name);
     } catch (...) {
+        // P0-001 FIX: Ensure cleanup on exception
+        if (current_token_handle_ != TokenHandleManager::INVALID_HANDLE) {
+            TokenHandleManager::instance().unregister(current_token_handle_);
+            current_token_handle_ = TokenHandleManager::INVALID_HANDLE;
+        }
+        // P1-001 FIX: Rollback transaction on exception
+        callback_provider_.end_rhs_transaction(false);
         std::string error_msg = "Unknown exception during JavaScript execution";
         loge("Unknown error executing RHS for rule '{}'", rule_name);
         throw ReteExecutionException(error_msg, rule_name);
@@ -792,3 +944,5 @@ std::string JSScriptingManager::fact_to_json(Fact const& fact) {
         return "{}";
     }
 }
+
+

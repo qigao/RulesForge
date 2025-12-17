@@ -208,3 +208,4 @@ TEST_CASE("Fact Event Tracing", "[tracing]") {
     CHECK(found_addition);
     CHECK(found_in_rule);
 }
+

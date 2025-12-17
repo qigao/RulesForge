@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <iostream>
 #include <magic_enum/magic_enum.hpp>
+#include <regex>
 #include <sstream>
 #include <typeinfo>
 #include <utility>
@@ -14,10 +15,252 @@
 // --- Helper Functions ---
 namespace {
 
+    // P1 FIX: Helper for contains check on FactList
+    bool fact_list_contains(FactList const& list, ConstraintValue const& value) {
+        for (auto const& fact : list.facts) {
+            if (!fact) continue;
+            // Check if any field matches the value
+            for (auto const& [_, field_val] : fact->fields) {
+                if (field_val == value) return true;
+            }
+            // Also check the type
+            if (std::holds_alternative<std::string>(value) &&
+                fact->type == std::get<std::string>(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // P1 FIX: Simple regex cache to avoid recompiling the same patterns
+    std::regex& get_cached_regex(std::string const& pattern) {
+        static std::unordered_map<std::string, std::regex> cache;
+        auto it = cache.find(pattern);
+        if (it != cache.end()) {
+            return it->second;
+        }
+        // Insert and return reference
+        auto [inserted_it, _] = cache.emplace(pattern, std::regex(pattern));
+        return inserted_it->second;
+    }
+    // Forward declaration for recursive evaluation
+    double evaluate_arith_expr(ArithExprValue const& expr,
+                               Token const& token,
+                               Fact const& current_fact,
+                               map<std::string, int> const& bindings);
+
+    double evaluate_arith_expr(ArithExprValue const& expr,
+                               Token const& token,
+                               Fact const& current_fact,
+                               map<std::string, int> const& bindings) {
+        return std::visit(
+            [&](auto const& arg) -> double {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, double>) {
+                    return arg;
+                } else if constexpr (std::is_same_v<T, std::string>) {
+                    // It's a variable reference like "$avail" or field name
+                    std::string const& ref = arg;
+                    if (ref.empty()) return 0.0;
+
+                    if (ref[0] == '$') {
+                        // It's a binding reference
+                        size_t dot_pos = ref.find('.');
+                        std::string binding_name = (dot_pos != std::string::npos)
+                            ? ref.substr(0, dot_pos)
+                            : ref;
+                        std::string field_name = (dot_pos != std::string::npos)
+                            ? ref.substr(dot_pos + 1)
+                            : "this";
+
+                        // First check if it's a binding to a fact in the token
+                        auto it = bindings.find(binding_name);
+                        if (it != bindings.end()) {
+                            auto bound_fact = token.get_fact_at_depth(it->second);
+                            if (bound_fact) {
+                                if (field_name == "this") {
+                                    // Return 0 for "this" reference (can't convert fact to number)
+                                    return 0.0;
+                                }
+                                auto val_opt = bound_fact->get_field(field_name);
+                                if (val_opt) {
+                                    if (std::holds_alternative<double>(*val_opt)) {
+                                        return std::get<double>(*val_opt);
+                                    } else if (std::holds_alternative<int64_t>(*val_opt)) {
+                                        return static_cast<double>(std::get<int64_t>(*val_opt));
+                                    }
+                                }
+                            }
+                        }
+                        // Check current fact's inline bindings - the binding might refer to a field
+                        // on the current fact (common in accumulate source patterns)
+                        auto val_opt = current_fact.get_field(field_name != "this" ? field_name : binding_name.substr(1));
+                        if (val_opt) {
+                            if (std::holds_alternative<double>(*val_opt)) {
+                                return std::get<double>(*val_opt);
+                            } else if (std::holds_alternative<int64_t>(*val_opt)) {
+                                return static_cast<double>(std::get<int64_t>(*val_opt));
+                            }
+                        }
+                    } else {
+                        // It's a plain field name on current fact
+                        auto val_opt = current_fact.get_field(ref);
+                        if (val_opt) {
+                            if (std::holds_alternative<double>(*val_opt)) {
+                                return std::get<double>(*val_opt);
+                            } else if (std::holds_alternative<int64_t>(*val_opt)) {
+                                return static_cast<double>(std::get<int64_t>(*val_opt));
+                            }
+                        }
+                    }
+                    return 0.0;
+                } else if constexpr (std::is_same_v<T, std::unique_ptr<ArithExprNode>>) {
+                    if (!arg) return 0.0;
+                    double left_val = evaluate_arith_expr(arg->left, token, current_fact, bindings);
+                    double right_val = evaluate_arith_expr(arg->right, token, current_fact, bindings);
+                    switch (arg->op) {
+                        case ArithOp::ADD: return left_val + right_val;
+                        case ArithOp::SUB: return left_val - right_val;
+                        case ArithOp::MUL: return left_val * right_val;
+                        case ArithOp::DIV: return (right_val != 0.0) ? left_val / right_val : 0.0;
+                    }
+                    return 0.0;
+                }
+                return 0.0;
+            },
+            expr);
+    }
+
+    // Overload for accumulate context where we have inline bindings map
+    double evaluate_arith_expr_for_accumulate(ArithExprValue const& expr,
+                                              Fact const& fact,
+                                              map<std::string, std::string> const& inline_bindings) {
+        return std::visit(
+            [&](auto const& arg) -> double {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, double>) {
+                    return arg;
+                } else if constexpr (std::is_same_v<T, std::string>) {
+                    std::string const& ref = arg;
+                    if (ref.empty()) return 0.0;
+
+                    std::string field_name = ref;
+                    if (ref[0] == '$') {
+                        // Look up in inline bindings map
+                        auto it = inline_bindings.find(ref);
+                        if (it != inline_bindings.end()) {
+                            field_name = it->second;
+                        } else {
+                            // Try without the $ prefix as field name
+                            field_name = ref.substr(1);
+                        }
+                    }
+
+                    auto val_opt = fact.get_field(field_name);
+                    if (val_opt) {
+                        if (std::holds_alternative<double>(*val_opt)) {
+                            return std::get<double>(*val_opt);
+                        } else if (std::holds_alternative<int64_t>(*val_opt)) {
+                            return static_cast<double>(std::get<int64_t>(*val_opt));
+                        }
+                    }
+                    return 0.0;
+                } else if constexpr (std::is_same_v<T, std::unique_ptr<ArithExprNode>>) {
+                    if (!arg) return 0.0;
+                    double left_val = evaluate_arith_expr_for_accumulate(arg->left, fact, inline_bindings);
+                    double right_val = evaluate_arith_expr_for_accumulate(arg->right, fact, inline_bindings);
+                    switch (arg->op) {
+                        case ArithOp::ADD: return left_val + right_val;
+                        case ArithOp::SUB: return left_val - right_val;
+                        case ArithOp::MUL: return left_val * right_val;
+                        case ArithOp::DIV: return (right_val != 0.0) ? left_val / right_val : 0.0;
+                    }
+                    return 0.0;
+                }
+                return 0.0;
+            },
+            expr);
+    }
+
     bool compare_values(ConstraintValue const& v1, std::string const& op, ConstraintValue const& v2) {
         logd("      compare_values: {} {} {}", ::to_string(v1), op, ::to_string(v2));
 
         bool result = false;
+
+        // P1 FIX: Handle 'contains' and 'not contains' operators
+        if (op == "contains" || op == "not contains") {
+            bool contains_result = false;
+
+            // Case 1: String contains substring
+            if (std::holds_alternative<std::string>(v1) && std::holds_alternative<std::string>(v2)) {
+                std::string const& haystack = std::get<std::string>(v1);
+                std::string const& needle = std::get<std::string>(v2);
+                contains_result = haystack.find(needle) != std::string::npos;
+            }
+            // Case 2: FactList contains value
+            else if (std::holds_alternative<FactList>(v1)) {
+                contains_result = fact_list_contains(std::get<FactList>(v1), v2);
+            }
+
+            return (op == "contains") ? contains_result : !contains_result;
+        }
+
+        // P1 FIX: Handle 'matches' and 'not matches' operators (regex)
+        if (op == "matches" || op == "not matches") {
+            if (std::holds_alternative<std::string>(v1) && std::holds_alternative<std::string>(v2)) {
+                std::string const& text = std::get<std::string>(v1);
+                std::string const& pattern = std::get<std::string>(v2);
+                try {
+                    std::regex& re = get_cached_regex(pattern);
+                    bool matches = std::regex_search(text, re);
+                    return (op == "matches") ? matches : !matches;
+                } catch (std::regex_error const& e) {
+                    loge("Invalid regex pattern '{}': {}", pattern, e.what());
+                    return false;
+                }
+            }
+            return false;
+        }
+        if (op == "startsWith") {
+            if (std::holds_alternative<std::string>(v1) && std::holds_alternative<std::string>(v2)) {
+                std::string const& text = std::get<std::string>(v1);
+                std::string const& prefix = std::get<std::string>(v2);
+                return text.length() >= prefix.length() &&
+                       text.compare(0, prefix.length(), prefix) == 0;
+            }
+            return false;
+        }
+        if (op == "endsWith") {
+            if (std::holds_alternative<std::string>(v1) && std::holds_alternative<std::string>(v2)) {
+                std::string const& text = std::get<std::string>(v1);
+                std::string const& suffix = std::get<std::string>(v2);
+                return text.length() >= suffix.length() &&
+                       text.compare(text.length() - suffix.length(), suffix.length(), suffix) == 0;
+            }
+            return false;
+        }
+        if (op == "lengthIs") {
+            if (std::holds_alternative<std::string>(v1)) {
+                std::string const& text = std::get<std::string>(v1);
+                int64_t expected_length = 0;
+                if (std::holds_alternative<int64_t>(v2)) {
+                    expected_length = std::get<int64_t>(v2);
+                } else if (std::holds_alternative<double>(v2)) {
+                    expected_length = static_cast<int64_t>(std::get<double>(v2));
+                }
+                return static_cast<int64_t>(text.length()) == expected_length;
+            }
+            return false;
+        }
+        // memberOf checks if v1 is a member of v2 (collection) - reverse of contains
+        if (op == "memberOf" || op == "not memberOf") {
+            bool member_result = false;
+            if (std::holds_alternative<FactList>(v2)) {
+                member_result = fact_list_contains(std::get<FactList>(v2), v1);
+            }
+            return (op == "memberOf") ? member_result : !member_result;
+        }
+
         if (std::holds_alternative<NilValue>(v1) || std::holds_alternative<NilValue>(v2)) {
             bool v1_is_nil = std::holds_alternative<NilValue>(v1);
             bool v2_is_nil = std::holds_alternative<NilValue>(v2);
@@ -99,6 +342,15 @@ namespace {
                     pass = (*lhs_ts < *rhs_ts);
                 } else if (tc.op == "within") {
                     pass = (std::abs(*lhs_ts - *rhs_ts) <= tc.window_ms);
+                } else if (tc.op == "coincides") {
+                    // For point events, coincides means equal timestamps
+                    // Optional: Could add tolerance parameter in future
+                    pass = (*lhs_ts == *rhs_ts);
+                } else if (tc.op == "during") {
+                    // For point events, during means lhs is strictly between rhs bounds
+                    // If we only have start timestamp, treat it as lhs > rhs.start
+                    // For full interval support, would need end_timestamp field
+                    pass = (*lhs_ts > *rhs_ts);
                 }
                 if (!pass) return false;
                 continue;
@@ -126,6 +378,10 @@ namespace {
                 if (!bound_fact) return false;
                 rhs_val_opt = bound_fact->get_field(join.right_bound_field->second);
 
+            } else if (join.right_arith_ast.has_value()) {
+                // Evaluate arithmetic expression using token bindings
+                double result = evaluate_arith_expr(*join.right_arith_ast, token, fact, bindings);
+                rhs_val_opt = result;
             } else if (join.right_literal) {
                 rhs_val_opt = join.right_literal;
             } else {
@@ -171,11 +427,11 @@ BetaConditionNode::BetaConditionNode(std::vector<ParsedConstraint> const& joins,
                                      map<std::string, int> const& bindings) :
     join_constraints(joins), binding_to_token_idx(bindings) {}
 
-void BetaConditionNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    logd("Node {}:{} left_activate. Token depth {}, type {}", this->id, typeid(*this).name(), token->wme->depth,
-              magic_enum::enum_name(token->type));
-    auto const& wme = token->wme;
-    if (token->type == PropagationType::RETRACT) {
+void BetaConditionNode::left_activate(StatefulSession& session, Token const& token) {
+    logd("Node {}:{} left_activate. Token depth {}, type {}", this->id, typeid(*this).name(), token.wme->depth,
+              magic_enum::enum_name(token.type));
+    auto const& wme = token.wme;
+    if (token.type == PropagationType::RETRACT) {
         auto it = left_memory.find(wme.get());
         if (it != left_memory.end()) {
             if (was_passing(it->second.match_count)) {
@@ -190,7 +446,7 @@ void BetaConditionNode::left_activate(StatefulSession& session, std::shared_ptr<
 
     LeftMemoryItem new_item{wme, 0};
     for (auto const& [fact_id, fact] : right_memory) {
-        if (check_all_join_conditions(session, *token, *fact, join_constraints, binding_to_token_idx)) {
+        if (check_all_join_conditions(session, token, *fact, join_constraints, binding_to_token_idx)) {
             new_item.match_count++;
         }
     }
@@ -218,10 +474,10 @@ void BetaConditionNode::right_activate(StatefulSession& session, std::shared_ptr
 
     // Iterate over all tokens in the left memory to see which ones are affected by this fact.
     for (auto& [wme_ptr, item] : left_memory) {
-        auto token = std::make_shared<Token>(item.wme, PropagationType::ASSERT);
+        Token token{item.wme, PropagationType::ASSERT};
 
         // Check if the arriving fact matches the conditions for the current token.
-        bool matches = check_all_join_conditions(session, *token, *fact, join_constraints, binding_to_token_idx);
+        bool matches = check_all_join_conditions(session, token, *fact, join_constraints, binding_to_token_idx);
 
         // If it doesn't match, this fact doesn't affect this token's match count. Continue.
         if (!matches) { continue; }
@@ -239,12 +495,12 @@ void BetaConditionNode::right_activate(StatefulSession& session, std::shared_ptr
 
         // Propagate only if the state has changed (e.g., from passing to not passing).
         if (was_passing_before && !is_passing_now) {
-            auto retract_token = std::make_shared<Token>(item.wme, PropagationType::RETRACT);
+            Token retract_token{item.wme, PropagationType::RETRACT};
             for (auto& weak_child : children) {
                 if (auto child = weak_child.lock()) child->left_activate(session, retract_token);
             }
         } else if (!was_passing_before && is_passing_now) {
-            auto assert_token = std::make_shared<Token>(item.wme, PropagationType::ASSERT);
+            Token assert_token{item.wme, PropagationType::ASSERT};
             for (auto& weak_child : children) {
                 if (auto child = weak_child.lock()) child->left_activate(session, assert_token);
             }
@@ -255,7 +511,7 @@ void BetaConditionNode::right_activate(StatefulSession& session, std::shared_ptr
 // --- AlphaNode ---
 AlphaNode::AlphaNode(ParsedConstraint const& c) : constraint(c) {}
 
-void AlphaNode::left_activate(StatefulSession&, std::shared_ptr<Token>) {}
+void AlphaNode::left_activate(StatefulSession&, Token const&) {}
 
 void AlphaNode::right_activate(StatefulSession& session, std::shared_ptr<Fact> fact, PropagationType p_type) {
     bool passes = check_constraint(*fact);
@@ -289,7 +545,34 @@ bool AlphaNode::check_constraint(Fact const& fact) const {
     }
 
     ConstraintValue const& lhs = *fact_val_opt;
-    ConstraintValue const& rhs = constraint.right_literal.value_or(NilValue{});
+
+    // Handle 'in' and 'not in' operators with value list
+    if ((constraint.op == "in" || constraint.op == "not in") && constraint.right_value_list.has_value()) {
+        bool found = false;
+        for (auto const& list_val : *constraint.right_value_list) {
+            if (compare_values(lhs, "==", list_val)) {
+                found = true;
+                break;
+            }
+        }
+        bool result = (constraint.op == "in") ? found : !found;
+        logd("  -> AlphaNode ID {} checking: {} {} [list of {} values] -> {}",
+             this->id, to_string(lhs), constraint.op, constraint.right_value_list->size(),
+             result ? "PASS" : "FAIL");
+        return result;
+    }
+
+    // Handle arithmetic expressions on the RHS (e.g., `price > base * 1.2`)
+    // AlphaNode can only evaluate expressions referencing current fact fields
+    ConstraintValue rhs;
+    if (constraint.right_arith_ast.has_value()) {
+        static map<std::string, std::string> empty_bindings;
+        double result = evaluate_arith_expr_for_accumulate(*constraint.right_arith_ast, fact, empty_bindings);
+        rhs = result;
+        logd("  -> AlphaNode ID {} evaluated arithmetic expression to {}", this->id, result);
+    } else {
+        rhs = constraint.right_literal.value_or(NilValue{});
+    }
     bool result = compare_values(lhs, constraint.op, rhs);
 
     logd("  -> AlphaNode ID {} checking: LHS: {} (type {}) {} RHS: {} (type {}) -> {}", this->id, to_string(lhs),
@@ -310,7 +593,7 @@ void AlphaNode::print_node(std::ostream& os) const {
 }
 
 // --- EntryPointNode ---
-void EntryPointNode::left_activate(StatefulSession&, std::shared_ptr<Token>) {
+void EntryPointNode::left_activate(StatefulSession&, Token const&) {
     // An EntryPointNode is the start of an alpha chain. It does not receive left activations.
 }
 
@@ -330,14 +613,14 @@ void EntryPointNode::print_node(std::ostream& os) const {
 BaseJoinNode::BaseJoinNode(std::vector<ParsedConstraint> joins, map<std::string, int> bindings) :
     ReteNode(), join_constraints_(std::move(joins)), binding_to_token_idx_(std::move(bindings)) {}
 
-void BaseJoinNode::propagate_assert(StatefulSession& session, std::shared_ptr<Token> token,
+void BaseJoinNode::propagate_assert(StatefulSession& session, Token const& token,
                                     std::shared_ptr<Fact> fact) {
-    auto new_wme = session.get_or_create_wme(token->wme, fact);
-    left_to_children_[token->wme.get()].push_back(new_wme);
+    auto new_wme = session.get_or_create_wme(token.wme, fact);
+    left_to_children_[token.wme.get()].push_back(new_wme);
     right_to_children_[fact->id].push_back(new_wme);
-    auto new_token = std::make_shared<Token>(new_wme, PropagationType::ASSERT);
+    Token new_token{new_wme, PropagationType::ASSERT};
     logd("Node {}:{} propagating ASSERT. Old token depth {}, new token depth {}", this->id, typeid(*this).name(),
-              token->wme->depth, new_wme->depth);
+              token.wme->depth, new_wme->depth);
     for (auto& weak_child : children) {
         if (auto c = weak_child.lock()) c->left_activate(session, new_token);
     }
@@ -359,7 +642,7 @@ void BaseJoinNode::propagate_retract(StatefulSession& session, std::shared_ptr<T
     if (child_to_retract) {
         logd("Node {}:{} propagating RETRACT. Old token depth {}, fact ID {}", this->id, typeid(*this).name(),
                   wme->depth, fact->id);
-        auto retract_token = std::make_shared<Token>(child_to_retract, PropagationType::RETRACT);
+        Token retract_token{child_to_retract, PropagationType::RETRACT};
         for (auto& weak_child : children) {
             if (auto c = weak_child.lock()) c->left_activate(session, retract_token);
         }
@@ -383,8 +666,8 @@ HashedJoinNode::HashedJoinNode(std::vector<ParsedConstraint> joins, map<std::str
     BaseJoinNode(std::move(joins), std::move(bindings)), left_hash_key_(std::move(left_hash_key)),
     right_hash_key_(std::move(right_hash_key)) {}
 
-std::optional<ConstraintValue> HashedJoinNode::get_key(std::shared_ptr<Token> const& token) const {
-    auto fact_at_depth = token->get_fact_at_depth(left_hash_key_.second);
+std::optional<ConstraintValue> HashedJoinNode::get_key(Token const& token) const {
+    auto fact_at_depth = token.get_fact_at_depth(left_hash_key_.second);
     if (!fact_at_depth) return std::nullopt;
     return fact_at_depth->get_field(left_hash_key_.first);
 }
@@ -393,33 +676,33 @@ std::optional<ConstraintValue> HashedJoinNode::get_key(std::shared_ptr<Fact> con
     return fact->get_field(right_hash_key_);
 }
 
-void HashedJoinNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    logd("Node {}:HashedJoinNode left_activate. Token depth {}, type {}", this->id, token->wme->depth,
-              magic_enum::enum_name(token->type));
+void HashedJoinNode::left_activate(StatefulSession& session, Token const& token) {
+    logd("Node {}:HashedJoinNode left_activate. Token depth {}, type {}", this->id, token.wme->depth,
+              magic_enum::enum_name(token.type));
     auto key_opt = get_key(token);
     if (!key_opt) return;
     auto const& key = *key_opt;
     logd("  -> Left key: {}", ::to_string(key));
 
-    if (token->type == PropagationType::RETRACT) {
+    if (token.type == PropagationType::RETRACT) {
         auto mem_it = left_memory_.find(key);
         if (mem_it != left_memory_.end()) {
-            remove_from_vector(mem_it->second, token->wme);
+            remove_from_vector(mem_it->second, token.wme);
             if (mem_it->second.empty()) left_memory_.erase(mem_it);
         }
         auto fact_it = right_memory_.find(key);
         if (fact_it != right_memory_.end()) {
-            for (auto const& fact : fact_it->second) { propagate_retract(session, token->wme, fact); }
+            for (auto const& fact : fact_it->second) { propagate_retract(session, token.wme, fact); }
         }
         return;
     }
 
-    left_memory_[key].push_back(token->wme);
+    left_memory_[key].push_back(token.wme);
     auto it_right = right_memory_.find(key);
     if (it_right != right_memory_.end()) {
         logd("  -> Found {} matching facts in right memory.", it_right->second.size());
         for (auto const& fact : it_right->second) {
-            if (check_all_join_conditions(session, *token, *fact, join_constraints_, binding_to_token_idx_)) {
+            if (check_all_join_conditions(session, token, *fact, join_constraints_, binding_to_token_idx_)) {
                 propagate_assert(session, token, fact);
             }
         }
@@ -471,8 +754,8 @@ void HashedJoinNode::right_activate(StatefulSession& session, std::shared_ptr<Fa
     if (it_left != left_memory_.end()) {
         logd("  -> Found {} matching tokens in left memory.", it_left->second.size());
         for (auto const& wme : it_left->second) {
-            auto token = std::make_shared<Token>(wme, PropagationType::ASSERT);
-            if (check_all_join_conditions(session, *token, *fact, join_constraints_, binding_to_token_idx_)) {
+            Token token{wme, PropagationType::ASSERT};
+            if (check_all_join_conditions(session, token, *fact, join_constraints_, binding_to_token_idx_)) {
                 propagate_assert(session, token, fact);
             }
         }
@@ -493,20 +776,20 @@ void HashedJoinNode::print_node(std::ostream& os) const {
 CrossProductJoinNode::CrossProductJoinNode(std::vector<ParsedConstraint> joins, map<std::string, int> bindings) :
     BaseJoinNode(std::move(joins), std::move(bindings)) {}
 
-void CrossProductJoinNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    logd("Node {}:CrossProductJoinNode left_activate. Token depth {}, type {}", this->id, token->wme->depth,
-              magic_enum::enum_name(token->type));
-    if (token->type == PropagationType::RETRACT) {
-        if (left_memory_.erase(token->wme.get()) > 0) {
+void CrossProductJoinNode::left_activate(StatefulSession& session, Token const& token) {
+    logd("Node {}:CrossProductJoinNode left_activate. Token depth {}, type {}", this->id, token.wme->depth,
+              magic_enum::enum_name(token.type));
+    if (token.type == PropagationType::RETRACT) {
+        if (left_memory_.erase(token.wme.get()) > 0) {
             logd("  -> Retracted token from left memory. Propagating retract to {} children.", children.size());
-            for (auto const& [id, fact] : right_memory_) { propagate_retract(session, token->wme, fact); }
+            for (auto const& [id, fact] : right_memory_) { propagate_retract(session, token.wme, fact); }
         }
         return;
     }
 
-    left_memory_[token->wme.get()] = token->wme;
+    left_memory_[token.wme.get()] = token.wme;
     for (auto const& [id, fact] : right_memory_) {
-        if (check_all_join_conditions(session, *token, *fact, join_constraints_, binding_to_token_idx_)) {
+        if (check_all_join_conditions(session, token, *fact, join_constraints_, binding_to_token_idx_)) {
             propagate_assert(session, token, fact);
         }
     }
@@ -534,8 +817,8 @@ void CrossProductJoinNode::right_activate(StatefulSession& session, std::shared_
 
     right_memory_[fact->id] = fact;
     for (auto const& [ptr, wme] : left_memory_) {
-        auto token = std::make_shared<Token>(wme, PropagationType::ASSERT);
-        if (check_all_join_conditions(session, *token, *fact, join_constraints_, binding_to_token_idx_)) {
+        Token token{wme, PropagationType::ASSERT};
+        if (check_all_join_conditions(session, token, *fact, join_constraints_, binding_to_token_idx_)) {
             propagate_assert(session, token, fact);
         }
     }
@@ -577,17 +860,36 @@ void ExistsNode::print_node(std::ostream& os) const {
 }
 
 // --- AccumulateNode ---
+namespace {
+    std::optional<ConstraintValue> get_accumulate_value(
+        ParsedAccumulate const& info,
+        Fact const& fact)
+    {
+        // If we have an arithmetic expression AST, evaluate it
+        if (info.accumulate_expr_ast.has_value()) {
+            double result = evaluate_arith_expr_for_accumulate(
+                *info.accumulate_expr_ast, fact, info.inline_binding_to_field);
+            return ConstraintValue{result};
+        }
+        // Otherwise use simple field lookup
+        if (!info.accumulate_field_name.empty()) {
+            return fact.get_field(info.accumulate_field_name);
+        }
+        return std::nullopt;
+    }
+}
+
 AccumulateNode::AccumulateNode(IAccumulator const* prototype, ParsedAccumulate&& accumulate_info,
                                std::string res_fact_type, map<std::string, int> bindings,
                                std::vector<ParsedConstraint> joins) :
     accumulator_prototype(prototype), info(std::move(accumulate_info)), result_fact_type(std::move(res_fact_type)),
     binding_to_token_idx(std::move(bindings)), join_constraints(std::move(joins)) {}
 
-void AccumulateNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    logd("Node {}:AccumulateNode left_activate. Token depth {}, type {}", this->id, token->wme->depth,
-              magic_enum::enum_name(token->type));
-    auto const& wme = token->wme;
-    if (token->type == PropagationType::RETRACT) {
+void AccumulateNode::left_activate(StatefulSession& session, Token const& token) {
+    logd("Node {}:AccumulateNode left_activate. Token depth {}, type {}", this->id, token.wme->depth,
+              magic_enum::enum_name(token.type));
+    auto const& wme = token.wme;
+    if (token.type == PropagationType::RETRACT) {
         auto it = left_memory.find(wme.get());
         if (it != left_memory.end()) {
             session.retract_fact(it->second.result_fact);
@@ -604,13 +906,13 @@ void AccumulateNode::left_activate(StatefulSession& session, std::shared_ptr<Tok
     bool is_collect_list = (info.function == "collect" || info.function == "collectList");
     bool is_collect_set = (info.function == "collectSet");
     for (auto const& [id, fact_ptr] : right_memory) {
-        if (check_all_join_conditions(session, *token, *fact_ptr, join_constraints, binding_to_token_idx)) {
+        if (check_all_join_conditions(session, token, *fact_ptr, join_constraints, binding_to_token_idx)) {
             if (is_collect_set) {
                 new_item.contributing_facts_set.insert(fact_ptr);
             } else if (is_collect_list) {
                 new_item.contributing_facts_list.push_back(fact_ptr);
             } else {
-                if (auto value_opt = fact_ptr->get_field(info.accumulate_field_name)) {
+                if (auto value_opt = get_accumulate_value(info, *fact_ptr)) {
                     new_item.accumulator->accumulate(*value_opt);
                 }
             }
@@ -632,19 +934,19 @@ void AccumulateNode::right_activate(StatefulSession& session, std::shared_ptr<Fa
         bool is_collect_list = (info.function == "collect" || info.function == "collectList");
         bool is_collect_set = (info.function == "collectSet");
         for (auto& [wme_ptr, item] : left_memory) {
-            auto current_token = std::make_shared<Token>(item.wme, PropagationType::ASSERT);
+            Token current_token{item.wme, PropagationType::ASSERT};
             item.accumulator->clear();
             item.contributing_facts_list.clear();
             item.contributing_facts_set.clear();
             for (auto const& [id, f_ptr] : right_memory) {
-                if (check_all_join_conditions(session, *current_token, *f_ptr, join_constraints,
+                if (check_all_join_conditions(session, current_token, *f_ptr, join_constraints,
                                               binding_to_token_idx)) {
                     if (is_collect_set) {
                         item.contributing_facts_set.insert(f_ptr);
                     } else if (is_collect_list) {
                         item.contributing_facts_list.push_back(f_ptr);
                     } else {
-                        if (auto value_opt = f_ptr->get_field(info.accumulate_field_name)) {
+                        if (auto value_opt = get_accumulate_value(info, *f_ptr)) {
                             item.accumulator->accumulate(*value_opt);
                         }
                     }
@@ -656,9 +958,9 @@ void AccumulateNode::right_activate(StatefulSession& session, std::shared_ptr<Fa
         if (p_type == PropagationType::ASSERT) {
             right_memory[fact->id] = fact;
             for (auto& [wme_ptr, item] : left_memory) {
-                auto token = std::make_shared<Token>(item.wme, PropagationType::ASSERT);
-                if (check_all_join_conditions(session, *token, *fact, join_constraints, binding_to_token_idx)) {
-                    if (auto value_opt = fact->get_field(info.accumulate_field_name)) {
+                Token token{item.wme, PropagationType::ASSERT};
+                if (check_all_join_conditions(session, token, *fact, join_constraints, binding_to_token_idx)) {
+                    if (auto value_opt = get_accumulate_value(info, *fact)) {
                         item.accumulator->accumulate(*value_opt);
                         update_and_propagate_result(session, item);
                     }
@@ -667,9 +969,9 @@ void AccumulateNode::right_activate(StatefulSession& session, std::shared_ptr<Fa
         } else {
             if (right_memory.count(fact->id) == 0) return;
             for (auto& [wme_ptr, item] : left_memory) {
-                auto token = std::make_shared<Token>(item.wme, PropagationType::ASSERT);
-                if (check_all_join_conditions(session, *token, *fact, join_constraints, binding_to_token_idx)) {
-                    if (auto value_opt = fact->get_field(info.accumulate_field_name)) {
+                Token token{item.wme, PropagationType::ASSERT};
+                if (check_all_join_conditions(session, token, *fact, join_constraints, binding_to_token_idx)) {
+                    if (auto value_opt = get_accumulate_value(info, *fact)) {
                         item.accumulator->reverse(*value_opt);
                         update_and_propagate_result(session, item);
                     }
@@ -694,14 +996,29 @@ void AccumulateNode::update_and_propagate_result(StatefulSession& session, LeftM
             fl.facts.assign(item.contributing_facts_set.begin(), item.contributing_facts_set.end());
             f.fields["result"] = fl;
         } else {
-            f.fields["result"] = item.accumulator->get_result();
+            ConstraintValue result_val = item.accumulator->get_result();
+            f.fields["result"] = result_val;
+
+            // For Number type, provide Java-like accessor methods (intValue, doubleValue, etc.)
+            // This fulfills the contract promised by the Number type schema
+            double numeric_result = 0.0;
+            if (std::holds_alternative<int64_t>(result_val)) {
+                numeric_result = static_cast<double>(std::get<int64_t>(result_val));
+            } else if (std::holds_alternative<double>(result_val)) {
+                numeric_result = std::get<double>(result_val);
+            }
+            f.fields["intValue"] = static_cast<int64_t>(numeric_result);
+            f.fields["longValue"] = static_cast<int64_t>(numeric_result);
+            f.fields["doubleValue"] = numeric_result;
+            f.fields["floatValue"] = numeric_result;
+            f.fields["value"] = numeric_result;
         }
     };
     if (is_new_fact) {
         modifier(*item.result_fact);
         session.add_fact(item.result_fact);
         auto result_wme = session.get_or_create_wme(item.wme, item.result_fact);
-        auto assert_token = std::make_shared<Token>(result_wme, PropagationType::ASSERT);
+        Token assert_token{result_wme, PropagationType::ASSERT};
         logd("  -> Accumulate created new result fact ID {}, propagating.", item.result_fact->id);
         for (auto& weak_child : children) {
             if (auto c = weak_child.lock()) c->left_activate(session, assert_token);
@@ -727,15 +1044,15 @@ void AccumulateNode::print_node(std::ostream& os) const {
 UnnestNode::UnnestNode(ParsedUnnest const& unnest_info, map<std::string, int> const& bindings) :
     info(unnest_info), binding_to_token_idx(bindings) {}
 
-void UnnestNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    logd("Node {}:UnnestNode left_activate. Token depth {}, type {}", this->id, token->wme->depth,
-              magic_enum::enum_name(token->type));
-    auto const& wme = token->wme;
-    if (token->type == PropagationType::RETRACT) {
+void UnnestNode::left_activate(StatefulSession& session, Token const& token) {
+    logd("Node {}:UnnestNode left_activate. Token depth {}, type {}", this->id, token.wme->depth,
+              magic_enum::enum_name(token.type));
+    auto const& wme = token.wme;
+    if (token.type == PropagationType::RETRACT) {
         auto it = parent_to_children_map.find(wme.get());
         if (it != parent_to_children_map.end()) {
             for (auto const& child_wme : it->second.second) {
-                auto child_token = std::make_shared<Token>(child_wme, PropagationType::RETRACT);
+                Token child_token{child_wme, PropagationType::RETRACT};
                 for (auto& weak_child : children) {
                     if (auto c = weak_child.lock()) c->left_activate(session, child_token);
                 }
@@ -747,7 +1064,7 @@ void UnnestNode::left_activate(StatefulSession& session, std::shared_ptr<Token> 
     auto it_binding = binding_to_token_idx.find(info.source_binding);
     if (it_binding == binding_to_token_idx.end()) return;
     int token_idx = it_binding->second;
-    auto source_fact = token->get_fact_at_depth(token_idx);
+    auto source_fact = token.get_fact_at_depth(token_idx);
     if (!source_fact) return;
     auto collection_opt = source_fact->get_field(info.source_field);
     if (collection_opt && std::holds_alternative<FactList>(*collection_opt)) {
@@ -759,7 +1076,7 @@ void UnnestNode::left_activate(StatefulSession& session, std::shared_ptr<Token> 
         for (auto const& item_fact : list) {
             auto new_wme = session.get_or_create_wme(wme, item_fact);
             new_child_wmes.push_back(new_wme);
-            auto new_token = std::make_shared<Token>(new_wme, PropagationType::ASSERT);
+            Token new_token{new_wme, PropagationType::ASSERT};
             for (auto& weak_child : children) {
                 if (auto c = weak_child.lock()) c->left_activate(session, new_token);
             }
@@ -777,11 +1094,11 @@ void UnnestNode::print_node(std::ostream& os) const {
 EvalNode::EvalNode(std::string expr, map<std::string, int> bindings) :
     expression(std::move(expr)), binding_to_token_idx(std::move(bindings)) {}
 
-void EvalNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    auto const& wme = token->wme;
+void EvalNode::left_activate(StatefulSession& session, Token const& token) {
+    auto const& wme = token.wme;
     logd("Node {}:EvalNode left_activate. Token depth {}, type {}", this->id, wme->depth,
-              magic_enum::enum_name(token->type));
-    if (token->type == PropagationType::RETRACT) {
+              magic_enum::enum_name(token.type));
+    if (token.type == PropagationType::RETRACT) {
         if (memory.erase(wme.get()) > 0) {
             logd("  -> Retracted token from memory. Propagating retract to children.");
             for (auto& weak_child : children) {
@@ -790,7 +1107,7 @@ void EvalNode::left_activate(StatefulSession& session, std::shared_ptr<Token> to
         }
         return;
     }
-    bool result = session.execute_eval(expression, *token, binding_to_token_idx);
+    bool result = session.execute_eval(expression, token, binding_to_token_idx);
     logd("  -> Eval expression '{}' result: {}", expression, result);
     if (result) {
         memory[wme.get()] = wme;
@@ -817,24 +1134,24 @@ void EvalNode::print_node(std::ostream& os) const {
 TerminalNode::TerminalNode(ParsedRule const& r, map<std::string, int> b) :
     rule_name(r.name), binding_to_token_idx(std::move(b)) {}
 
-void TerminalNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
+void TerminalNode::left_activate(StatefulSession& session, Token const& token) {
     logd("Node {}:TerminalNode left_activate for rule '{}'. Token type: {}", this->id, rule_name,
-              magic_enum::enum_name(token->type));
-    auto wme_ptr = token->wme.get();
+              magic_enum::enum_name(token.type));
+    auto wme_ptr = token.wme.get();
 
     auto const* rule = session.get_knowledge_base()->find_rule_by_name(rule_name);
     if (!rule) return;   // Should not happen in a valid network
 
-    if (token->type == PropagationType::RETRACT) {
+    if (token.type == PropagationType::RETRACT) {
         if (memory_.erase(wme_ptr) > 0) {
             size_t hash = std::hash<TokenWME const*>{}(wme_ptr) ^ reinterpret_cast<uintptr_t>(rule);
             session.remove_activation(hash);
             for (auto& listener : session.get_listeners()) {
-                listener->on_activation_retracted(rule->name, token->get_facts());
+                listener->on_activation_retracted(rule->name, token.get_facts());
             }
         }
         session.logical_retract(wme_ptr);
-    } else if (token->type == PropagationType::ASSERT) {
+    } else if (token.type == PropagationType::ASSERT) {
         if (memory_.find(wme_ptr) == memory_.end()) {
             memory_.insert(wme_ptr);
             size_t hash = std::hash<TokenWME const*>{}(wme_ptr) ^ reinterpret_cast<uintptr_t>(rule);
@@ -842,7 +1159,11 @@ void TerminalNode::left_activate(StatefulSession& session, std::shared_ptr<Token
             session.add_activation(activation);
             // Notify listeners about creation
             for (auto& listener : session.get_listeners()) {
-                listener->on_activation_created(rule->name, token->get_facts());
+                listener->on_activation_created(rule->name, token.get_facts());
+            }
+            if (rule->auto_focus && rule->agenda_group) {
+                logd("  -> auto-focus: Setting focus to agenda-group '{}'", *rule->agenda_group);
+                session.set_focus(*rule->agenda_group);
             }
         }
     }
@@ -856,10 +1177,10 @@ void TerminalNode::print_node(std::ostream& os) const {
 // --- QueryTerminalNode ---
 QueryTerminalNode::QueryTerminalNode(map<std::string, int> bindings) : binding_to_token_idx(std::move(bindings)) {}
 
-void QueryTerminalNode::left_activate(StatefulSession& session, std::shared_ptr<Token> token) {
-    logd("Node {}:QueryTerminalNode left_activate. Token type: {}", this->id, magic_enum::enum_name(token->type));
-    auto const& wme = token->wme;
-    if (token->type == PropagationType::ASSERT) {
+void QueryTerminalNode::left_activate(StatefulSession& session, Token const& token) {
+    logd("Node {}:QueryTerminalNode left_activate. Token type: {}", this->id, magic_enum::enum_name(token.type));
+    auto const& wme = token.wme;
+    if (token.type == PropagationType::ASSERT) {
         results[wme.get()] = token;
         logd("  -> Added token to query results. Total results: {}", results.size());
     } else {
@@ -904,7 +1225,7 @@ void QueryInputNode::execute(StatefulSession& session, std::vector<std::shared_p
 
     std::shared_ptr<TokenWME const> current_wme = session.get_dummy_wme();
     for (auto const& arg_fact : args) { current_wme = session.get_or_create_wme(current_wme, arg_fact); }
-    auto initial_token = std::make_shared<Token>(current_wme, PropagationType::ASSERT);
+    Token initial_token{current_wme, PropagationType::ASSERT};
     for (auto& weak_child : children) {
         if (auto c = weak_child.lock()) { c->left_activate(session, initial_token); }
     }
@@ -917,3 +1238,5 @@ void QueryInputNode::execute(StatefulSession& session, std::vector<std::shared_p
 void QueryInputNode::print_node(std::ostream& os) const {
     os << "  \"" << id << "\" [label=\"Query Input (" << id << ")\", shape=invhouse, style=filled, fillcolor=yellow];";
 }
+
+

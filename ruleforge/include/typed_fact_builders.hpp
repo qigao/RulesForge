@@ -202,3 +202,4 @@ private:
 #define ORDER() TypedBuilders::OrderBuilder::create()
 
 #endif // TYPED_FACT_BUILDERS_HPP
+

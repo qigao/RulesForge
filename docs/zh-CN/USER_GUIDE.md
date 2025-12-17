@@ -34,8 +34,8 @@ then
     // 仅当两个条件都满足时才触发
     // 如果价格超过 100，则自动撤销警报
     drools.insert({
-        type: "PriceAlert", 
-        userId: user.id, 
+        type: "PriceAlert",
+        userId: user.id,
         productId: product.id
     });
 end
@@ -169,17 +169,17 @@ rule "规则名称"
             status == "Active",  // 字符串比较
             balance > 1000.0     // 数字约束
         )
-        
+
         // 负面条件
         not VipStatus(customerId == $customer.id)
-        
+
         // 存在性检查
         exists Order(customerId == $customer.id)
-        
+
 then
         // 右侧 (RHS) - JavaScript 动作
         console.log(`处理客户: ${customer.name}`);
-        
+
         drools.insert({
             type: "VipStatus",
             customerId: customer.id,
@@ -249,7 +249,7 @@ end
 - `count()` - 计数匹配项
 - `sum($field)` - 求和数字字段
 - `min($field)` - 最小值
-- `max($field)` - 最大值  
+- `max($field)` - 最大值
 - `average($field)` - 平均值
 
 #### Collect - 收集事实
@@ -290,7 +290,7 @@ query "按状态查询客户"(String requiredStatus)
     $customer: Customer(status == requiredStatus)
 end
 
-query "范围内的订单"(double minAmount, double maxAmount) 
+query "范围内的订单"(double minAmount, double maxAmount)
     $order: Order(amount >= minAmount, amount <= maxAmount)
 end
 
@@ -305,7 +305,7 @@ end
 // 简单查询
 auto activeCustomers = session->execute_query("customers_by_status", {"Active"});
 
-// 范围查询  
+// 范围查询
 auto midRangeOrders = session->execute_query("orders_in_range", {100.0, 500.0});
 
 // 处理结果
@@ -329,7 +329,7 @@ for (auto& row : activeCustomers) {
 // 事实操作
 drools.insert({type: "NewFact", field: "value"});
 drools.retract(existingFact);
-drools.modify(existingFact, {field: "newValue"});
+drools.update(existingFact, {field: "newValue"});
 
 // 逻辑断言 (当规则不再匹配时自动撤销)
 drools.insertLogical({type: "DerivedFact", source: customer.id});
@@ -342,7 +342,7 @@ let fact = drools.getFactById(123);
 #### 控制台日志
 ```javascript
 console.log("信息消息");
-console.warn("警告消息");  
+console.warn("警告消息");
 console.error("错误消息");
 ```
 
@@ -374,11 +374,11 @@ when
 then
     // DRL $customer 变为 JS customer
     console.log(`客户: ${customer.name}`);
-    
+
     // 字段绑定变为 JS 变量
     console.log(`姓名: ${name}, 余额: ${balance}`);
     console.log(`订单金额: ${amount}`);
-    
+
     // 访问嵌套字段
     if (customer.profile && customer.profile.email) {
         console.log(`电子邮件: ${customer.profile.email}`);
@@ -397,10 +397,10 @@ then
     // 计算指标
     let totalAmount = 0;
     let orderCount = orders.length;
-    
+
     for (let order of orders) {
         totalAmount += order.amount;
-        
+
         // 检查模式
         if (order.category === "Premium" && order.amount > 1000) {
             drools.insert({
@@ -411,20 +411,20 @@ then
             });
         }
     }
-    
+
     // 确定客户等级
     let tier = "Bronze";
     if (totalAmount > 10000) tier = "Gold";
     else if (totalAmount > 5000) tier = "Silver";
-    
+
     // 更新客户
-    drools.modify(customer, {
+    drools.update(customer, {
         totalSpent: totalAmount,
         orderCount: orderCount,
         tier: tier,
         lastUpdated: Date.now()
     });
-    
+
     // 发送通知
     if (tier !== customer.tier) {
         drools.insert({
@@ -463,8 +463,8 @@ then
         currentState: "VALIDATION",
         data: {startTime: Date.now()}
     });
-    
-    drools.modify(request, {status: "PROCESSING"});
+
+    drools.update(request, {status: "PROCESSING"});
 end
 
 rule "验证完成"
@@ -472,18 +472,18 @@ when
     $state: ProcessState(currentState == "VALIDATION")
     $validation: ValidationResult(processId == $state.processId, valid == true)
 then
-    drools.modify(state, {
+    drools.update(state, {
         currentState: "APPROVAL",
         data: {...state.data, validatedAt: Date.now()}
     });
 end
 
 rule "流程批准"
-when  
+when
     $state: ProcessState(currentState == "APPROVAL")
     $approval: ApprovalResult(processId == $state.processId, approved == true)
 then
-    drools.modify(state, {
+    drools.update(state, {
         currentState: "COMPLETE",
         data: {...state.data, completedAt: Date.now()}
     });
@@ -511,7 +511,7 @@ when
     $user: User()
     $failedLogins: Number() from accumulate(
         LoginEvent(
-            userId == $user.id, 
+            userId == $user.id,
             success == false,
             timestamp > (Date.now() - 300000) // 过去 5 分钟
         ),
@@ -525,7 +525,7 @@ then
         userId: user.id,
         reason: `${failedLogins} 次登录失败，在 5 分钟内`
     });
-    
+
     console.warn(`安全警报: 用户 ${user.id} 有 ${failedLogins} 次登录失败`);
 end
 
@@ -534,7 +534,7 @@ when
     $user: User()
     $login1: LoginEvent(userId == $user.id, $ip1: ipAddress)
     $login2: LoginEvent(
-        userId == $user.id, 
+        userId == $user.id,
         ipAddress != $ip1,
         timestamp > $login1.timestamp,
         timestamp < ($login1.timestamp + 3600000) // 1 小时内
@@ -543,7 +543,7 @@ then
     // 检查 IP 是否来自不同国家
     let country1 = geoLookup(login1.ipAddress);
     let country2 = geoLookup(login2.ipAddress);
-    
+
     if (country1 !== country2) {
         drools.insert({
             type: "SuspiciousActivity",
@@ -585,7 +585,7 @@ when
     $customer: Customer(age < 18)
 then
     drools.insert({
-        type: "ValidationError", 
+        type: "ValidationError",
         entityType: "Customer",
         entityId: customer.id,
         field: "age",
@@ -605,7 +605,7 @@ when
 then
     drools.insert({
         type: "ValidationError",
-        entityType: "Customer", 
+        entityType: "Customer",
         entityId: customer.id,
         field: "balance",
         message: `余额不匹配: ${balance} vs 计算出的 ${totalOrders}`,
@@ -622,7 +622,7 @@ end
 
 #### ✅ 优先放置选择性约束
 ```drl
-// 好 - 最具选择性的约束优先  
+// 好 - 最具选择性的约束优先
 when
     $customer: Customer(tier == "VIP", status == "Active")
 
@@ -641,7 +641,7 @@ then
     // 验证数据
 end
 
-rule "业务逻辑"  
+rule "业务逻辑"
     salience 100   // 验证后运行
 when
     $data: InputData(valid == true)
@@ -673,7 +673,7 @@ auto customer = FAST_CUSTOMER()
     .balance(5000.0)
     .build();
 
-// 标准方法  
+// 标准方法
 auto customer = std::make_shared<Fact>();
 customer->type = "Customer";
 customer->fields["id"] = static_cast<int64_t>(1001);
@@ -699,7 +699,7 @@ for (int i = 0; i < 1000; ++i) {
 ### 5.3 监控规则性能
 
 ```cpp
-// 启用规则跟踪  
+// 启用规则跟踪
 session->enable_tracing(true);
 
 // 执行规则
@@ -710,7 +710,7 @@ auto trace = session->get_execution_trace();
 auto summary = session->get_rule_performance_summary();
 
 for (auto& [rule_name, stats] : summary) {
-    std::cout << rule_name << ": " 
+    std::cout << rule_name << ": "
               << stats.execution_count << " 次执行, "
               << stats.total_time_ms << "ms 总计\n";
 }
@@ -767,7 +767,7 @@ then
     } catch (error) {
         console.error("计算失败: " + error.message);
         drools.insert({
-            type: "ProcessingError", 
+            type: "ProcessingError",
             entityId: customer.id,
             error: error.message
         });
@@ -780,7 +780,7 @@ then
 auto stats = PoolStatsCollector::collect();
 std::cout << PoolStatsCollector::format_stats(stats) << std::endl;
 
-// 定期清除未使用的事实  
+// 定期清除未使用的事实
 session->retract_facts_of_type("TemporaryData");
 
 // 对高频操作使用对象池
@@ -796,7 +796,7 @@ auto start = std::chrono::high_resolution_clock::now();
 
 session->fire_all_rules();
 
-auto end = std::chrono::high_resolution_clock::now(); 
+auto end = std::chrono::high_resolution_clock::now();
 auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
 std::cout << "规则执行耗时: " << duration.count() << "ms\n";

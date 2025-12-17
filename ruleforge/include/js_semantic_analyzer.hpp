@@ -32,8 +32,9 @@ private:
     // Helper methods
     std::string resolve_and_substitute_types(const std::string& js_code);
     std::string substitute_variables(const std::string& js_code);
-    bool validate_variable_bindings(const std::vector<JSVariableRef>& variables);
+    bool validate_variable_bindings(const std::vector<JSVariableRef>& variables, const std::set<std::string>& local_vars);
     bool validate_function_calls(const std::vector<JSFunctionCall>& calls);
 };
 
 #endif // JS_SEMANTIC_ANALYZER_HPP
+
