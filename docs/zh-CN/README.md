@@ -2,7 +2,7 @@
 
 [English Documentation](../README.md)
 
-这是一个复杂的、高性能的 C++ 规则引擎，实现了 **Rete 算法** 并带有 **JavaScript (QuickJS) 脚本** 用于规则后果，灵感来源于 Java Drools，但专门为 C++ 环境设计。
+这是一个复杂的、高性能的 C++ 规则引擎，实现了 **Rete 算法** 并带有 **JavaScript (QuickJS) 脚本** 用于规则后果，灵感来源于 Java RuleForge，但专门为 C++ 环境设计。
 
 ## 核心架构
 
@@ -12,13 +12,13 @@
 - 管理工作内存的可变 `StatefulSession` (`drills/include/stateful_session.hpp:141`)
 
 **JavaScript 集成**:
-- `JSScriptingManager` 连接 C++ 和 JavaScript (`drills/src/drools_js_manager.cpp`)
+- `JSScriptingManager` 连接 C++ 和 JavaScript (`drills/src/rfl_js_manager.cpp`)
 - QuickJS 库用于无缝的 C++/JavaScript 绑定 (`vcpkg.json:90-92`)
-- 暴露给 JavaScript 的自定义 `drools` API，用于事实操作
+- 暴露给 JavaScript 的自定义 `rfl` API，用于事实操作
 
 ## 主要特性
 
-1.  **DRL 语言**: 类似 Drools 的语法，带有全面的语法 (`drills/dsl.md`, `drills/guide.md`)
+1.  **RFL 语言**: 类似 Rules Forge Language 的语法，带有全面的语法 (`drills/dsl.md`, `drills/guide.md`)
 2.  **高级条件逻辑**: 支持 `not`、`exists`、`forall` 模式
 3.  **数据聚合**: 内置累加器 (`sum`、`count`、`average` 等)
 4.  **真值维护系统 (TMS)**: 带有自动依赖跟踪的逻辑断言
@@ -52,10 +52,10 @@ drills/
 
 这里有一个简单的示例，帮助您快速上手。
 
-### 1. 在 DRL 文件中编写您的规则
+### 1. 在 RFL 文件中编写您的规则
 
-**`my_rules.drl`**
-```drl
+**`my_rules.rfl`**
+```rfl
 // 定义事实的数据模型
 declare Person
     name : String
@@ -79,7 +79,7 @@ then
     // 'then' 块是 JavaScript。
     // 变量 $p 可作为 'p' 使用。
     console.log("Granting voting rights to: " + p.name);
-    drools.insert({ type: "CanVote", name: p.name });
+    rfl.insert({ type: "CanVote", name: p.name });
 end
 
 // 一个查找所有可以投票的人的查询
@@ -91,7 +91,7 @@ end
 ### 2. 在您的 C++ 应用程序中使用引擎
 
 ```cpp
-#include "drools_parser.hpp"
+#include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "stateful_session.hpp"
 #include "query_result.hpp"
@@ -110,10 +110,10 @@ std::string read_file(const std::string& path) {
 }
 
 int main() {
-    // 1. 将 DRL 文件加载并编译到 KnowledgeBase 中
-    std::string drl_content = read_file("my_rules.drl");
+    // 1. 将 RFL 文件加载并编译到 KnowledgeBase 中
+    std::string rfl_content = read_file("my_rules.rfl");
     ParsingResult result;
-    std::shared_ptr<KnowledgeBase> kb = build_knowledge_base(drl_content, result);
+    std::shared_ptr<KnowledgeBase> kb = build_knowledge_base(rfl_content, result);
 
     if (!result.success) {
         for (const auto& err : result.errors) {
@@ -172,10 +172,10 @@ int main() {
 -   **现代 C++**: 利用 C++20 特性和最佳实践
 -   **测试**: 彻底的测试覆盖
 
-这是一个生产就绪的规则引擎，适用于需要高性能和通过声明式 DRL 语法与 JavaScript 脚本功能相结合的灵活规则编写的复杂业务规则场景。
+这是一个生产就绪的规则引擎，适用于需要高性能和通过声明式 RFL 语法与 JavaScript 脚本功能相结合的灵活规则编写的复杂业务规则场景。
 
 ## 文档
 
-有关 DRL 语法、特性和高级设计模式的完整参考，请参阅
-- [DRL 语言指南](./docs/USER_GUIDE.md)
-- [DRL 语法指南](./docs/dsl.md)
+有关 RFL 语法、特性和高级设计模式的完整参考，请参阅
+- [RFL 语言指南](./docs/USER_GUIDE.md)
+- [RFL 语法指南](./docs/dsl.md)

@@ -1,5 +1,5 @@
 #include "catch2/catch_test_macros.hpp"
-#include "drools_parser.hpp"
+#include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "stateful_session.hpp"
 
@@ -33,8 +33,8 @@ TEST_CASE_METHOD(StabilityTestFixture, "Retraction during rule firing removes de
         when
             $i: Item(processed == false)
         then
-            drools.update(i, {processed: true});
-            drools.insert({type: "Marker", id: i.id});
+            rfl.update(i, {processed: true});
+            rfl.insert({type: "Marker", id: i.id});
         end
 
         rule "Cleanup Marker"
@@ -42,7 +42,7 @@ TEST_CASE_METHOD(StabilityTestFixture, "Retraction during rule firing removes de
         when
             $m: Marker()
         then
-            drools.retract(m);
+            rfl.retract(m);
         end
     )");
 
@@ -77,9 +77,9 @@ TEST_CASE_METHOD(StabilityTestFixture, "Multiple retractions in single rule", "[
             $b: B()
             $c: C()
         then
-            drools.retract(a);
-            drools.retract(b);
-            drools.retract(c);
+            rfl.retract(a);
+            rfl.retract(b);
+            rfl.retract(c);
         end
     )");
 
@@ -117,8 +117,8 @@ TEST_CASE_METHOD(StabilityTestFixture, "Update followed by retraction of same fa
         when
             $c: Counter(value == 0)
         then
-            drools.update(c, {value: 1});
-            drools.retract(c);
+            rfl.update(c, {value: 1});
+            rfl.retract(c);
         end
     )");
 
@@ -146,7 +146,7 @@ TEST_CASE_METHOD(StabilityTestFixture, "Bounded iteration with update loop", "[e
         when
             $c: Counter(value < 100)
         then
-            drools.update(c, {value: c.value + 1});
+            rfl.update(c, {value: c.value + 1});
         end
     )");
 
@@ -181,8 +181,8 @@ TEST_CASE_METHOD(StabilityTestFixture, "Retract fact used by multiple rules", "[
         when
             $s: Shared()
         then
-            drools.insert({type: "ResultA"});
-            drools.retract(s);
+            rfl.insert({type: "ResultA"});
+            rfl.retract(s);
         end
 
         rule "Rule B"
@@ -190,7 +190,7 @@ TEST_CASE_METHOD(StabilityTestFixture, "Retract fact used by multiple rules", "[
         when
             $s: Shared()
         then
-            drools.insert({type: "ResultB"});
+            rfl.insert({type: "ResultB"});
         end
     )");
 

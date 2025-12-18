@@ -5,7 +5,7 @@
 #include <cstring>
 
 // Include C++ backend
-#include "drools_parser.hpp"
+#include "rfl_parser.hpp"
 #include "errors.hpp"
 #include "fact_builder.hpp"
 #include "knowledge_base.hpp"
@@ -74,18 +74,18 @@ DRILLS_CAPI_API ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_bas
     return DRILLS_ERROR_INVALID_ARGUMENT;
   }
   if (!drl_source) {
-    set_error("DRL source is NULL");
+    set_error("RFL source is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
   }
   try {
     ParsingResult result;
     auto kb_wrapper = static_cast<KnowledgeBaseWrapper *>(kb);
 
-    // Use the real DRL parser
+    // Use the real RFL parser
     kb_wrapper->kb = build_knowledge_base(drl_source, result, "C_API_Source");
 
     if (!result.success) {
-      std::string error_msg = "DRL compilation failed: ";
+      std::string error_msg = "RFL compilation failed: ";
       for (const auto &err : result.errors) {
         error_msg += err.to_string() + "; ";
       }
@@ -96,7 +96,7 @@ DRILLS_CAPI_API ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_bas
     last_error[0] = '\0';
     return DRILLS_OK;
   } catch (const std::exception &e) {
-    set_error_fmt("Failed to load DRL: ", e.what());
+    set_error_fmt("Failed to load RFL: ", e.what());
     return DRILLS_ERROR_GENERIC;
   }
 }

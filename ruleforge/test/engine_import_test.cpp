@@ -1,5 +1,5 @@
 #include "catch2/catch_all.hpp"
-#include "drools_parser.hpp"
+#include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "stateful_session.hpp"
 
@@ -36,7 +36,7 @@ struct ImportTestFixture {
 
 TEST_CASE_METHOD(ImportTestFixture, "Parser: Import Resolution", "[parser][import]") {
 
-    // --- 1. Define the DRL content for each file ---
+    // --- 1. Define the RFL content for each file ---
 
     // File 1: The main entry point, importing other modules.
     std::string const main_drl = R"(
@@ -50,7 +50,7 @@ TEST_CASE_METHOD(ImportTestFixture, "Parser: Import Resolution", "[parser][impor
         when
             $c: Customer(status == "GOLD")
         then
-            drools.insert({type: "com.example.model.HighValueCustomer"});
+            rfl.insert({type: "com.example.model.HighValueCustomer"});
         end
     )";
 
@@ -82,12 +82,12 @@ TEST_CASE_METHOD(ImportTestFixture, "Parser: Import Resolution", "[parser][impor
         end
     )";
 
-    // --- 2. Write the DRL files to disk ---
+    // --- 2. Write the RFL files to disk ---
 
     // The paths correspond to the package structure.
-    write_file("com/example/main.drl", main_drl);
-    write_file("com/example/model/Customer.drl", customer_drl);
-    write_file("com/example/rules/Rules.drl", base_rule_drl);   // The wildcard import will find this.
+    write_file("com/example/main.rfl", main_drl);
+    write_file("com/example/model/Customer.rfl", customer_drl);
+    write_file("com/example/rules/Rules.rfl", base_rule_drl);   // The wildcard import will find this.
 
     // --- 3. Parse the main file with the correct search path ---
 
@@ -96,7 +96,7 @@ TEST_CASE_METHOD(ImportTestFixture, "Parser: Import Resolution", "[parser][impor
     std::vector<std::string> search_paths = {test_dir};
 
     std::shared_ptr<KnowledgeBase> kb =
-        build_knowledge_base((std::filesystem::path(test_dir) / "com/example/main.drl").string(), search_paths, result);
+        build_knowledge_base((std::filesystem::path(test_dir) / "com/example/main.rfl").string(), search_paths, result);
 
     // --- 4. Assertions ---
 

@@ -11,12 +11,13 @@ Real-world business rule examples demonstrating the full capabilities of the Rul
 | [Fraud Detection](./fraud-detection/) | Banking/Security | CEP, temporal reasoning, velocity checks, alert escalation |
 | [Order Fulfillment](./order-fulfillment/) | E-commerce | Inventory management, discount stacking, shipping optimization |
 | [Travel Booking](./travel-booking/) | Travel Industry | Multi-service orchestration, eligibility checks, package pricing |
+| [Modular Rules](./modular-rules/) | Architecture | Multi-file imports, shared types, modular rule organization |
 
 ## Quick Start
 
 Each example includes:
 - **README.md** - Business scenario, data model, and rules documentation
-- **\*.drl** - Complete rule definitions in DRL format
+- **\*.rfl** - Complete rule definitions in RFL format
 - **\*-sample.json / \*-test-data.json** - Test data for running the example
 
 ### Running an Example
@@ -28,7 +29,7 @@ The quickest way to run examples is with `capi_demo`:
 ```bash
 # Loan Eligibility
 capi_demo \
-  -d docs/examples/loan-eligibility/loan-eligibility.drl \
+  -r docs/examples/loan-eligibility/loan-eligibility.rfl \
   -j docs/examples/loan-eligibility/loan-applications-sample.json \
   -m applications:com.bank.loan.LoanApplication \
   -q LoanDecisions -b decision \
@@ -36,7 +37,7 @@ capi_demo \
 
 # Insurance Pricing
 capi_demo \
-  -d docs/examples/insurance-pricing/insurance-pricing.drl \
+  -r docs/examples/insurance-pricing/insurance-pricing.rfl \
   -j docs/examples/insurance-pricing/insurance-applications-sample.json \
   -m applications:com.insurance.auto.InsuranceApplication \
   -q PolicyDecisions -b decision \
@@ -44,7 +45,7 @@ capi_demo \
 
 # Fraud Detection
 capi_demo \
-  -d docs/examples/fraud-detection/fraud-detection.drl \
+  -r docs/examples/fraud-detection/fraud-detection.rfl \
   -j docs/examples/fraud-detection/fraud-test-data.json \
   -m accountProfiles:com.bank.fraud.AccountProfile \
   -q ActiveAlerts -b alert \
@@ -52,7 +53,7 @@ capi_demo \
 
 # Order Fulfillment
 capi_demo \
-  -d docs/examples/order-fulfillment/order-fulfillment.drl \
+  -r docs/examples/order-fulfillment/order-fulfillment.rfl \
   -j docs/examples/order-fulfillment/order-test-data.json \
   -m warehouses:com.ecommerce.Warehouse \
   -m inventory:com.ecommerce.Inventory \
@@ -62,7 +63,7 @@ capi_demo \
 
 # Travel Booking
 capi_demo \
-  -d docs/examples/travel-booking/travel-booking.drl \
+  -r docs/examples/travel-booking/travel-booking.rfl \
   -j docs/examples/travel-booking/travel-test-data.json \
   -m visaRequirements:com.travel.VisaRequirement \
   -m flightOptions:com.travel.FlightOption \
@@ -78,7 +79,7 @@ capi_demo \
 
 int main() {
     ParseResult result;
-    auto kb = build_knowledge_base_from_file("loan-eligibility/loan-eligibility.drl", result);
+    auto kb = build_knowledge_base_from_file("loan-eligibility/loan-eligibility.rfl", result);
     if (!result.success) {
         std::cerr << "Parse error: " << result.error_message << std::endl;
         return 1;
@@ -107,22 +108,23 @@ int main() {
 
 ## Feature Coverage Matrix
 
-| Feature | Loan | Insurance | Fraud | Order | Travel |
-|---------|:----:|:---------:|:-----:|:-----:|:------:|
-| Pattern Matching | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Variable Binding | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Constraints | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `accumulate` | ✓ | ✓ | ✓ | ✓ | - |
-| `not` Patterns | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `exists` Patterns | - | - | ✓ | ✓ | - |
-| `forall` Patterns | - | - | - | ✓ | - |
-| `salience` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `activation-group` | - | - | - | ✓ | - |
-| `no-loop` | - | - | ✓ | - | - |
-| Entry Points (CEP) | - | - | ✓ | - | - |
-| Temporal Operators | - | - | ✓ | - | - |
-| Queries | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Multi-phase Execution | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Feature | Loan | Insurance | Fraud | Order | Travel | Modular |
+|---------|:----:|:---------:|:-----:|:-----:|:------:|:-------:|
+| Pattern Matching | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Variable Binding | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Constraints | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `import` | - | - | - | - | - | ✓ |
+| `accumulate` | ✓ | ✓ | ✓ | ✓ | - | - |
+| `not` Patterns | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `exists` Patterns | - | - | ✓ | ✓ | - | - |
+| `forall` Patterns | - | - | - | ✓ | - | - |
+| `salience` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `activation-group` | - | - | - | ✓ | - | - |
+| `no-loop` | - | - | ✓ | - | - | - |
+| Entry Points (CEP) | - | - | ✓ | - | - | - |
+| Temporal Operators | - | - | ✓ | - | - | - |
+| Queries | ✓ | ✓ | ✓ | ✓ | ✓ | - |
+| Multi-phase Execution | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ## Example Details
 
@@ -136,7 +138,7 @@ Demonstrates automated loan application processing with:
 - Tiered loan decisions based on risk levels
 
 **Key Patterns**:
-```drl
+```rfl
 // Risk factor accumulation
 $riskCount: Number() from accumulate(
     RiskFactor(applicantId == $appId),
@@ -157,7 +159,7 @@ Demonstrates risk-based pricing with:
 - Automatic decline rules for high-risk profiles
 
 **Key Patterns**:
-```drl
+```rfl
 // Multi-factor risk accumulation
 $riskFactors: Number() from accumulate(
     DriverRiskFactor(applicationId == $appId, $factor: factor),
@@ -175,7 +177,7 @@ Demonstrates Complex Event Processing (CEP) with:
 - Alert escalation based on signal accumulation
 
 **Key Patterns**:
-```drl
+```rfl
 // Temporal velocity check
 $txn: Transaction() from entry-point "transaction-stream"
 $count: Number(intValue > 5) from accumulate(
@@ -200,7 +202,7 @@ Demonstrates order processing workflow with:
 - Fulfillment routing to optimal warehouse
 
 **Key Patterns**:
-```drl
+```rfl
 // Activation group for exclusive shipping rules
 activation-group "shipping-cost"
 
@@ -221,11 +223,42 @@ Demonstrates multi-service orchestration with:
 - Points redemption calculations
 
 **Key Patterns**:
-```drl
+```rfl
 // Multi-entity join across services
 $req: TravelRequest($reqId: requestId, $dest: destination)
 $flight: FlightOption(destination == $dest, seatsAvailable >= $travelers)
 $hotel: HotelOption(destinationCity == $dest, stars >= $stars)
+```
+
+### 6. Modular Rules
+**Domain**: Architecture / Best Practices
+
+Demonstrates multi-file rule organization with:
+- Shared type declarations in separate files
+- Import statements for code reuse
+- Validation rules separated from business rules
+- Main entry point that imports all modules
+
+**Key Patterns**:
+```rfl
+// Import shared types from another file
+import ecommerce.common.types
+
+// Import all files in a directory
+import ecommerce.validation.*
+
+// Types from imported files are available
+$c : Customer(tier == "Gold")
+$o : Order(customerId == $c.id)
+```
+
+**File Structure**:
+```
+modular-rules/
+├── common/types.rfl      # Shared declarations
+├── validation-rules.rfl  # Validation logic
+├── pricing-rules.rfl     # Pricing logic
+└── main.rfl              # Entry point
 ```
 
 ## Additional Resources
@@ -240,7 +273,7 @@ $hotel: HotelOption(destinationCity == $dest, stars >= $stars)
 
 ### Related Documentation
 
-- [DSL Reference](../dsl.md) - Complete DRL syntax documentation
+- [DSL Reference](../dsl.md) - Complete RFL syntax documentation
 - [User Guide](../USER_GUIDE.md) - Getting started and advanced usage
 - [API Reference](../API.md) - C++ API documentation
 
@@ -251,7 +284,7 @@ When adding new examples, please follow this structure:
 ```
 docs/examples/your-example/
 ├── README.md           # Business scenario and documentation
-├── your-example.drl    # Rule definitions
+├── your-example.rfl    # Rule definitions
 └── test-data.json      # Sample test data
 ```
 

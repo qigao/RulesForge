@@ -32,29 +32,29 @@ if (customer.failed_logins > 3) {
 }
 ```
 
-```drl
+```rfl
 // 使用 Drills - 所有业务逻辑集中在一处
 rule "Promote to VIP"
 when
     $c: Customer(balance > 1000, orderCount > 5)
 then
     console.log(`${c.name} is now VIP!`);
-    drools.update(c, {status: "VIP"});
-    drools.insert({type: "Notification", message: "Welcome to VIP!"});
+    rfl.update(c, {status: "VIP"});
+    rfl.insert({type: "Notification", message: "Welcome to VIP!"});
 end
 
 rule "Age Verification"
 when
     $o: Order(), $c: Customer(id == $o.customerId, age < 18)
 then
-    drools.insert({type: "OrderRejection", reason: "Age verification required"});
+    rfl.insert({type: "OrderRejection", reason: "Age verification required"});
 end
 
 rule "Account Security"
 when
     $c: Customer(failedLogins > 3)
 then
-    drools.update(c, {accountLocked: true});
+    rfl.update(c, {accountLocked: true});
 end
 ```
 
@@ -74,9 +74,9 @@ cmake --build build
 
 ### 步骤 2: 创建您的第一个规则文件
 
-创建 `my_first_rules.drl`：
+创建 `my_first_rules.rfl`：
 
-```drl
+```rfl
 // 告诉系统数据是什么样的
 declare Person
     name: String
@@ -102,7 +102,7 @@ then
     console.log($person.name + " 可以开车！");
 
     // 向系统添加新事实
-    drools.insert({
+    rfl.insert({
         type: "CanDrive",
         name: person.name,
         reason: "年龄 " + person.age + " 且有驾照"
@@ -129,7 +129,7 @@ std::string read_file(const std::string& path) {
 
 int main() {
     // 1. 加载规则
-    std::string rules = read_file("my_first_rules.drl");
+    std::string rules = read_file("my_first_rules.rfl");
     ParsingResult result;
     auto knowledge_base = build_knowledge_base(rules, result);
 
@@ -207,7 +207,7 @@ Bob 不符合条件，因为他只有 15 岁！
 - **WHEN** (条件)：要查找什么模式
 - **THEN** (动作)：找到后做什么
 
-```drl
+```rfl
 rule "规则名称"
 when
     // 条件：当此模式匹配时...
@@ -232,7 +232,7 @@ auto results = session->get_facts_of_type("Result"); // 获取结果
 ### 模式 1: 简单过滤
 “查找所有成年人”
 
-```drl
+```rfl
 declare Adult
     name: String
 end
@@ -241,14 +241,14 @@ rule "查找成年人"
 when
     $person: Person(age >= 18)
 then
-    drools.insert({type: "Adult", name: person.name});
+    rfl.insert({type: "Adult", name: person.name});
 end
 ```
 
 ### 模式 2: 验证
 “检查数据是否有效”
 
-```drl
+```rfl
 declare ValidationError
     field: String
     message: String
@@ -259,7 +259,7 @@ when
     $person: Person($email: email)
     eval($email == null || $email == "" || !$email.includes("@"))
 then
-    drools.insert({
+    rfl.insert({
         type: "ValidationError",
         field: "email",
         message: "电子邮件是必需的，并且必须包含 @"
@@ -270,7 +270,7 @@ end
 ### 模式 3: 计算
 “计算派生值”
 
-```drl
+```rfl
 declare CreditScore
     name: String
     score: int
@@ -281,7 +281,7 @@ when
     $person: Person(age > 0, income > 0)
 then
     let score = Math.min(850, person.income / 1000 + person.age * 10);
-    drools.insert({
+    rfl.insert({
         type: "CreditScore",
         name: person.name,
         score: score
@@ -301,14 +301,14 @@ end
 ## 常见初学者错误
 
 ### ❌ 忘记声明类型
-```drl
+```rfl
 // 错误 - 没有声明
 rule "Bad Rule"
 when
     $p: Person(age > 18)  // Person 是什么？
 ```
 
-```drl
+```rfl
 // 正确 - 先声明
 declare Person
     age: int
@@ -320,14 +320,14 @@ when
 ```
 
 ### ❌ 错误的字段类型
-```drl
+```rfl
 declare Person
     age: String  // 错误 - age 应该是 int
 end
 ```
 
 ### ❌ 条件中的 JavaScript 语法
-```drl
+```rfl
 rule "Wrong"
 when
     $p: Person(age >= 18 && income > 1000)  // JavaScript 语法在这里不起作用
@@ -336,7 +336,7 @@ then
 end
 ```
 
-```drl
+```rfl
 rule "Correct"
 when
     $p: Person(age >= 18, income > 1000)  // 使用逗号，而不是 &&
@@ -355,7 +355,7 @@ end
 ### “编译错误”
 1.  确保每个 `declare` 块都有匹配的字段类型
 2.  检查字段名称中的拼写错误
-3.  确保 DRL 语法正确 (约束之间用逗号分隔)
+3.  确保 RFL 语法正确 (约束之间用逗号分隔)
 
 ### “运行时错误”
 1.  检查 `then` 块中的 JavaScript 语法

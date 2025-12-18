@@ -1,0 +1,19 @@
+package test.multi
+
+// Shared declarations
+declare FactA
+    value: String
+end
+
+declare FactB
+    value: int
+end
+
+// Shared validation rule
+rule "Common Validation"
+salience 100
+when
+    $a : FactA(value == "")
+then
+    console.log("Warning: FactA has empty value");
+end

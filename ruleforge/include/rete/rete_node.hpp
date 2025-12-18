@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "drools_accumulators.hpp"
-#include "drools_rete_defs.hpp"
+#include "rfl_accumulators.hpp"
+#include "rfl_rete_defs.hpp"
 #include "phmap.h"
 
 // Forward declarations

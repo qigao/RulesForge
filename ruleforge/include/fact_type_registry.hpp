@@ -1,7 +1,7 @@
 #ifndef FACT_TYPE_REGISTRY_HPP
 #define FACT_TYPE_REGISTRY_HPP
 
-#include "drools_rete_defs.hpp"
+#include "rfl_rete_defs.hpp"
 
 #include <functional>
 #include <string>
@@ -16,7 +16,7 @@ public:
     /**
      * @brief Registers a C++ type with the engine.
      * @tparam T The C++ struct type (e.g., Person).
-     * @param name The corresponding type name in the DRL (e.g., "Person").
+     * @param name The corresponding type name in the RFL (e.g., "Person").
      * @param populator A function that copies fields from the C++ struct to the engine's Fact.
      */
     template <typename T>

@@ -32,29 +32,29 @@ if (customer.failed_logins > 3) {
 }
 ```
 
-```drl
+```rfl
 // With Drills - all business logic in one place
 rule "Promote to VIP"
 when
     $c: Customer(balance > 1000, orderCount > 5)
 then
     console.log(`${c.name} is now VIP!`);
-    drools.update(c, {status: "VIP"});
-    drools.insert({type: "Notification", message: "Welcome to VIP!"});
+    rfl.update(c, {status: "VIP"});
+    rfl.insert({type: "Notification", message: "Welcome to VIP!"});
 end
 
 rule "Age Verification"
 when
     $o: Order(), $c: Customer(id == $o.customerId, age < 18)
 then
-    drools.insert({type: "OrderRejection", reason: "Age verification required"});
+    rfl.insert({type: "OrderRejection", reason: "Age verification required"});
 end
 
 rule "Account Security"
 when
     $c: Customer(failedLogins > 3)
 then
-    drools.update(c, {accountLocked: true});
+    rfl.update(c, {accountLocked: true});
 end
 ```
 
@@ -74,9 +74,9 @@ cmake --build build
 
 ### Step 2: Create Your First Rules File
 
-Create `my_first_rules.drl`:
+Create `my_first_rules.rfl`:
 
-```drl
+```rfl
 // Tell the system what data looks like
 declare Person
     name: String
@@ -102,7 +102,7 @@ then
     console.log($person.name + " can drive!");
 
     // Add new facts to the system
-    drools.insert({
+    rfl.insert({
         type: "CanDrive",
         name: person.name,
         reason: "Age " + person.age + " and has license"
@@ -129,7 +129,7 @@ std::string read_file(const std::string& path) {
 
 int main() {
     // 1. Load the rules
-    std::string rules = read_file("my_first_rules.drl");
+    std::string rules = read_file("my_first_rules.rfl");
     ParsingResult result;
     auto knowledge_base = build_knowledge_base(rules, result);
 
@@ -207,7 +207,7 @@ Rules have two parts:
 - **WHEN** (conditions): What pattern to look for
 - **THEN** (actions): What to do when you find it
 
-```drl
+```rfl
 rule "Rule Name"
 when
     // Conditions: when this pattern matches...
@@ -232,7 +232,7 @@ auto results = session->get_facts_of_type("Result"); // Get results out
 ### Pattern 1: Simple Filtering
 "Find all adults"
 
-```drl
+```rfl
 declare Adult
     name: String
 end
@@ -241,14 +241,14 @@ rule "Find Adults"
 when
     $person: Person(age >= 18)
 then
-    drools.insert({type: "Adult", name: person.name});
+    rfl.insert({type: "Adult", name: person.name});
 end
 ```
 
 ### Pattern 2: Validation
 "Check if data is valid"
 
-```drl
+```rfl
 declare ValidationError
     field: String
     message: String
@@ -259,7 +259,7 @@ when
     $person: Person($email: email)
     eval($email == null || $email == "" || !$email.includes("@"))
 then
-    drools.insert({
+    rfl.insert({
         type: "ValidationError",
         field: "email",
         message: "Email is required and must contain @"
@@ -270,7 +270,7 @@ end
 ### Pattern 3: Calculations
 "Calculate derived values"
 
-```drl
+```rfl
 declare CreditScore
     name: String
     score: int
@@ -281,7 +281,7 @@ when
     $person: Person(age > 0, income > 0)
 then
     let score = Math.min(850, person.income / 1000 + person.age * 10);
-    drools.insert({
+    rfl.insert({
         type: "CreditScore",
         name: person.name,
         score: score
@@ -301,14 +301,14 @@ Once you're comfortable with the basics:
 ## Common Beginner Mistakes
 
 ### ❌ Forgetting to declare types
-```drl
+```rfl
 // Wrong - no declaration
 rule "Bad Rule"
 when
     $p: Person(age > 18)  // What is Person?
 ```
 
-```drl
+```rfl
 // Correct - declare first
 declare Person
     age: int
@@ -320,14 +320,14 @@ when
 ```
 
 ### ❌ Wrong field types
-```drl
+```rfl
 declare Person
     age: String  // Wrong - age should be int
 end
 ```
 
 ### ❌ JavaScript syntax in conditions
-```drl
+```rfl
 rule "Wrong"
 when
     $p: Person(age >= 18 && income > 1000)  // JavaScript syntax doesn't work here
@@ -336,7 +336,7 @@ then
 end
 ```
 
-```drl
+```rfl
 rule "Correct"
 when
     $p: Person(age >= 18, income > 1000)  // Use comma, not &&
@@ -355,7 +355,7 @@ end
 ### "Compilation errors"
 1. Make sure every `declare` block has matching field types
 2. Check for typos in field names
-3. Ensure DRL syntax is correct (commas between constraints)
+3. Ensure RFL syntax is correct (commas between constraints)
 
 ### "Runtime errors"
 1. Check JavaScript syntax in `then` blocks

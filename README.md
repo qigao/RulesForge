@@ -2,7 +2,7 @@
 
 [中文文档](./docs/zh-CN/README.md)
 
-This is a sophisticated, high-performance C++ rules engine implementing the **Rete algorithm** with **JavaScript (QuickJS) scripting** for rule consequences, inspired by Java Drools but designed specifically for C++ environments.
+This is a sophisticated, high-performance C++ rules engine implementing the **Rete algorithm** with **JavaScript (QuickJS) scripting** for rule consequences, inspired by Java RuleForge but designed specifically for C++ environments.
 
 ## Core Architecture
 
@@ -12,13 +12,13 @@ This is a sophisticated, high-performance C++ rules engine implementing the **Re
 - Mutable `StatefulSession` managing working memory (`ruleforge/include/stateful_session.hpp:141`)
 
 **JavaScript Integration**:
-- `JSScriptingManager` bridges C++ and JavaScript (`ruleforge/src/drools_js_manager.cpp`)
+- `JSScriptingManager` bridges C++ and JavaScript (`ruleforge/src/rfl_js_manager.cpp`)
 - QuickJS library for seamless C++/JavaScript binding (`vcpkg.json:90-92`)
-- Custom `drools` API exposed to JavaScript for fact manipulation
+- Custom `rfl` API exposed to JavaScript for fact manipulation
 
 ## Key Features
 
-1. **DRL Language**: Drools-like syntax with comprehensive grammar (`ruleforge/dsl.md`, `ruleforge/guide.md`)
+1. **RFL Language**: RuleForge-like syntax with comprehensive grammar ([docs/dsl.md](./docs/dsl.md), [docs/USER_GUIDE.md](./docs/USER_GUIDE.md))
 2. **Advanced Conditional Logic**: Support for `not`, `exists`, `forall` patterns
 3. **Data Aggregation**: Built-in accumulators (`sum`, `count`, `average`, etc.)
 4. **Truth Maintenance System (TMS)**: Logical assertions with automatic dependency tracking
@@ -38,14 +38,13 @@ This is a sophisticated, high-performance C++ rules engine implementing the **Re
 
 ```
 ruleforge/
-├── include/           # Headers (AST, parser, Rete nodes, Lua manager)
+├── include/           # Headers (AST, parser, Rete nodes, JavaScript manager)
 ├── src/              # Implementation files
 ├── test/             # Comprehensive test suite
-├── docs/             # Documentation
-├── examples/         # Usage examples (currently empty)
+docs/                 # Documentation
 ├── dsl.md           # Grammar specification
-├── guide.md         # User guide
-└── readme.md        # Quick start guide
+├── USER_GUIDE.md    # User guide
+└── README.md        # Quick start guide (Chinese)
 ```
 
 ## WebAssembly Demo 🐳
@@ -110,10 +109,10 @@ The demo demonstrates:
 
 Here's a simple example to get you up and running.
 
-### 1. Write your rules in a DRL file
+### 1. Write your rules in a RFL file
 
-**`my_rules.drl`**
-```drl
+**`my_rules.rfl`**
+```rfl
 // Define the data model for our facts
 declare Person
     name : String
@@ -137,7 +136,7 @@ then
     // The 'then' block is JavaScript.
     // The $p variable is available as 'p'.
     console.log("Granting voting rights to: " + p.name);
-    drools.insert({ type: "CanVote", name: p.name });
+    rfl.insert({ type: "CanVote", name: p.name });
 end
 
 // A query to find all people who can vote
@@ -149,7 +148,7 @@ end
 ### 2. Use the engine in your C++ application
 
 ```cpp
-#include "drools_parser.hpp"
+#include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "stateful_session.hpp"
 #include "query_result.hpp"
@@ -168,10 +167,10 @@ std::string read_file(const std::string& path) {
 }
 
 int main() {
-    // 1. Load and compile the DRL file into a KnowledgeBase
-    std::string drl_content = read_file("my_rules.drl");
+    // 1. Load and compile the RFL file into a KnowledgeBase
+    std::string rfl_content = read_file("my_rules.rfl");
     ParsingResult result;
-    std::shared_ptr<KnowledgeBase> kb = build_knowledge_base(drl_content, result);
+    std::shared_ptr<KnowledgeBase> kb = build_knowledge_base(rfl_content, result);
 
     if (!result.success) {
         for (const auto& err : result.errors) {
@@ -230,10 +229,10 @@ int main() {
 - **Modern C++**: Leverages C++20 features and best practices
 - **Testing**: Thorough test coverage
 
-This is a production-ready rules engine suitable for complex business rule scenarios requiring both high performance and flexible rule authoring through the combination of declarative DRL syntax and JavaScript scripting capabilities.
+This is a production-ready rules engine suitable for complex business rule scenarios requiring both high performance and flexible rule authoring through the combination of declarative RFL syntax and JavaScript scripting capabilities.
 
 ## Documentation
 
-For a complete reference on the DRL syntax, features, and advanced design patterns, please see the
-- [DRL Language Guide](./docs/USER_GUIDE.md)
-- [DRL Grammar Guide](./docs/dsl.md)
+For a complete reference on the RFL syntax, features, and advanced design patterns, please see the
+- [RFL Language Guide](./docs/USER_GUIDE.md)
+- [RFL Grammar Guide](./docs/dsl.md)

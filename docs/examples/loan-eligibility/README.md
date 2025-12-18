@@ -78,7 +78,7 @@ Ensure all regulatory requirements are met.
 
 ```bash
 capi_demo \
-  -d docs/examples/loan-eligibility/loan-eligibility.drl \
+  -d docs/examples/loan-eligibility/loan-eligibility.rfl \
   -j docs/examples/loan-eligibility/loan-applications-sample.json \
   -m applications:com.bank.loan.LoanApplication \
   -q LoanDecisions \
@@ -94,7 +94,7 @@ capi_demo \
 int main() {
     // Load rules
     ParseResult result;
-    auto kb = build_knowledge_base_from_file("loan-eligibility.drl", result);
+    auto kb = build_knowledge_base_from_file("loan-eligibility.rfl", result);
 
     // Create session
     auto session = kb->create_session();

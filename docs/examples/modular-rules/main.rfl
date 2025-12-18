@@ -1,0 +1,30 @@
+// main.rfl - Main entry point that imports all modules
+package ecommerce
+
+// Import shared types
+import ecommerce.common.types
+
+// Import validation rules
+import ecommerce.validation-rules
+
+// Import pricing rules
+import ecommerce.pricing-rules
+
+// Orchestration rule - ensure proper execution order
+rule "Start Processing"
+salience 1000
+when
+    $o : Order()
+    $c : Customer(id == $o.customerId)
+then
+    console.log("Processing order " + o.id + " for customer " + c.name);
+end
+
+rule "Processing Complete"
+salience -1000
+when
+    $o : Order()
+    $p : PricingResult(orderId == $o.id)
+then
+    console.log("Order processing complete for order " + o.id);
+end

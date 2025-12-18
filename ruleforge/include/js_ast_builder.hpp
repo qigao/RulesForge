@@ -10,7 +10,7 @@
 
 // Forward declarations
 struct JSFunctionCall {
-    std::string object_name;    // e.g., "drools"
+    std::string object_name;    // e.g., "rfl"
     std::string method_name;    // e.g., "insert"
     std::vector<std::string> arguments; // Raw argument strings
 };
@@ -54,7 +54,7 @@ public:
     // Validate JavaScript syntax without building full AST
     bool validate_syntax(const std::string& js_code, std::string& error_message);
     
-    // Extract function calls like drools.insert(), drools.retract()
+    // Extract function calls like rfl.insert(), rfl.retract()
     std::vector<JSFunctionCall> extract_function_calls(const std::string& js_code);
     
     // Extract variable references like $p.name

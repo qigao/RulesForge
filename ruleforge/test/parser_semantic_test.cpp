@@ -1,18 +1,18 @@
 #include "catch2/catch_all.hpp"
-#include "drools_parser.hpp"
+#include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "stateful_session.hpp"
 
 // A dedicated test fixture for semantic analysis tests.
 struct SemanticTestFixture {
     /**
-     * @brief A helper that builds a KnowledgeBase from DRL and asserts that it fails
+     * @brief A helper that builds a KnowledgeBase from RFL and asserts that it fails
      *        with a specific semantic error.
      *
      * This function encapsulates the entire test pattern for semantic validation,
      * making individual test cases clean and declarative.
      *
-     * @param drl The DRL string containing the expected error.
+     * @param drl The RFL string containing the expected error.
      * @param expected_message_part A substring that must appear in the error message.
      */
     void expect_error(std::string const& drl, std::string const& expected_message_part) {
@@ -21,7 +21,7 @@ struct SemanticTestFixture {
         auto kb = build_knowledge_base(drl, result, "test.drl");
 
         // The build MUST fail for a semantic error.
-        INFO("DRL being tested:\n" << drl);
+        INFO("RFL being tested:\n" << drl);
         REQUIRE(kb == nullptr);
         REQUIRE_FALSE(result.success);
 
@@ -47,7 +47,7 @@ TEST_CASE_METHOD(SemanticTestFixture, "Semantic Analysis: Binding and Scope Erro
     SECTION("Using an unbound variable in the RHS") {
         std::string drl = R"(
             declare Person end
-            rule "x" when $p: Person() then drools.retract($p2); end
+            rule "x" when $p: Person() then rfl.retract($p2); end
         )";
         expect_error(drl, "RHS uses undeclared variable '$p2'");
     }
@@ -55,7 +55,7 @@ TEST_CASE_METHOD(SemanticTestFixture, "Semantic Analysis: Binding and Scope Erro
     SECTION("Using a variable from a `not` clause in the RHS") {
         std::string drl = R"(
             declare Person end
-            rule "x" when not($p: Person()) then drools.retract($p); end
+            rule "x" when not($p: Person()) then rfl.retract($p); end
         )";
         expect_error(drl, "RHS uses undeclared variable '$p'");
     }

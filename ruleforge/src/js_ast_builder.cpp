@@ -104,7 +104,7 @@ JSAstRoot JSAstBuilder::parse(const std::string& js_code) {
 std::vector<JSFunctionCall> JSAstBuilder::extract_function_calls(const std::string& js_code) {
     std::vector<JSFunctionCall> calls;
 
-    // Regex to match function calls like: drools.insert({...})
+    // Regex to match function calls like: rfl.insert({...})
     // Pattern: object.method(arguments)
     std::regex call_regex(R"((\w+)\.(\w+)\s*\(\s*([^)]*)\s*\))");
     std::smatch match;
@@ -164,7 +164,7 @@ std::vector<JSVariableRef> JSAstBuilder::extract_variables(const std::string& js
     }
 
     // Regex to match variable references in two forms:
-    // 1. Drools bindings: $p.name, $customer.age
+    // 1. Rules Forge Language bindings: $p.name, $customer.age
     // 2. Regular JS variables: p.name, customer.age (when not preceded by . or $)
     // Using negative lookbehind to avoid matching object.method patterns
     std::regex var_regex(R"((?:^|[^.\w$])(\$?[a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b)");

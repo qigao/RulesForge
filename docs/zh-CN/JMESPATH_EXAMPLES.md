@@ -232,7 +232,7 @@ var avgPremiumPoints = jmespath(activeCustomerStr, '[*].membership.points | sum(
 
 ### 电子商务商业智能
 
-```drl
+```rfl
 rule "High Value Customer Analysis"
 when
     $data : EcommerceReport(period == "2024-01")
@@ -255,7 +255,7 @@ then
     console.log("高级客户占收入的", premiumPercentage.toFixed(2), "%");
 
     if (premiumPercentage > 60) {
-        drools.insert({
+        rfl.insert({
             type: "BusinessInsight",
             category: "customer_analysis",
             insight: "premium_customer_dominance",
@@ -268,7 +268,7 @@ end
 
 ### 物联网环境监测
 
-```drl
+```rfl
 rule "Environmental Risk Assessment"
 when
     $sensors : IoTSensorBatch(location == "downtown")
@@ -299,7 +299,7 @@ then
 
     // 根据阈值生成警报
     if (avgPM25 > 35) {
-        drools.insert({
+        rfl.insert({
             type: "EnvironmentalAlert",
             severity: "warning",
             parameter: "air_quality_pm25",
@@ -310,7 +310,7 @@ then
     }
 
     if (noiseViolations > 2) {
-        drools.insert({
+        rfl.insert({
             type: "EnvironmentalAlert",
             severity: "info",
             parameter: "noise_pollution",

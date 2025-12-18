@@ -5,7 +5,7 @@
 ## Table of Contents
 
 1. [**Core Concepts**](#1-core-concepts)
-2. [**DRL Language Reference**](#2-drl-language-reference)
+2. [**RFL Language Reference**](#2-rfl-language-reference)
 3. [**JavaScript Integration**](#3-javascript-integration)
 4. [**Advanced Patterns**](#4-advanced-patterns)
 5. [**Performance Guidelines**](#5-performance-guidelines)
@@ -25,7 +25,7 @@ Drills implements the **Rete algorithm**, a powerful pattern-matching technique 
 - ✅ **Conflict Resolution** - Handle multiple rule matches intelligently
 - ✅ **Truth Maintenance** - Automatically retract derived facts when premises change
 
-```drl
+```rfl
 rule "Price Alert"
 when
     $product: Product(price < 100)
@@ -33,7 +33,7 @@ when
 then
     // Only fires when BOTH conditions are met
     // Automatically retracts alert if price goes above 100
-    drools.insert({
+    rfl.insert({
         type: "PriceAlert",
         userId: user.id,
         productId: product.id
@@ -45,7 +45,7 @@ end
 
 ```cpp
 // Knowledge Base = Immutable compiled rules (thread-safe)
-auto kb = build_knowledge_base(drl_source, result);
+auto kb = build_knowledge_base(rfl_source, result);
 
 // Session = Mutable working memory (one per thread)
 auto session1 = kb->create_session(); // Thread 1
@@ -61,7 +61,7 @@ session2->add_fact(customer2); // Independent data
 Understanding how data moves through the Drills engine is crucial. It's a continuous cycle of **Facts** (your input data) interacting with **Rules** (your defined logic) within the engine's **Working Memory**.
 
 1.  **Rules Ingested into Knowledge Base:**
-    *   Your rules, whether defined in DRL files, decision tables (like CSVs), or other formats, are first parsed and compiled into an optimized internal representation, primarily a Rete network.
+    *   Your rules, whether defined in RFL files, decision tables (like CSVs), or other formats, are first parsed and compiled into an optimized internal representation, primarily a Rete network.
     *   This compiled rule set is stored in a `KnowledgeBase`. The `KnowledgeBase` is immutable and thread-safe, acting as the blueprint for your business logic.
 
 2.  **Facts Inserted into Working Memory:**
@@ -86,13 +86,13 @@ Understanding how data moves through the Drills engine is crucial. It's a contin
 
 ---
 
-## 2. DRL Language Reference
+## 2. RFL Language Reference
 
 ### 2.1 File Structure
 
-Every DRL file follows this structure:
+Every RFL file follows this structure:
 
-```drl
+```rfl
 package com.example.business.rules
 
 import com.example.model.Customer
@@ -130,7 +130,7 @@ rule "Business Rule 2"
 
 Define your data schema:
 
-```drl
+```rfl
 declare Customer
     id: int                    // Required field
     name: String              // String type
@@ -158,7 +158,7 @@ end
 
 ### 2.3 Rule Syntax
 
-```drl
+```rfl
 rule "Rule Name"
     salience 10              // Priority (higher = earlier)
     agenda-group "validation" // Rule group
@@ -180,7 +180,7 @@ rule "Rule Name"
         // Right-Hand Side (RHS) - JavaScript Actions
         console.log(`Processing customer: ${customer.name}`);
 
-        drools.insert({
+        rfl.insert({
             type: "VipStatus",
             customerId: customer.id,
             level: "Gold",
@@ -203,7 +203,7 @@ end
 | `duration` | Delay rule execution by milliseconds after activation | `duration 1000` |
 | `extends` | Inherit conditions from another rule | `extends "BaseRule"` |
 
-```drl
+```rfl
 rule "Priority Rule"
     salience 100              // High priority
     agenda-group "validation" // Part of validation group
@@ -211,7 +211,7 @@ rule "Priority Rule"
     when
         $order: Order(status == "new")
     then
-        drools.update(order, {status: "validated"});
+        rfl.update(order, {status: "validated"});
 end
 
 rule "Exclusive Handler"
@@ -254,12 +254,12 @@ end
 ### 2.6 Pattern Matching
 
 #### Basic Pattern
-```drl
+```rfl
 $customer: Customer(balance > 1000)
 ```
 
 #### Multiple Constraints
-```drl
+```rfl
 $order: Order(
     amount > 100,
     status == "Completed",
@@ -268,13 +268,13 @@ $order: Order(
 ```
 
 #### Nested Field Access
-```drl
+```rfl
 $user: User(profile.preferences.newsletter == true)
 ```
 
 #### Null-Safe Field Access (`!.`)
 Safely navigate through potentially null fields. Returns `nil` if any segment is null:
-```drl
+```rfl
 // Won't error if address is null - just won't match
 $user: User(address!.city == "NYC")
 
@@ -284,7 +284,7 @@ $order: Order(customer!.preferences!.priority == "high")
 
 #### Index Access (`[]`)
 Access list elements by index or map values by key:
-```drl
+```rfl
 // Access first item in list
 $order: Order(items[0].name == "Widget")
 
@@ -296,7 +296,7 @@ $config: Config(settings["theme"] == "dark")
 ```
 
 #### Variable Binding
-```drl
+```rfl
 $customer: Customer($customerId: id, balance > 1000)
 $orders: Order(customerId == $customerId)
 ```
@@ -304,7 +304,7 @@ $orders: Order(customerId == $customerId)
 ### 2.7 Advanced Patterns
 
 #### Accumulate - Data Aggregation
-```drl
+```rfl
 rule "High Volume Customer"
 when
     $customer: Customer()
@@ -326,7 +326,7 @@ end
 - `average($field)` - Average value
 
 #### Collect - Gather Facts
-```drl
+```rfl
 rule "Bundle Orders"
 when
     $customer: Customer()
@@ -341,7 +341,7 @@ end
 ```
 
 #### Forall - Universal Quantification
-```drl
+```rfl
 rule "All Orders Completed"
 when
     $customer: Customer()
@@ -358,7 +358,7 @@ end
 
 Parameterized queries for data retrieval:
 
-```drl
+```rfl
 query "customers_by_status"(String requiredStatus)
     $customer: Customer(status == requiredStatus)
 end
@@ -412,41 +412,41 @@ let subtotal = order.quantity * order.unitPrice;  // SyntaxError on second rule!
 
 ### 3.2 Available JavaScript APIs
 
-#### drools Object
+#### rfl Object
 ```javascript
 // Insert a new fact (type must be fully qualified from package declaration)
-drools.insert({type: "com.example.Customer", name: "John", balance: 1000});
+rfl.insert({type: "com.example.Customer", name: "John", balance: 1000});
 
 // Update an existing fact
-drools.update(order, {finalPrice: 99.99, status: "processed"});
+rfl.update(order, {finalPrice: 99.99, status: "processed"});
 
 // Retract (delete) a fact
-drools.retract(oldFact);
+rfl.retract(oldFact);
 
 // Logical insertion (auto-retracted when rule conditions no longer match)
-drools.insertLogical({type: "com.example.Alert", message: "Low stock"});
+rfl.insertLogical({type: "com.example.Alert", message: "Low stock"});
 
 // Stop rule execution immediately
-drools.halt();
+rfl.halt();
 
 // Set agenda focus to a specific group
-drools.setFocus("cleanup");
+rfl.setFocus("cleanup");
 
 // Get information about the current rule
-var ruleName = drools.getRule().name;
+var ruleName = rfl.getRule().name;
 console.log("Executing rule: " + ruleName);
 ```
 
 #### Modify Block Syntax
-A Drools-style structured way to update facts:
-```drl
-// Instead of drools.update(), you can use modify block:
+A RuleForge-style structured way to update facts:
+```rfl
+// Instead of rfl.update(), you can use modify block:
 modify($person) {
     setAge(30),
     setStatus("updated"),
     setScore(person.score + 100)
 }
-// This transforms to: drools.update(person, {age: 30, status: "updated", score: person.score + 100})
+// This transforms to: rfl.update(person, {age: 30, status: "updated", score: person.score + 100})
 ```
 
 #### Console Logging
@@ -482,15 +482,15 @@ var message = `Customer ${customer.name} has ${orders.length} orders`;
 
 ### 3.3 Variable Binding Rules
 
-DRL bindings (with `$` prefix) become JavaScript variables (without `$`):
+RFL bindings (with `$` prefix) become JavaScript variables (without `$`):
 
-```drl
+```rfl
 rule "Example"
 when
     $customer: Customer($name: name, $balance: balance)
     $order: Order(customerId == $customer.id, $amount: amount)
 then
-    // DRL $customer becomes JS customer ($ stripped)
+    // RFL $customer becomes JS customer ($ stripped)
     console.log("Customer: " + customer.name);
 
     // Field bindings also lose the $ prefix
@@ -505,18 +505,18 @@ end
 ```
 
 **Binding Reference:**
-| DRL (LHS) | JavaScript (RHS) |
+| RFL (LHS) | JavaScript (RHS) |
 |-----------|------------------|
 | `$customer` | `customer` |
 | `$order` | `order` |
 | `$name: name` | `name` |
 | `$totalAmount` | `totalAmount` |
 
-### 3.4 Type Names in drools.insert()
+### 3.4 Type Names in rfl.insert()
 
 When inserting facts, the `type` field must use the **fully qualified name** from the package declaration:
 
-```drl
+```rfl
 package com.example.pricing
 
 declare Order
@@ -529,14 +529,14 @@ when
     // ...
 then
     // ✅ CORRECT - fully qualified type name
-    drools.insert({
+    rfl.insert({
         type: "com.example.pricing.Order",
         quantity: 5,
         unitPrice: 19.99
     });
 
     // ❌ WRONG - unqualified name won't match alpha network
-    drools.insert({
+    rfl.insert({
         type: "Order",  // This fact won't trigger rules!
         quantity: 5,
         unitPrice: 19.99
@@ -548,33 +548,33 @@ end
 
 When a rule updates a fact that matches its own conditions, it can trigger infinitely. Use `no-loop` to prevent this:
 
-```drl
+```rfl
 rule "Round Down Price"
     no-loop  // Prevents re-triggering on self-modified facts
     when
         $order: Order(finalPrice > 0)
     then
         var rounded = Math.floor(order.finalPrice);
-        drools.update(order, {finalPrice: rounded});
+        rfl.update(order, {finalPrice: rounded});
         // Without no-loop: would fire again because finalPrice > 0 still true!
 end
 ```
 
 **Alternative:** Design conditions that become false after the action:
 
-```drl
+```rfl
 rule "Apply Discount Once"
     when
         $order: Order(discountApplied == false)  // Condition becomes false after update
     then
         var discounted = order.total * 0.9;
-        drools.update(order, {total: discounted, discountApplied: true});
+        rfl.update(order, {total: discounted, discountApplied: true});
 end
 ```
 
 ### 3.6 Complete Example
 
-```drl
+```rfl
 package com.example.pricing
 
 declare Order
@@ -591,7 +591,7 @@ rule "Bulk Discount"
         console.log("Applying bulk discount for qty=" + order.quantity);
         var subtotal = order.quantity * order.unitPrice;
         var discounted = subtotal * 0.90;
-        drools.update(order, {finalPrice: discounted});
+        rfl.update(order, {finalPrice: discounted});
 end
 
 // Round down final price
@@ -602,7 +602,7 @@ rule "Round Down"
         $order: Order(finalPrice > 0.01)
     then
         var rounded = Math.floor(order.finalPrice);
-        drools.update(order, {finalPrice: rounded});
+        rfl.update(order, {finalPrice: rounded});
 end
 
 query "ProcessedOrders"
@@ -618,7 +618,7 @@ end
 
 Model complex workflows:
 
-```drl
+```rfl
 declare ProcessState
     processId: String
     currentState: String
@@ -630,14 +630,14 @@ when
     $request: ProcessRequest(status == "NEW")
     not ProcessState(processId == $request.id)
 then
-    drools.insert({
+    rfl.insert({
         type: "ProcessState",
         processId: request.id,
         currentState: "VALIDATION",
         data: {startTime: Date.now()}
     });
 
-    drools.update(request, {status: "PROCESSING"});
+    rfl.update(request, {status: "PROCESSING"});
 end
 
 rule "Validation Complete"
@@ -645,7 +645,7 @@ when
     $state: ProcessState(currentState == "VALIDATION")
     $validation: ValidationResult(processId == $state.processId, valid == true)
 then
-    drools.update(state, {
+    rfl.update(state, {
         currentState: "APPROVAL",
         data: {...state.data, validatedAt: Date.now()}
     });
@@ -656,7 +656,7 @@ when
     $state: ProcessState(currentState == "APPROVAL")
     $approval: ApprovalResult(processId == $state.processId, approved == true)
 then
-    drools.update(state, {
+    rfl.update(state, {
         currentState: "COMPLETE",
         data: {...state.data, completedAt: Date.now()}
     });
@@ -691,7 +691,7 @@ event->fields["timestamp"] = getCurrentTimestamp();
 session->insert_into("sensor-stream", event);
 ```
 
-```drl
+```rfl
 rule "Process Sensor Events"
 when
     // Only matches facts from the "sensor-stream" entry point
@@ -703,7 +703,7 @@ end
 
 #### Temporal Pattern Example
 
-```drl
+```rfl
 declare LoginEvent
     userId: int
     timestamp: long
@@ -729,7 +729,7 @@ when
     eval($failedLogins >= 5)
     not SuspiciousActivity(userId == $user.id)
 then
-    drools.insert({
+    rfl.insert({
         type: "SuspiciousActivity",
         userId: user.id,
         reason: `${failedLogins} failed logins in 5 minutes`
@@ -754,7 +754,7 @@ then
     var country2 = geoLookup(login2.ipAddress);
 
     if (country1 !== country2) {
-        drools.insert({
+        rfl.insert({
             type: "SuspiciousActivity",
             userId: user.id,
             reason: `Logins from ${country1} and ${country2} within 1 hour`
@@ -765,7 +765,7 @@ end
 
 ### 4.3 Data Validation Framework
 
-```drl
+```rfl
 declare ValidationError
     entityType: String
     entityId: int
@@ -779,7 +779,7 @@ when
     $customer: Customer($email: email)
     eval($email === null || $email === "" || !$email.includes("@"))
 then
-    drools.insert({
+    rfl.insert({
         type: "ValidationError",
         entityType: "Customer",
         entityId: customer.id,
@@ -793,7 +793,7 @@ rule "Validate Customer Age"
 when
     $customer: Customer(age < 18)
 then
-    drools.insert({
+    rfl.insert({
         type: "ValidationError",
         entityType: "Customer",
         entityId: customer.id,
@@ -812,7 +812,7 @@ when
     )
     eval(Math.abs($balance - $totalOrders) > 0.01) // Account for rounding
 then
-    drools.insert({
+    rfl.insert({
         type: "ValidationError",
         entityType: "Customer",
         entityId: customer.id,
@@ -830,7 +830,7 @@ end
 ### 5.1 Rule Design Best Practices
 
 #### ✅ Put Selective Constraints First
-```drl
+```rfl
 // Good - most selective constraint first
 when
     $customer: Customer(tier == "VIP", status == "Active")
@@ -841,7 +841,7 @@ when
 ```
 
 #### ✅ Use Appropriate Salience
-```drl
+```rfl
 rule "Data Validation"
 salience 1000  // Run first
 when
@@ -860,7 +860,7 @@ end
 ```
 
 #### ✅ Minimize eval() Usage
-```drl
+```rfl
 // Good - native constraints
 when
     $customer: Customer(balance > 1000, age >= 21)
@@ -953,7 +953,7 @@ The `KnowledgeBase` is **fully thread-safe** because it is immutable after const
 
 ```cpp
 // Build once, share everywhere
-auto kb = build_knowledge_base(drl_source, result);
+auto kb = build_knowledge_base(rfl_source, result);
 
 // Safe: multiple threads can create sessions from the same KB
 std::thread t1([&kb]() {
@@ -1093,7 +1093,7 @@ std::string get_prometheus_metrics() {
 ### 6.1 Common Issues
 
 #### Rule Not Firing
-```drl
+```rfl
 rule "Debug Rule"
 when
     $customer: Customer(balance > 1000)
@@ -1115,10 +1115,10 @@ end
 then
     try {
         var result = complexCalculation(customer.data);
-        drools.insert({type: "Result", value: result});
+        rfl.insert({type: "Result", value: result});
     } catch (error) {
         console.error("Calculation failed: " + error.message);
-        drools.insert({
+        rfl.insert({
             type: "ProcessingError",
             entityId: customer.id,
             error: error.message
@@ -1181,23 +1181,9 @@ session->add_facts(orders);
 
 Ready for advanced topics?
 
--   **[Deployment Guide](DEPLOYMENT.md)** - Production deployment, monitoring
-
----
-
-*"Good programmers worry about data structures and their relationships. Bad programmers worry about the code."* - Linus Torvalds
-
-The Drills engine is built around elegant data structures that make complex business logic simple to express and blazingly fast to execute.
-
-
-## Next Steps
-
-Ready for advanced topics?
-
-- **[Developer Guide](DEVELOPER_GUIDE.md)** - Extending the engine, custom functions
-- **[API Reference](API_REFERENCE.md)** - Complete C++ API documentation
+- **[RFL Language Guide](dsl.md)** - Grammar specification and reference
 - **[Deployment Guide](DEPLOYMENT.md)** - Production deployment, monitoring
-- **[Architecture Guide](ARCHITECTURE.md)** - Understanding the Rete implementation
+- **[Quick Start](../README.md)** - Basic examples and C++ API usage
 
 ---
 

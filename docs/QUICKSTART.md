@@ -10,8 +10,8 @@ Drills is a high-performance C++ rules engine implementing the **Rete algorithm*
 
 ### 1. Write Your Business Rules
 
-Create `my_rules.drl`:
-```drl
+Create `my_rules.rfl`:
+```rfl
 // Define your data model
 declare Customer
     id: int
@@ -35,7 +35,7 @@ when
 then
     // JavaScript action - 'c' is the matched customer
     console.log(`Promoting ${c.name} to VIP status`);
-    drools.insert({
+    rfl.insert({
         type: "VipCustomer", 
         customerId: c.id,
         reason: "High Balance: $" + c.balance
@@ -58,9 +58,9 @@ end
 
 int main() {
     // Load and compile rules
-    std::string drl = read_file("my_rules.drl");
+    std::string rfl = read_file("my_rules.rfl");
     ParsingResult result;
-    auto kb = build_knowledge_base(drl, result);
+    auto kb = build_knowledge_base(rfl, result);
     
     if (!result.success) {
         for (auto& err : result.errors) {
@@ -120,7 +120,7 @@ auto customer = CUSTOMER()
 ```
 
 ### Rules = Your Business Logic
-```drl
+```rfl
 rule "Rule Name"
 when
     // Conditions - what data pattern to match?
@@ -128,7 +128,7 @@ when
 then
     // Actions - what to do when matched?
     console.log("High-value customer: " + customer.name);
-    drools.insert({type: "HighValueCustomer", id: customer.id});
+    rfl.insert({type: "HighValueCustomer", id: customer.id});
 end
 ```
 
@@ -143,25 +143,25 @@ auto results = session->execute_query("my_query"); // Query results
 ## Common Patterns
 
 ### Pattern 1: Data Validation
-```drl
+```rfl
 rule "Validate Customer"
 when
     $c: Customer(age < 18)
 then
     console.error(`Customer ${c.name} is underage: ${c.age}`);
-    drools.insert({type: "ValidationError", message: "Customer must be 18+"});
+    rfl.insert({type: "ValidationError", message: "Customer must be 18+"});
 end
 ```
 
 ### Pattern 2: Data Transformation
-```drl
+```rfl
 rule "Calculate Credit Score"
 when
     $c: Customer(balance > 0)
     not CreditScore(customerId == $c.id)
 then
     let score = Math.min(850, Math.max(300, c.balance / 100 + 600));
-    drools.insert({
+    rfl.insert({
         type: "CreditScore", 
         customerId: c.id, 
         score: score
@@ -170,7 +170,7 @@ end
 ```
 
 ### Pattern 3: Complex Conditions
-```drl
+```rfl
 rule "Loyal Customer Reward"
 when
     $c: Customer(status == "Active")
@@ -181,7 +181,7 @@ when
     eval($orders >= 5)
 then
     console.log(`${c.name} has ${orders} large orders - reward time!`);
-    drools.insert({type: "Reward", customerId: c.id, points: 1000});
+    rfl.insert({type: "Reward", customerId: c.id, points: 1000});
 end
 ```
 
@@ -203,7 +203,7 @@ cmake --build build
 ### Run Examples
 ```bash
 # Basic example
-./build/bin/drills_engine examples/basic.drl
+./build/bin/drills_engine examples/basic.rfl
 
 # Performance demo
 ./build/bin/memory_optimization_demo

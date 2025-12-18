@@ -39,7 +39,7 @@ TEST_CASE("CAPI: Knowledge Base Management", "[capi]") {
         kb = nullptr; // Clear handle after destruction
     }
 
-    SECTION("Load DRL (Placeholder - requires valid DRL)") {
+    SECTION("Load RFL (Placeholder - requires valid RFL)") {
         REQUIRE_DRILLS_OK(ruleforge_kb_create(&kb));
         const char* simple_drl = R"(
 declare Fact
@@ -53,8 +53,8 @@ rule "HelloWorld"
         // No action, just for parsing test
 end
 )";
-        // This test will pass if the DRL parser is robust enough for this simple case.
-        // Real DRL parsing requires a fully functional parser.
+        // This test will pass if the RFL parser is robust enough for this simple case.
+        // Real RFL parsing requires a fully functional parser.
         REQUIRE_DRILLS_OK(ruleforge_kb_load_drl(kb, simple_drl));
         REQUIRE_DRILLS_OK(ruleforge_kb_destroy(kb));
     }

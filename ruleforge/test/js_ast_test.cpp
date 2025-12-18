@@ -20,23 +20,23 @@ TEST_CASE("JSAstBuilder: Basic Functionality", "[js_parser]") {
     
     SECTION("Function call extraction") {
         std::string js_code = R"(
-            drools.insert({type: "Adult", name: p.name});
-            drools.retract(oldFact);
+            rfl.insert({type: "Adult", name: p.name});
+            rfl.retract(oldFact);
             console.log("test");
         )";
         
         auto calls = builder.extract_function_calls(js_code);
         
-        REQUIRE(calls.size() >= 2); // At least drools.insert and drools.retract
+        REQUIRE(calls.size() >= 2); // At least rfl.insert and rfl.retract
         
         bool found_insert = false, found_retract = false;
         for (const auto& call : calls) {
-            if (call.object_name == "drools" && call.method_name == "insert") {
+            if (call.object_name == "rfl" && call.method_name == "insert") {
                 found_insert = true;
                 CHECK_FALSE(call.arguments.empty());
-                std::cout << "Found drools.insert with args: " << call.arguments[0] << std::endl;
+                std::cout << "Found rfl.insert with args: " << call.arguments[0] << std::endl;
             }
-            if (call.object_name == "drools" && call.method_name == "retract") {
+            if (call.object_name == "rfl" && call.method_name == "retract") {
                 found_retract = true;
             }
         }
@@ -46,7 +46,7 @@ TEST_CASE("JSAstBuilder: Basic Functionality", "[js_parser]") {
     }
     
     SECTION("Variable extraction") {
-        std::string js_code = "drools.insert({type: 'Adult', name: p.name, age: p.age});";
+        std::string js_code = "rfl.insert({type: 'Adult', name: p.name, age: p.age});";
         
         auto vars = builder.extract_variables(js_code);
         
@@ -70,7 +70,7 @@ TEST_CASE("JSAstBuilder: Basic Functionality", "[js_parser]") {
     }
     
     SECTION("Full AST parsing") {
-        std::string js_code = "drools.insert({type: 'Adult', name: p.name});";
+        std::string js_code = "rfl.insert({type: 'Adult', name: p.name});";
         
         auto ast = builder.parse(js_code);
         

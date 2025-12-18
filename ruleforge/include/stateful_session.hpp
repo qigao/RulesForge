@@ -4,7 +4,7 @@
 
 #include <quickjs.h>
 
-#include "drools_rete_defs.hpp"
+#include "rfl_rete_defs.hpp"
 #include "i_engine_listener.hpp"
 #include "i_network_callback.hpp"
 #include "knowledge_base.hpp"
@@ -12,6 +12,7 @@
 #include "phmap.h"
 #include "query_result.hpp"
 #include "rule_execution_tracer.hpp"
+#include "schema_validator.hpp"
 #include "session_arena.hpp"
 
 // Forward declarations
@@ -113,7 +114,7 @@ public:
   /**
    * @brief Insert a fact into a named entry point stream.
    * Facts inserted via this method will only match patterns that specify
-   * `from entry-point "stream_name"` in their DRL definition.
+   * `from entry-point "stream_name"` in their RFL definition.
    * @param stream_name The name of the entry point stream
    * @param fact The fact to insert
    */
@@ -127,7 +128,7 @@ public:
   /**
    * @brief Immediately stop rule execution.
    *
-   * P1 FIX: Implement drools.halt() functionality.
+   * P1 FIX: Implement rfl.halt() functionality.
    * When called, fire_all_rules() will stop after the current rule completes.
    * The halt flag is automatically reset at the start of fire_all_rules().
    */
@@ -171,6 +172,18 @@ public:
   size_t get_fact_count() const;
   int64_t get_next_fact_id();
   JSContext* get_js_context();
+
+  /**
+   * @brief PROD-002: Set validation mode for fact insertion
+   * @param mode ValidationMode::None (default), Warn, or Strict
+   */
+  void set_validation_mode(ValidationMode mode) { validation_mode_ = mode; }
+  ValidationMode get_validation_mode() const { return validation_mode_; }
+
+  /**
+   * @brief PROD-002: Check if a fact type has a declaration
+   */
+  bool has_type_declaration(std::string const& type_name) const;
 
   // Rule execution tracing
   RuleExecutionTracer& get_tracer() { return tracer_; }
@@ -320,7 +333,7 @@ private:
   std::priority_queue<std::pair<int, size_t>> agenda_queue_;
   std::vector<std::shared_ptr<IEngineListener>> listeners_;
   unordered_set<size_t> no_loop_blocked_;  // Blocked activations for no-loop rules
-  bool halt_requested_ = false;  // P1 FIX: drools.halt() support
+  bool halt_requested_ = false;  // P1 FIX: rfl.halt() support
 
   // P1 FIX: activation-group support - maps group name to activation hashes
   map<std::string, unordered_set<size_t>> activation_group_map_;
@@ -340,6 +353,10 @@ private:
   bool in_rhs_transaction_ = false;
   bool is_consistent_ = true;
   std::vector<int64_t> transaction_inserted_facts_;  // Facts to retract on rollback
+
+  // PROD-002: Schema validation
+  ValidationMode validation_mode_ = ValidationMode::None;
+  std::unique_ptr<SchemaValidator> schema_validator_;
 
   // P1-002 FIX: Metrics counters for monitoring
   mutable int64_t rules_fired_total_ = 0;

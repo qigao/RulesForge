@@ -1,5 +1,5 @@
 #include "catch2/catch_test_macros.hpp"
-#include "drools_parser.hpp"
+#include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "stateful_session.hpp"
 
@@ -33,7 +33,7 @@ struct ForallTestFixture {
                     Order(isShipped == true)
                 )
             then
-                drools.insert({type: "FullyShippedCustomer", id: $id});
+                rfl.insert({type: "FullyShippedCustomer", id: $id});
             end
         )";
 
@@ -59,7 +59,7 @@ struct ForallTestFixture {
         auto o = std::make_shared<Fact>();
         o->type = "Order";
         o->fields["customerId"] = (int64_t)custId;
-        // DRL 'true'/'false' is represented as int64_t 1/0
+        // RFL 'true'/'false' is represented as int64_t 1/0
         o->fields["isShipped"] = (int64_t)(shipped ? 1 : 0);
         return o;
     }

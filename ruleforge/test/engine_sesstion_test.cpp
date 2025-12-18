@@ -1,5 +1,5 @@
 #include "catch2/catch_all.hpp"
-#include "drools_parser.hpp"
+#include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "stateful_session.hpp"
 
@@ -36,7 +36,7 @@ TEST_CASE_METHOD(TestFixture, "Engine: Simple Rule Fire", "[engine]") {
         when
             $p : Person(age >= 18)
         then
-            drools.insert({type: "Adult", name: $p.name});
+            rfl.insert({type: "Adult", name: $p.name});
         end
     )");
 
@@ -72,7 +72,7 @@ static std::shared_ptr<KnowledgeBase> create_test_kb() {
         when
             $p : Person(age >= 18)
         then
-            drools.insert({type: "Adult", name: $p.name});
+            rfl.insert({type: "Adult", name: $p.name});
         end
 
         query "findAdults"(NameParam $param)

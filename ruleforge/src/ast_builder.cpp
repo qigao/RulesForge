@@ -8,7 +8,7 @@
 #include <tao/pegtl/contrib/parse_tree.hpp>
 #include <tao/pegtl/string_input.hpp>
 
-#include "drools_parser_state.hpp"
+#include "rfl_parser_state.hpp"
 #include "fmtlog.h"
 
 namespace
@@ -413,7 +413,7 @@ std::string AstBuilder::build_modify_statement(pegtl::parse_tree::node const& n)
     return "";
   }
   std::stringstream ss;
-  ss << "drools.update(" << target_node->string() << ", {";
+  ss << "rfl.update(" << target_node->string() << ", {";
   bool first = true;
   for (auto const& setter_ptr : body_node->children) {
     if (!setter_ptr->is_type<grammar::modify_setter>()) {
@@ -439,7 +439,7 @@ std::string AstBuilder::build_modify_statement(pegtl::parse_tree::node const& n)
       if (!first) {
         ss << ", ";
       }
-      ss << field_name << " = " << args_content;
+      ss << field_name << ": " << args_content;
       first = false;
     }
   }
@@ -530,15 +530,25 @@ ParsedPattern AstBuilder::build_pattern(pegtl::parse_tree::node const& n)
         pattern.forall_info->patterns.push_back(build_pattern(*nested_node));
       }
     }
-  } else if (auto const* eval_body =
-                 find_descendant<grammar::eval_pattern_body>(n))
+  } else if (auto const* query_body =
+                 find_descendant<grammar::query_call_pattern_body>(n))
   {
-    pattern.type = PatternType::EVAL;
-    if (auto const* expr_node =
-            find_descendant<grammar::eval_expression>(*eval_body))
+    pattern.type = PatternType::QUERY_CALL;
+    ParsedQueryCall call;
+    if (auto const* name_node =
+            find_descendant<grammar::query_call_name>(*query_body))
     {
-      pattern.eval_expression = expr_node->string();
+      std::string name = name_node->string();
+      if (name.size() >= 2 && name.front() == '"' && name.back() == '"') {
+        name = name.substr(1, name.size() - 2);
+      }
+      call.query_name = name;
     }
+    auto args = find_all_descendants<grammar::query_call_arg>(*query_body);
+    for (auto const* arg_node : args) {
+      call.arguments.push_back(arg_node->string());
+    }
+    pattern.source = std::move(call);
   } else if (auto const* body =
                  find_descendant<grammar::standard_pattern_body>(n))
   {

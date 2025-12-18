@@ -5,7 +5,7 @@
 ## 目录
 
 1.  [**核心概念**](#1-核心概念)
-2.  [**DRL 语言参考**](#2-drl-语言参考)
+2.  [**RFL 语言参考**](#2-rfl-语言参考)
 3.  [**JavaScript 集成**](#3-javascript-集成)
 4.  [**高级模式**](#4-高级模式)
 5.  [**性能指南**](#5-性能指南)
@@ -25,7 +25,7 @@ Drills 实现了 **Rete 算法**，这是一种强大的模式匹配技术，具
 -   ✅ **冲突解决** - 智能处理多个规则匹配
 -   ✅ **真值维护** - 当前提条件改变时自动撤销派生事实
 
-```drl
+```rfl
 rule "价格警报"
 when
     $product: Product(price < 100)
@@ -33,7 +33,7 @@ when
 then
     // 仅当两个条件都满足时才触发
     // 如果价格超过 100，则自动撤销警报
-    drools.insert({
+    rfl.insert({
         type: "PriceAlert",
         userId: user.id,
         productId: product.id
@@ -45,7 +45,7 @@ end
 
 ```cpp
 // 知识库 = 不可变编译规则 (线程安全)
-auto kb = build_knowledge_base(drl_source, result);
+auto kb = build_knowledge_base(rfl_source, result);
 
 // 会话 = 可变工作内存 (每个线程一个)
 auto session1 = kb->create_session(); // 线程 1
@@ -61,7 +61,7 @@ session2->add_fact(customer2); // 独立数据
 理解数据如何在 Drills 引擎中流动至关重要。这是一个 **事实**（您的输入数据）与 **规则**（您定义的逻辑）在引擎的 **工作内存** 中持续交互的循环。
 
 1.  **规则被摄取到知识库中：**
-    *   您的规则，无论是通过 DRL 文件、决策表（如 CSV）还是其他格式定义，首先被解析并编译成优化的内部表示，主要是 Rete 网络。
+    *   您的规则，无论是通过 RFL 文件、决策表（如 CSV）还是其他格式定义，首先被解析并编译成优化的内部表示，主要是 Rete 网络。
     *   这个编译后的规则集存储在 `KnowledgeBase` 中。`KnowledgeBase` 是不可变的且线程安全的，充当您业务逻辑的蓝图。
 
 2.  **事实被插入到工作内存中：**
@@ -86,13 +86,13 @@ session2->add_fact(customer2); // 独立数据
 
 ---
 
-## 2. DRL 语言参考
+## 2. RFL 语言参考
 
 ### 2.1 文件结构
 
-每个 DRL 文件都遵循以下结构：
+每个 RFL 文件都遵循以下结构：
 
-```drl
+```rfl
 package com.example.business.rules
 
 import com.example.model.Customer
@@ -130,7 +130,7 @@ rule "业务规则 2"
 
 定义您的数据模式：
 
-```drl
+```rfl
 declare Customer
     id: int                    // 必填字段
     name: String              // 字符串类型
@@ -158,7 +158,7 @@ end
 
 ### 2.3 规则语法
 
-```drl
+```rfl
 rule "规则名称"
     salience 10              // 优先级 (越高越早)
     agenda-group "validation" // 规则组
@@ -180,7 +180,7 @@ then
         // 右侧 (RHS) - JavaScript 动作
         console.log(`处理客户: ${customer.name}`);
 
-        drools.insert({
+        rfl.insert({
             type: "VipStatus",
             customerId: customer.id,
             level: "Gold",
@@ -204,12 +204,12 @@ end
 ### 2.5 模式匹配
 
 #### 基本模式
-```drl
+```rfl
 $customer: Customer(balance > 1000)
 ```
 
 #### 多个约束
-```drl
+```rfl
 $order: Order(
     amount > 100,
     status == "Completed",
@@ -218,12 +218,12 @@ $order: Order(
 ```
 
 #### 嵌套字段访问
-```drl
+```rfl
 $user: User(profile.preferences.newsletter == true)
 ```
 
 #### 变量绑定
-```drl
+```rfl
 $customer: Customer($customerId: id, balance > 1000)
 $orders: Order(customerId == $customerId)
 ```
@@ -231,7 +231,7 @@ $orders: Order(customerId == $customerId)
 ### 2.6 高级模式
 
 #### Accumulate - 数据聚合
-```drl
+```rfl
 rule "高价值客户"
 when
     $customer: Customer()
@@ -253,7 +253,7 @@ end
 - `average($field)` - 平均值
 
 #### Collect - 收集事实
-```drl
+```rfl
 rule "捆绑订单"
 when
     $customer: Customer()
@@ -268,7 +268,7 @@ end
 ```
 
 #### Forall - 全称量词
-```drl
+```rfl
 rule "所有订单已完成"
 when
     $customer: Customer()
@@ -285,7 +285,7 @@ end
 
 用于数据检索的参数化查询：
 
-```drl
+```rfl
 query "按状态查询客户"(String requiredStatus)
     $customer: Customer(status == requiredStatus)
 end
@@ -324,19 +324,19 @@ for (auto& row : activeCustomers) {
 
 ### 3.1 可用 API
 
-#### drools 对象
+#### rfl 对象
 ```javascript
 // 事实操作
-drools.insert({type: "NewFact", field: "value"});
-drools.retract(existingFact);
-drools.update(existingFact, {field: "newValue"});
+rfl.insert({type: "NewFact", field: "value"});
+rfl.retract(existingFact);
+rfl.update(existingFact, {field: "newValue"});
 
 // 逻辑断言 (当规则不再匹配时自动撤销)
-drools.insertLogical({type: "DerivedFact", source: customer.id});
+rfl.insertLogical({type: "DerivedFact", source: customer.id});
 
 // 工作内存查询
-let facts = drools.getFactsOfType("Customer");
-let fact = drools.getFactById(123);
+let facts = rfl.getFactsOfType("Customer");
+let fact = rfl.getFactById(123);
 ```
 
 #### 控制台日志
@@ -364,15 +364,15 @@ let config = JSON.parse(customer.preferences);
 
 ### 3.2 变量绑定
 
-DRL 变量变为 JavaScript 对象：
+RFL 变量变为 JavaScript 对象：
 
-```drl
+```rfl
 rule "示例"
 when
     $customer: Customer($name: name, $balance: balance)
     $order: Order(customerId == $customer.id, $amount: amount)
 then
-    // DRL $customer 变为 JS customer
+    // RFL $customer 变为 JS customer
     console.log(`客户: ${customer.name}`);
 
     // 字段绑定变为 JS 变量
@@ -388,7 +388,7 @@ end
 
 ### 3.3 复杂 JavaScript 动作
 
-```drl
+```rfl
 rule "复杂业务逻辑"
 when
     $customer: Customer()
@@ -403,7 +403,7 @@ then
 
         // 检查模式
         if (order.category === "Premium" && order.amount > 1000) {
-            drools.insert({
+            rfl.insert({
                 type: "PremiumPurchase",
                 customerId: customer.id,
                 orderId: order.id,
@@ -418,7 +418,7 @@ then
     else if (totalAmount > 5000) tier = "Silver";
 
     // 更新客户
-    drools.update(customer, {
+    rfl.update(customer, {
         totalSpent: totalAmount,
         orderCount: orderCount,
         tier: tier,
@@ -427,7 +427,7 @@ then
 
     // 发送通知
     if (tier !== customer.tier) {
-        drools.insert({
+        rfl.insert({
             type: "TierChangeNotification",
             customerId: customer.id,
             oldTier: customer.tier,
@@ -445,7 +445,7 @@ end
 
 建模复杂工作流：
 
-```drl
+```rfl
 declare ProcessState
     processId: String
     currentState: String
@@ -457,14 +457,14 @@ when
     $request: ProcessRequest(status == "NEW")
     not ProcessState(processId == $request.id)
 then
-    drools.insert({
+    rfl.insert({
         type: "ProcessState",
         processId: request.id,
         currentState: "VALIDATION",
         data: {startTime: Date.now()}
     });
 
-    drools.update(request, {status: "PROCESSING"});
+    rfl.update(request, {status: "PROCESSING"});
 end
 
 rule "验证完成"
@@ -472,7 +472,7 @@ when
     $state: ProcessState(currentState == "VALIDATION")
     $validation: ValidationResult(processId == $state.processId, valid == true)
 then
-    drools.update(state, {
+    rfl.update(state, {
         currentState: "APPROVAL",
         data: {...state.data, validatedAt: Date.now()}
     });
@@ -483,7 +483,7 @@ when
     $state: ProcessState(currentState == "APPROVAL")
     $approval: ApprovalResult(processId == $state.processId, approved == true)
 then
-    drools.update(state, {
+    rfl.update(state, {
         currentState: "COMPLETE",
         data: {...state.data, completedAt: Date.now()}
     });
@@ -494,7 +494,7 @@ end
 
 跟踪跨时间模式：
 
-```drl
+```rfl
 declare LoginEvent
     userId: int
     timestamp: long
@@ -520,7 +520,7 @@ when
     eval($failedLogins >= 5)
     not SuspiciousActivity(userId == $user.id)
 then
-    drools.insert({
+    rfl.insert({
         type: "SuspiciousActivity",
         userId: user.id,
         reason: `${failedLogins} 次登录失败，在 5 分钟内`
@@ -545,7 +545,7 @@ then
     let country2 = geoLookup(login2.ipAddress);
 
     if (country1 !== country2) {
-        drools.insert({
+        rfl.insert({
             type: "SuspiciousActivity",
             userId: user.id,
             reason: "1 小时内来自 ${country1} 和 ${country2} 的登录"
@@ -556,7 +556,7 @@ end
 
 ### 4.3 数据验证框架
 
-```drl
+```rfl
 declare ValidationError
     entityType: String
     entityId: int
@@ -570,7 +570,7 @@ when
     $customer: Customer($email: email)
     eval($email === null || $email === "" || !$email.includes("@"))
 then
-    drools.insert({
+    rfl.insert({
         type: "ValidationError",
         entityType: "Customer",
         entityId: customer.id,
@@ -584,7 +584,7 @@ rule "验证客户年龄"
 when
     $customer: Customer(age < 18)
 then
-    drools.insert({
+    rfl.insert({
         type: "ValidationError",
         entityType: "Customer",
         entityId: customer.id,
@@ -603,7 +603,7 @@ when
     )
     eval(Math.abs($balance - $totalOrders) > 0.01) // 考虑四舍五入
 then
-    drools.insert({
+    rfl.insert({
         type: "ValidationError",
         entityType: "Customer",
         entityId: customer.id,
@@ -621,7 +621,7 @@ end
 ### 5.1 规则设计最佳实践
 
 #### ✅ 优先放置选择性约束
-```drl
+```rfl
 // 好 - 最具选择性的约束优先
 when
     $customer: Customer(tier == "VIP", status == "Active")
@@ -632,7 +632,7 @@ when
 ```
 
 #### ✅ 使用适当的优先级
-```drl
+```rfl
 rule "数据验证"
     salience 1000  // 优先运行
 when
@@ -651,7 +651,7 @@ end
 ```
 
 #### ✅ 最小化 `eval()` 使用
-```drl
+```rfl
 // 好 - 本机约束
 when
     $customer: Customer(balance > 1000, age >= 21)
@@ -741,7 +741,7 @@ for (auto& [rule_name, stats] : summary) {
 ### 6.1 常见问题
 
 #### 规则未触发
-```drl
+```rfl
 rule "调试规则"
 when
     $customer: Customer(balance > 1000)
@@ -763,10 +763,10 @@ end
 then
     try {
         let result = complexCalculation(customer.data);
-        drools.insert({type: "Result", value: result});
+        rfl.insert({type: "Result", value: result});
     } catch (error) {
         console.error("计算失败: " + error.message);
-        drools.insert({
+        rfl.insert({
             type: "ProcessingError",
             entityId: customer.id,
             error: error.message

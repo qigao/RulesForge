@@ -1,4 +1,4 @@
-#include "drools_parser.hpp"
+#include "rfl_parser.hpp"
 #include "errors.hpp"
 #include "knowledge_base.hpp"
 
@@ -81,7 +81,7 @@ public:
   Application(int argc, char *argv[]) { parse_arguments(argc, argv); }
 
   int run() {
-    std::cout << "--- Analyzing DRL file: " << m_options.filepath << " ---\n\n";
+    std::cout << "--- Analyzing RFL file: " << m_options.filepath << " ---\n\n";
     auto start = std::chrono::high_resolution_clock::now();
 
     ParsingResult result;

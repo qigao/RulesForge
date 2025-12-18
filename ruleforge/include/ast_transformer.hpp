@@ -1,7 +1,7 @@
 #ifndef AST_TRANSFORMER_HPP
 #define AST_TRANSFORMER_HPP
 
-#include "drools_parser_state.hpp"
+#include "rfl_parser_state.hpp"
 
 /**
  * @class AstTransformer

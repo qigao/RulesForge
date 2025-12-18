@@ -1,10 +1,10 @@
 #include "catch2/catch_all.hpp"
-#include "drools_parser.hpp"
+#include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 
 ParsingResult parse_drl(std::string const& drl) {
     ParsingResult result;
-    build_knowledge_base(drl, result, "string.drl");
+    build_knowledge_base(drl, result, "string.rfl");
     return result;
 }
 
@@ -25,7 +25,7 @@ TEST_CASE("Parser: Basic Rule Parsing", "[parser]") {
         when
             $p : Person(age > 30)
         then
-            drools.insert({type: "Adult"});
+            rfl.insert({type: "Adult"});
         end
     )";
     auto state = parse_drl_success(drl);
@@ -172,7 +172,7 @@ TEST_CASE("Parser: Parameterized Query", "[parser]") {
 }
 
 TEST_CASE("Parser: Native Temporal Operators 'after' and 'within'", "[parser][cep]") {
-    // This DRL uses the exact syntax we want to support.
+    // This RFL uses the exact syntax we want to support.
     std::string drl = R"(
         declare LoginEvent timestamp: long end
 

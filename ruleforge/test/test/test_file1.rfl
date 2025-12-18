@@ -1,0 +1,16 @@
+package test.multi
+
+declare FactA
+    value: String
+end
+
+rule "Rule A"
+when
+    $a : FactA()
+then
+    console.log("Rule A fired with " + $a.value);
+end
+
+query "GetFactA"(String $val)
+    $a : FactA(value == $val)
+end

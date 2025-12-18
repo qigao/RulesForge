@@ -1,0 +1,33 @@
+// common/types.rfl - Shared type declarations for e-commerce rules
+package ecommerce.common
+
+// Customer information
+declare Customer
+    id: int
+    name: String
+    email: String
+    tier: String
+end
+
+// Order information
+declare Order
+    id: int
+    customerId: int
+    itemCount: int
+    subtotal: double
+end
+
+// Validation result
+declare ValidationResult
+    orderId: int
+    valid: boolean
+    message: String
+end
+
+// Pricing calculation result
+declare PricingResult
+    orderId: int
+    subtotal: double
+    discount: double
+    finalPrice: double
+end

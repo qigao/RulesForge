@@ -115,10 +115,10 @@ void print_field_value(ruleforge_fact_t fact, const std::string &field_name) {
 }
 
 int main(int argc, char *argv[]) {
-  cxxopts::Options options("capi_demo", "RuleForge C API Demo - Load DRL rules and JSON facts");
+  cxxopts::Options options("capi_demo", "RuleForge C API Demo - Load RFL rules and JSON facts");
   // clang-format off
   options.add_options()
-      ("d,drl", "DRL rules file path", cxxopts::value<std::string>())
+      ("r,rfl", "RFL rules file path", cxxopts::value<std::string>())
       ("j,json", "JSON facts file path", cxxopts::value<std::string>())
       ("m,map", "Map JSON array to fact type (format: array:com.package.Type). Can be repeated.",
                                                 cxxopts::value<std::vector<std::string>>())
@@ -130,26 +130,26 @@ int main(int argc, char *argv[]) {
       ("v,verbose", "Enable verbose output", cxxopts::value<bool>()->default_value("false"))
       ("h,help",  "Print usage");
   // clang-format on
-  options.parse_positional({"drl", "json"});
-  options.positional_help("<drl-file> [json-file]");
+  options.parse_positional({"rfl", "json"});
+  options.positional_help("<rfl-file> [json-file]");
 
   try {
     auto result = options.parse(argc, argv);
 
-    if (result.count("help") || !result.count("drl")) {
+    if (result.count("help") || !result.count("rfl")) {
       std::cout << options.help() << std::endl;
       std::cout << "\nExamples:" << std::endl;
       std::cout << "  # Single fact type with auto-detect array" << std::endl;
-      std::cout << "  capi_demo -d rules.drl -j data.json -t com.example.Order -q AllOrders"
+      std::cout << "  capi_demo -d rules.rfl -j data.json -t com.example.Order -q AllOrders"
                 << std::endl;
       std::cout << std::endl;
       std::cout << "  # Multiple fact types with explicit mappings" << std::endl;
-      std::cout << "  capi_demo -d rules.drl -j data.json \\" << std::endl;
+      std::cout << "  capi_demo -d rules.rfl -j data.json \\" << std::endl;
       std::cout << "    -m orders:com.shop.Order \\" << std::endl;
       std::cout << "    -m customers:com.shop.Customer" << std::endl;
       std::cout << std::endl;
       std::cout << "  # Run loan eligibility example" << std::endl;
-      std::cout << "  capi_demo -d loan-eligibility.drl -j loan-applications-sample.json \\"
+      std::cout << "  capi_demo -d loan-eligibility.rfl -j loan-applications-sample.json \\"
                 << std::endl;
       std::cout << "    -m applications:com.bank.loan.LoanApplication \\" << std::endl;
       std::cout << "    -q LoanDecisions -b decision \\" << std::endl;
@@ -157,7 +157,7 @@ int main(int argc, char *argv[]) {
       return result.count("help") ? 0 : 1;
     }
 
-    std::string drl_path = result["drl"].as<std::string>();
+    std::string drl_path = result["rfl"].as<std::string>();
     bool verbose = result["verbose"].as<bool>();
 
     // Initialize RuleForge
@@ -166,7 +166,7 @@ int main(int argc, char *argv[]) {
     std::cout << "=== RuleForge C API Demo ===" << std::endl;
     std::cout << "Version: " << ruleforge_get_version() << std::endl << std::endl;
 
-    // Read and compile DRL
+    // Read and compile RFL
     std::string drl_content = read_file(drl_path);
     if (verbose) {
       std::cout << "Loaded rules from: " << drl_path << std::endl;
@@ -177,7 +177,7 @@ int main(int argc, char *argv[]) {
       return 1;
     }
 
-    if (!check_result(ruleforge_kb_load_drl(kb, drl_content.c_str()), "Load DRL rules")) {
+    if (!check_result(ruleforge_kb_load_drl(kb, drl_content.c_str()), "Load RFL rules")) {
       ruleforge_kb_destroy(kb);
       return 1;
     }

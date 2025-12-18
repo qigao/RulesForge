@@ -1,7 +1,7 @@
 #ifndef BETA_BUILDER_HPP
 #define BETA_BUILDER_HPP
 
-#include "drools_rete_defs.hpp"
+#include "rfl_rete_defs.hpp"
 
 #include <map>
 #include <memory>

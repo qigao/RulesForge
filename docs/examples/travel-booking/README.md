@@ -149,7 +149,7 @@ BookingDecision (derived)
 
 ```bash
 capi_demo \
-  -d docs/examples/travel-booking/travel-booking.drl \
+  -d docs/examples/travel-booking/travel-booking.rfl \
   -j docs/examples/travel-booking/travel-test-data.json \
   -m visaRequirements:com.travel.VisaRequirement \
   -m flightOptions:com.travel.FlightOption \
@@ -166,7 +166,7 @@ capi_demo \
 
 int main() {
     ParseResult result;
-    auto kb = build_knowledge_base_from_file("travel-booking.drl", result);
+    auto kb = build_knowledge_base_from_file("travel-booking.rfl", result);
     auto session = kb->create_session();
 
     // Load visa requirements

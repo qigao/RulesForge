@@ -1,7 +1,7 @@
 #ifndef QUERY_RESULT_HPP
 #define QUERY_RESULT_HPP
 
-#include "drools_rete_defs.hpp"
+#include "rfl_rete_defs.hpp"
 #include "knowledge_base.hpp"
 
 #include <memory>
@@ -81,6 +81,7 @@ private:
  * @class QueryResult
  * @brief A container for the results of a query execution.
  *
+ * PROD-003: This class now includes success/error status for consistent error handling.
  * This class provides a safe and ergonomic way to access the rows and
  * facts returned by a query. It supports iteration and convenience methods
  * for common access patterns.
@@ -89,7 +90,22 @@ class QueryResult {
 public:
     // The query result now needs a reference to the KB to perform type conversions
     QueryResult(std::vector<map<std::string, std::shared_ptr<Fact>>> data,
-                std::shared_ptr<KnowledgeBase const> kb) : data_(std::move(data)), kb_(std::move(kb)) {}
+                std::shared_ptr<KnowledgeBase const> kb)
+        : data_(std::move(data)), kb_(std::move(kb)), success_(true) {}
+
+    // PROD-003: Constructor for error case
+    static QueryResult error(std::string error_message) {
+        QueryResult result;
+        result.success_ = false;
+        result.error_message_ = std::move(error_message);
+        return result;
+    }
+
+    /// @brief PROD-003: Check if the query executed successfully
+    bool success() const { return success_; }
+
+    /// @brief PROD-003: Get error message if query failed
+    std::string const& error_message() const { return error_message_; }
 
     /// @brief Returns the number of rows in the result set.
     size_t size() const { return data_.size(); }
@@ -132,8 +148,13 @@ public:
     auto end() const { return QueryResultIterator(data_.cend(), kb_); }
 
 private:
+    // PROD-003: Default constructor for error() factory
+    QueryResult() : success_(false) {}
+
     std::vector<map<std::string, std::shared_ptr<Fact>>> data_;
     std::shared_ptr<KnowledgeBase const> kb_;
+    bool success_ = true;
+    std::string error_message_;
 };
 
 // --- Template and Iterator Implementations ---

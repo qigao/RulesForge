@@ -1,7 +1,7 @@
 #include "knowledge_base.hpp"
 #include "fmtlog.h"
 
-#include "drools_accumulators.hpp"
+#include "rfl_accumulators.hpp"
 #include "rete/beta_builder.hpp"
 #include "stateful_session.hpp"
 

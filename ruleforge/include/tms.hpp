@@ -1,7 +1,7 @@
 #ifndef TMS_HPP
 #define TMS_HPP
 
-#include "drools_rete_defs.hpp"
+#include "rfl_rete_defs.hpp"
 #include "i_network_callback.hpp"
 
 #include <algorithm>

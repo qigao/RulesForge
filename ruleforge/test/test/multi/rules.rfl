@@ -1,0 +1,26 @@
+package test.multi
+
+// Import shared declarations from common.rfl
+import test.multi.common
+
+rule "Rule A"
+when
+    $a : FactA()
+then
+    console.log("Rule A fired with " + $a.value);
+end
+
+rule "Rule B"
+when
+    $b : FactB()
+then
+    console.log("Rule B fired with " + $b.value);
+end
+
+rule "Cross Reference"
+when
+    $a : FactA()
+    $b : FactB()
+then
+    console.log("Both FactA and FactB present");
+end

@@ -9,7 +9,7 @@
 #include <tao/pegtl.hpp>
 #include <tao/pegtl/position.hpp>
 
-#include "drools_rete_defs.hpp"
+#include "rfl_rete_defs.hpp"
 #include "js_semantic_analyzer.hpp"
 #include "fmtlog.h"
 namespace pegtl = tao::pegtl;

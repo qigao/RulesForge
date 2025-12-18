@@ -30,7 +30,7 @@ Securing your rule engine deployment involves protecting rule sources, fact data
 ### 2.1 Rule Source Integrity
 
 *   **Trusted Sources:** Only load rules from trusted and verified sources. Malicious rules can execute arbitrary JavaScript code in rule actions.
-*   **Access Control:** Implement strict access control to your rule definition files (DRL, CSV for decision tables).
+*   **Access Control:** Implement strict access control to your rule definition files (RFL, CSV for decision tables).
 *   **Version Control:** Store rule definitions in a version control system (e.g., Git) to track changes and enable rollbacks.
 
 ### 2.2 Fact Data Sensitivity

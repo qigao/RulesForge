@@ -44,3 +44,4 @@ set_target_properties(${TARGET_NAME} PROPERTIES LINKER_LANGUAGE CXX)
 # Tests
 add_subdirectory(test)
 add_subdirectory(example)
+add_subdirectory(benchmark)

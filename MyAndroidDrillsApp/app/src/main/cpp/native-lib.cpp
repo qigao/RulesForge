@@ -42,7 +42,7 @@ Java_com_example_drillsandroidapp_DrillsEngine_loadRules(JNIEnv* env, jobject /*
 
     const char* rulesCStr = env->GetStringUTFChars(drlRules, nullptr);
     if (rulesCStr == nullptr) {
-        LOGE("Failed to get DRL rules string.");
+        LOGE("Failed to get RFL rules string.");
         return env->NewStringUTF("Error: Invalid rules string");
     }
 

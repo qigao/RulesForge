@@ -1,8 +1,8 @@
 #include "catch2/catch_all.hpp"
-#include "drools_parser.hpp"
+#include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "stateful_session.hpp"
-#include "drools_js_manager.hpp"
+#include "rfl_js_manager.hpp"
 
 std::unique_ptr<StatefulSession> build_session(std::string const& drl) {
     ParsingResult result;

@@ -138,7 +138,7 @@ OrderStatus (derived)
 
 ```bash
 capi_demo \
-  -d docs/examples/order-fulfillment/order-fulfillment.drl \
+  -d docs/examples/order-fulfillment/order-fulfillment.rfl \
   -j docs/examples/order-fulfillment/order-test-data.json \
   -m warehouses:com.ecommerce.Warehouse \
   -m inventory:com.ecommerce.Inventory \
@@ -155,7 +155,7 @@ capi_demo \
 
 int main() {
     ParseResult result;
-    auto kb = build_knowledge_base_from_file("order-fulfillment.drl", result);
+    auto kb = build_knowledge_base_from_file("order-fulfillment.rfl", result);
     auto session = kb->create_session();
 
     // Load warehouse data

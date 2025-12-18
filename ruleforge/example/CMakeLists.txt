@@ -15,5 +15,5 @@ foreach(example_source ${SOURCES})
     )
 
 endforeach()
-configure_file(valid_rules.drl ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/valid_rules.drl COPYONLY)
-configure_file(invalid_rules.drl ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/invalid_rules.drl COPYONLY)
+configure_file(valid_rules.rfl ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/valid_rules.rfl COPYONLY)
+configure_file(invalid_rules.rfl ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/invalid_rules.rfl COPYONLY)

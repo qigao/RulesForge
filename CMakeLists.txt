@@ -46,7 +46,6 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Add subdirectories
 add_subdirectory(vendor)
-# add_subdirectory(parser)
 add_subdirectory(shared)
 add_subdirectory(ruleforge)
 add_subdirectory(capi)

@@ -96,7 +96,7 @@ var totalAmount = jmespath(ordersData, 'orders[*].amount | sum(@)'); // 结果: 
 
 ### 规则中的使用
 
-```drl
+```rfl
 declare TestFact
     name: String
     payload: String

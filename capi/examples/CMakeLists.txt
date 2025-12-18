@@ -7,4 +7,4 @@ target_link_libraries(capi_demo PRIVATE rule_forge cxxopts::cxxopts jsoncons)
 set_target_properties(capi_demo PROPERTIES FOLDER capi/examples)
 
 # Copy sample files to output directory
-configure_file(payments.drl ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/payments.drl COPYONLY)
+configure_file(payments.rfl ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/payments.rfl COPYONLY)

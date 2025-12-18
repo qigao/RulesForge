@@ -1,6 +1,6 @@
 #include "tms.hpp"
 
-#include "drools_rete_defs.hpp"
+#include "rfl_rete_defs.hpp"
 
 #include <iostream>
 

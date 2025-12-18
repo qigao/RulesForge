@@ -1,0 +1,104 @@
+// pricing-rules.rfl - Order pricing rules
+package ecommerce.pricing
+
+import ecommerce.common.types
+
+rule "Calculate Base Price - Bronze Tier"
+salience 10
+when
+    $c : Customer(tier == "Bronze")
+    $o : Order(customerId == $c.id)
+    $v : ValidationResult(orderId == $o.id, valid == true)
+    not PricingResult(orderId == $o.id)
+then
+    var discount = o.subtotal * 0.05;
+    console.log("Bronze tier discount: " + discount);
+    rfl.insert({
+        type: "ecommerce.PricingResult",
+        orderId: o.id,
+        subtotal: o.subtotal,
+        discount: discount,
+        finalPrice: o.subtotal - discount
+    });
+end
+
+rule "Calculate Base Price - Silver Tier"
+salience 10
+when
+    $c : Customer(tier == "Silver")
+    $o : Order(customerId == $c.id)
+    $v : ValidationResult(orderId == $o.id, valid == true)
+    not PricingResult(orderId == $o.id)
+then
+    var discount = o.subtotal * 0.10;
+    console.log("Silver tier discount: " + discount);
+    rfl.insert({
+        type: "ecommerce.PricingResult",
+        orderId: o.id,
+        subtotal: o.subtotal,
+        discount: discount,
+        finalPrice: o.subtotal - discount
+    });
+end
+
+rule "Calculate Base Price - Gold Tier"
+salience 10
+when
+    $c : Customer(tier == "Gold")
+    $o : Order(customerId == $c.id)
+    $v : ValidationResult(orderId == $o.id, valid == true)
+    not PricingResult(orderId == $o.id)
+then
+    var discount = o.subtotal * 0.15;
+    console.log("Gold tier discount: " + discount);
+    rfl.insert({
+        type: "ecommerce.PricingResult",
+        orderId: o.id,
+        subtotal: o.subtotal,
+        discount: discount,
+        finalPrice: o.subtotal - discount
+    });
+end
+
+rule "Calculate Base Price - Platinum Tier"
+salience 10
+when
+    $c : Customer(tier == "Platinum")
+    $o : Order(customerId == $c.id)
+    $v : ValidationResult(orderId == $o.id, valid == true)
+    not PricingResult(orderId == $o.id)
+then
+    var discount = o.subtotal * 0.20;
+    console.log("Platinum tier discount: " + discount);
+    rfl.insert({
+        type: "ecommerce.PricingResult",
+        orderId: o.id,
+        subtotal: o.subtotal,
+        discount: discount,
+        finalPrice: o.subtotal - discount
+    });
+end
+
+rule "Volume Discount - Large Order"
+salience 5
+when
+    $o : Order(itemCount >= 10)
+    $p : PricingResult(orderId == $o.id)
+then
+    var extraDiscount = p.subtotal * 0.05;
+    var newDiscount = p.discount + extraDiscount;
+    console.log("Volume discount applied: " + extraDiscount);
+    rfl.update(p, {
+        discount: newDiscount,
+        finalPrice: p.subtotal - newDiscount
+    });
+end
+
+rule "Print Final Price"
+salience 1
+when
+    $o : Order()
+    $p : PricingResult(orderId == $o.id)
+then
+    console.log("Order " + o.id + " final price: $" + p.finalPrice + " (saved $" + p.discount + ")");
+end

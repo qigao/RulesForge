@@ -1,5 +1,5 @@
 #include "catch2/catch_all.hpp"
-#include "drools_parser.hpp"
+#include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "stateful_session.hpp"
 
@@ -23,7 +23,7 @@ std::unique_ptr<StatefulSession> create_tracing_session() {
         when
             $p : Person(age >= 18, age < 65, status == "Active")
         then
-            drools.insert({type: "Adult", name: $p.name});
+            rfl.insert({type: "Adult", name: $p.name});
         end
         
         rule "Classify Seniors"
@@ -31,7 +31,7 @@ std::unique_ptr<StatefulSession> create_tracing_session() {
         when
             $p : Person(age >= 65, status == "Active")
         then
-            drools.insert({type: "Senior", name: $p.name, age: $p.age});
+            rfl.insert({type: "Senior", name: $p.name, age: $p.age});
         end
     )";
     

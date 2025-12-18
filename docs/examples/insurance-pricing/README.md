@@ -102,7 +102,7 @@ Discounts:
 
 ```bash
 capi_demo \
-  -d docs/examples/insurance-pricing/insurance-pricing.drl \
+  -d docs/examples/insurance-pricing/insurance-pricing.rfl \
   -j docs/examples/insurance-pricing/insurance-applications-sample.json \
   -m applications:com.insurance.auto.InsuranceApplication \
   -q PolicyDecisions \
@@ -117,7 +117,7 @@ capi_demo \
 
 int main() {
     ParseResult result;
-    auto kb = build_knowledge_base_from_file("insurance-pricing.drl", result);
+    auto kb = build_knowledge_base_from_file("insurance-pricing.rfl", result);
     auto session = kb->create_session();
 
     auto application = std::make_shared<Fact>();

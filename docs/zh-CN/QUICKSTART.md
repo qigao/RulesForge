@@ -10,8 +10,8 @@ Drills 是一个高性能的 C++ 规则引擎，实现了 **Rete 算法** 并集
 
 ### 1. 编写您的业务规则
 
-创建 `my_rules.drl`：
-```drl
+创建 `my_rules.rfl`：
+```rfl
 // 定义您的数据模型
 declare Customer
     id: int
@@ -35,7 +35,7 @@ when
 then
     // JavaScript 动作 - 'c' 是匹配的客户
     console.log(`将 ${c.name} 提升为 VIP 状态`);
-    drools.insert({
+    rfl.insert({
         type: "VipCustomer", 
         customerId: c.id,
         reason: "高余额: $" + c.balance
@@ -58,9 +58,9 @@ end
 
 int main() {
     // 加载并编译规则
-    std::string drl = read_file("my_rules.drl");
+    std::string rfl = read_file("my_rules.rfl");
     ParsingResult result;
-    auto kb = build_knowledge_base(drl, result);
+    auto kb = build_knowledge_base(rfl, result);
     
     if (!result.success) {
         for (auto& err : result.errors) {
@@ -120,7 +120,7 @@ auto customer = CUSTOMER()
 ```
 
 ### 规则 = 您的业务逻辑
-```drl
+```rfl
 rule "规则名称"
 when
     // 条件 - 匹配什么数据模式？
@@ -128,7 +128,7 @@ when
 then
     // 动作 - 匹配后做什么？
     console.log("高价值客户: " + customer.name);
-    drools.insert({type: "HighValueCustomer", id: customer.id});
+    rfl.insert({type: "HighValueCustomer", id: customer.id});
 end
 ```
 
@@ -143,25 +143,25 @@ auto results = session->execute_query("my_query"); // 查询结果
 ## 常见模式
 
 ### 模式 1: 数据验证
-```drl
+```rfl
 rule "验证客户"
 when
     $c: Customer(age < 18)
 then
     console.error(`客户 ${c.name} 未成年: ${c.age}`);
-    drools.insert({type: "ValidationError", message: "客户必须年满 18 岁"});
+    rfl.insert({type: "ValidationError", message: "客户必须年满 18 岁"});
 end
 ```
 
 ### 模式 2: 数据转换
-```drl
+```rfl
 rule "计算信用评分"
 when
     $c: Customer(balance > 0)
     not CreditScore(customerId == $c.id)
 then
     let score = Math.min(850, Math.max(300, c.balance / 100 + 600));
-    drools.insert({
+    rfl.insert({
         type: "CreditScore", 
         customerId: c.id, 
         score: score
@@ -170,7 +170,7 @@ end
 ```
 
 ### 模式 3: 复杂条件
-```drl
+```rfl
 rule "忠诚客户奖励"
 when
     $c: Customer(status == "Active")
@@ -181,7 +181,7 @@ when
     eval($orders >= 5)
 then
     console.log(`${c.name} 有 ${orders} 笔大订单 - 奖励时间！`);
-    drools.insert({type: "Reward", customerId: c.id, points: 1000});
+    rfl.insert({type: "Reward", customerId: c.id, points: 1000});
 end
 ```
 
@@ -203,7 +203,7 @@ cmake --build build
 ### 运行示例
 ```bash
 # 基本示例
-./build/bin/drills_engine examples/basic.drl
+./build/bin/drills_engine examples/basic.rfl
 
 # 性能演示
 ./build/bin/memory_optimization_demo

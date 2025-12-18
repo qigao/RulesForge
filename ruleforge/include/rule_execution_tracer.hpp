@@ -1,7 +1,7 @@
 #ifndef RULE_EXECUTION_TRACER_HPP
 #define RULE_EXECUTION_TRACER_HPP
 
-#include "drools_rete_defs.hpp"
+#include "rfl_rete_defs.hpp"
 
 #include <chrono>
 #include <memory>

@@ -33,7 +33,7 @@ public:
     virtual void set_focus(std::string const& group_name) = 0;
     virtual map<std::string, JSValue> const& get_global_values() const = 0;
 
-    // P1 FIX: drools.halt() support
+    // P1 FIX: rfl.halt() support
     virtual void halt() = 0;
 
     // P1-001 FIX: Transactional semantics for RHS execution

@@ -1,9 +1,9 @@
 #ifndef AST_BUILDER_HPP
 #define AST_BUILDER_HPP
 
-#include "drools_grammar.hpp"
-#include "drools_parser_state.hpp"
-#include "drools_rete_defs.hpp"
+#include "rfl_grammar.hpp"
+#include "rfl_parser_state.hpp"
+#include "rfl_rete_defs.hpp"
 #include "errors.hpp"
 
 #include <memory>

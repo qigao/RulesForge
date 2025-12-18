@@ -1,7 +1,7 @@
 #ifndef MEMORY_OPTIMIZED_TYPES_HPP
 #define MEMORY_OPTIMIZED_TYPES_HPP
 
-#include "drools_rete_defs.hpp"
+#include "rfl_rete_defs.hpp"
 
 #include <string_view>
 #include <memory>

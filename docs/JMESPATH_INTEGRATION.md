@@ -96,7 +96,7 @@ For more complex JMESPath query examples, please refer to the [Official JMESPath
 
 ### Usage in Rules
 
-```drl
+```rfl
 declare TestFact
     name: String
     payload: String

@@ -1,6 +1,6 @@
 #include "catch2/catch_all.hpp"
 #include "catch2/matchers/catch_matchers_vector.hpp"   // For UnorderedEquals
-#include "drools_parser.hpp"
+#include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "query_result.hpp"
 #include "stateful_session.hpp"
@@ -14,7 +14,7 @@ struct QueryTestFixture {
         ParsingResult result;
         kb = build_knowledge_base(drl, result);
         if (!result.success) {
-            FAIL("DRL parsing failed: " << (result.errors.empty() ? "Unknown error" : result.errors[0].to_string()));
+            FAIL("RFL parsing failed: " << (result.errors.empty() ? "Unknown error" : result.errors[0].to_string()));
         }
         REQUIRE(kb != nullptr);
         session = kb->create_session();

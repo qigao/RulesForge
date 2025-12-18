@@ -2,7 +2,7 @@
 #define JS_SEMANTIC_ANALYZER_HPP
 
 #include "js_ast_builder.hpp"
-#include "drools_rete_defs.hpp"
+#include "rfl_rete_defs.hpp"
 #include "semantic_analyzer.hpp"
 #include <string>
 #include <map>

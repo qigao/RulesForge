@@ -109,7 +109,7 @@ This example showcases:
 
 ```bash
 capi_demo \
-  -d docs/examples/fraud-detection/fraud-detection.drl \
+  -d docs/examples/fraud-detection/fraud-detection.rfl \
   -j docs/examples/fraud-detection/fraud-test-data.json \
   -m accountProfiles:com.bank.fraud.AccountProfile \
   -q ActiveAlerts \
@@ -124,7 +124,7 @@ capi_demo \
 
 int main() {
     ParseResult result;
-    auto kb = build_knowledge_base_from_file("fraud-detection.drl", result);
+    auto kb = build_knowledge_base_from_file("fraud-detection.rfl", result);
     auto session = kb->create_session();
 
     // Load account profile

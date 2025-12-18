@@ -1,6 +1,6 @@
 #include "fmtlog.h"
 
-#include "drools_js_manager.hpp"
+#include "rfl_js_manager.hpp"
 #include "query_result.hpp"
 #include "rete/beta_builder.hpp"
 #include "rete/rete_node.hpp"
@@ -28,6 +28,8 @@ StatefulSession::StatefulSession(private_key, std::shared_ptr<KnowledgeBase cons
          kb_->get_rules().size(), kb_->get_parser_state().parsed_queries.size());
     scripting_manager_ = std::make_unique<JSScriptingManager>(*this);
     tms_ = std::make_unique<TruthMaintenanceSystem>(*this);
+    // PROD-002: Initialize schema validator
+    schema_validator_ = std::make_unique<SchemaValidator>(kb_->get_parser_state().parsed_declarations);
     // Allocate dummy_wme_ from pool
     TokenWME* raw = wme_pool_.allocate();
     new (raw) TokenWME{nullptr, nullptr, 0, 0};
@@ -159,6 +161,21 @@ JSContext* StatefulSession::get_js_context() { return scripting_manager_->get_js
 
 void StatefulSession::add_fact(std::shared_ptr<Fact> fact) {
     if (!fact) return;
+
+    // PROD-002: Schema validation
+    if (validation_mode_ != ValidationMode::None && schema_validator_) {
+        auto errors = schema_validator_->validate(*fact);
+        if (!errors.empty()) {
+            if (validation_mode_ == ValidationMode::Strict) {
+                throw SchemaValidationException(std::move(errors));
+            } else {  // ValidationMode::Warn
+                for (auto const& e : errors) {
+                    logw("Schema validation warning: {}", e.to_string());
+                }
+            }
+        }
+    }
+
     if (fact->id == 0) { fact->id = next_fact_id_++; }
     assign_nested_fact_ids(*fact);
 
@@ -349,9 +366,9 @@ int StatefulSession::fire_all_rules(int max_rules) {
             }
         }
 
-        // P1 FIX: Check if drools.halt() was called
+        // P1 FIX: Check if rfl.halt() was called
         if (halt_requested_) {
-            logi("Rule execution halted by drools.halt() after {} rules fired.", total_fired_count);
+            logi("Rule execution halted by rfl.halt() after {} rules fired.", total_fired_count);
             break;
         }
 
@@ -567,7 +584,10 @@ QueryResult StatefulSession::execute_query(std::string const& query_name,
 
     logd("Executing query -> name='{}', args={}", query_name, args.size());
     auto it = query_nodes_.find(query_name);
-    if (it == query_nodes_.end()) { throw std::runtime_error("Query '" + query_name + "' not found."); }
+    // PROD-003: Return error result instead of throwing
+    if (it == query_nodes_.end()) {
+        return QueryResult::error("Query '" + query_name + "' not found.");
+    }
     auto& terminal_node = it->second;
 
     auto param_it = parameterized_query_inputs_.find(query_name);
@@ -607,6 +627,11 @@ map<std::string, JSValue> const& StatefulSession::get_global_values() const {
 size_t StatefulSession::get_fact_count() const { return all_facts_.size(); }
 
 int64_t StatefulSession::get_next_fact_id() { return next_fact_id_++; }
+
+// PROD-002: Check if a fact type has a declaration
+bool StatefulSession::has_type_declaration(std::string const& type_name) const {
+    return schema_validator_ && schema_validator_->has_declaration(type_name);
+}
 
 bool StatefulSession::execute_eval(std::string const& code, Token const& token,
                                    map<std::string, int> const& bindings) {

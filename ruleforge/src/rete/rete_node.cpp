@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <list>
 #include <magic_enum/magic_enum.hpp>
 #include <regex>
 #include <sstream>
@@ -32,17 +33,52 @@ namespace {
         return false;
     }
 
-    // P1 FIX: Simple regex cache to avoid recompiling the same patterns
-    std::regex& get_cached_regex(std::string const& pattern) {
-        static std::unordered_map<std::string, std::regex> cache;
-        auto it = cache.find(pattern);
-        if (it != cache.end()) {
-            return it->second;
+    // PROD-006: Enhanced regex cache with LRU eviction
+    // Thread-safe for read operations, limited to MAX_CACHE_SIZE entries
+    class RegexCache {
+    public:
+        static constexpr size_t MAX_CACHE_SIZE = 1000;
+
+        static RegexCache& instance() {
+            static RegexCache cache;
+            return cache;
         }
-        // Insert and return reference
-        auto [inserted_it, _] = cache.emplace(pattern, std::regex(pattern));
-        return inserted_it->second;
+
+        std::regex const& get(std::string const& pattern) {
+            auto it = cache_.find(pattern);
+            if (it != cache_.end()) {
+                // Move to front of LRU list
+                lru_list_.splice(lru_list_.begin(), lru_list_, it->second.second);
+                return it->second.first;
+            }
+
+            // Compile new regex
+            std::regex compiled(pattern);
+
+            // Evict oldest if at capacity
+            if (cache_.size() >= MAX_CACHE_SIZE) {
+                cache_.erase(lru_list_.back());
+                lru_list_.pop_back();
+            }
+
+            // Insert at front
+            lru_list_.push_front(pattern);
+            cache_[pattern] = {std::move(compiled), lru_list_.begin()};
+            return cache_[pattern].first;
+        }
+
+        size_t size() const { return cache_.size(); }
+
+    private:
+        RegexCache() = default;
+        std::list<std::string> lru_list_;
+        std::unordered_map<std::string, std::pair<std::regex, std::list<std::string>::iterator>> cache_;
+    };
+
+    std::regex const& get_cached_regex(std::string const& pattern) {
+        return RegexCache::instance().get(pattern);
     }
+
     // Forward declaration for recursive evaluation
     double evaluate_arith_expr(ArithExprValue const& expr,
                                Token const& token,
@@ -211,7 +247,7 @@ namespace {
                 std::string const& text = std::get<std::string>(v1);
                 std::string const& pattern = std::get<std::string>(v2);
                 try {
-                    std::regex& re = get_cached_regex(pattern);
+                    std::regex re = get_cached_regex(pattern);
                     bool matches = std::regex_search(text, re);
                     return (op == "matches") ? matches : !matches;
                 } catch (std::regex_error const& e) {

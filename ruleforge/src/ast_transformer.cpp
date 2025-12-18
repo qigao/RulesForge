@@ -1,7 +1,7 @@
 #include "ast_transformer.hpp"
 #include "fmtlog.h"
 
-#include "drools_rete_defs.hpp"   // For ConstraintNode, NodeType, etc.
+#include "rfl_rete_defs.hpp"   // For ConstraintNode, NodeType, etc.
 
 #include <iostream>
 #include <magic_enum/magic_enum.hpp>

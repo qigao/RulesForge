@@ -1,0 +1,38 @@
+# PROD-005: Production Load Testing Benchmarks
+# Build with: cmake --build . --target production_benchmark.RuleForge
+# Run with: ./production_benchmark.RuleForge.exe
+
+set(folder_name ${TARGET_NAME}/benchmark)
+find_package(catch2 CONFIG REQUIRED)
+
+# Production benchmark executable
+add_executable(production_benchmark.${TARGET_NAME} production_benchmark.cpp)
+target_link_libraries(
+    production_benchmark.${TARGET_NAME}
+    PRIVATE
+        Catch2::Catch2WithMain
+        ${TARGET_NAME}
+        pubcxx
+        taocpp::pegtl
+)
+
+set_target_properties(
+    production_benchmark.${TARGET_NAME}
+    PROPERTIES
+        FOLDER ${folder_name}
+)
+
+# Add as a test (but exclude from normal test runs due to duration)
+# Run explicitly with: ctest -R production_benchmark
+add_test(
+    NAME production_benchmark.${TARGET_NAME}
+    COMMAND production_benchmark.${TARGET_NAME}
+)
+
+# Mark as a long-running test
+set_tests_properties(
+    production_benchmark.${TARGET_NAME}
+    PROPERTIES
+        LABELS "benchmark;long"
+        TIMEOUT 600  # 10 minutes max
+)

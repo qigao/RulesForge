@@ -1,8 +1,8 @@
 #ifndef SEMANTIC_ANALYZER_HPP
 #define SEMANTIC_ANALYZER_HPP
 
-#include "drools_parser_state.hpp"
-#include "drools_rete_defs.hpp"
+#include "rfl_parser_state.hpp"
+#include "rfl_rete_defs.hpp"
 #include "errors.hpp"   // For StructuredError
 
 #include <map>
@@ -43,7 +43,7 @@ void analyze_constraint_node_recursive(ConstraintNode* node, ParsedPattern const
 
 /**
  * @class SemanticAnalyzer
- * @brief Validates the semantic correctness of a parsed DRL Abstract Syntax Tree (AST).
+ * @brief Validates the semantic correctness of a parsed RFL Abstract Syntax Tree (AST).
  */
 class SemanticAnalyzer {
 public:

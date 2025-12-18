@@ -1,7 +1,7 @@
 #ifndef I_ENGINE_LISTENER_HPP
 #define I_ENGINE_LISTENER_HPP
 
-#include "drools_rete_defs.hpp"   // For Fact
+#include "rfl_rete_defs.hpp"   // For Fact
 
 #include <memory>
 #include <string>

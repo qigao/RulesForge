@@ -273,10 +273,10 @@ bool JSSemanticAnalyzer::validate_variable_bindings(const std::vector<JSVariable
   bool all_valid = true;
   std::set<std::string> unbound_vars;
 
-  // JavaScript built-in globals that should not be treated as Drools bindings
+  // JavaScript built-in globals that should not be treated as Rules Forge Language bindings
   static const std::set<std::string> js_globals = {
       // RuleForge provided
-      "drools", "console", "type",
+      "rfl", "console", "type",
       // JavaScript built-in objects
       "Math", "Date", "JSON", "Array", "Object", "String", "Number", "Boolean", "RegExp", "Error",
       "Map", "Set", "WeakMap", "WeakSet", "Promise",
@@ -336,15 +336,15 @@ bool JSSemanticAnalyzer::validate_variable_bindings(const std::vector<JSVariable
 }
 
 bool JSSemanticAnalyzer::validate_function_calls(const std::vector<JSFunctionCall> &calls) {
-  // For now, just validate that drools function calls are known
-  std::set<std::string> known_drools_methods = {"insert", "insertLogical", "retract", "update",
+  // For now, just validate that rfl function calls are known
+  std::set<std::string> known_rfl_methods = {"insert", "insertLogical", "retract", "update",
                                                 "setFocus"};
 
   for (const auto &call : calls) {
-    if (call.object_name == "drools") {
-      if (known_drools_methods.find(call.method_name) == known_drools_methods.end()) {
+    if (call.object_name == "rfl") {
+      if (known_rfl_methods.find(call.method_name) == known_rfl_methods.end()) {
         analyzer_.add_error(rule_.pos, "In rule '" + rule_.name +
-                                           "', unknown drools method: drools." + call.method_name +
+                                           "', unknown rfl method: rfl." + call.method_name +
                                            "()");
         return false;
       }

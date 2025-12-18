@@ -1,7 +1,7 @@
 #ifndef KNOWLEDGE_BASE_HPP
 #define KNOWLEDGE_BASE_HPP
 
-#include "drools_parser_state.hpp"
+#include "rfl_parser_state.hpp"
 #include "fact_type_registry.hpp"
 
 #include <chrono>
@@ -50,15 +50,15 @@ public:
     /**
      * @brief Register a custom accumulate function.
      *
-     * Custom accumulators can be used in DRL rules like built-in functions:
-     * ```drl
+     * Custom accumulators can be used in RFL rules like built-in functions:
+     * ```rfl
      * $result : Number() from accumulate(
      *     Order($amount : amount),
      *     myCustomFunc($amount)
      * )
      * ```
      *
-     * @param name The function name to use in DRL (e.g., "myCustomFunc")
+     * @param name The function name to use in RFL (e.g., "myCustomFunc")
      * @param prototype A prototype instance that will be cloned for each accumulate node
      *
      * Example:

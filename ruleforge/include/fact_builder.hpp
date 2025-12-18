@@ -1,7 +1,7 @@
 #ifndef FACT_BUILDER_HPP
 #define FACT_BUILDER_HPP
 
-#include "drools_rete_defs.hpp"
+#include "rfl_rete_defs.hpp"
 
 #include <memory>
 #include <string>

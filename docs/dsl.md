@@ -1,10 +1,10 @@
-# Drools-Inspired Rule Language (DRL) Grammar
+# Rules Forge Language-Inspired Rule Language (RFL) Grammar
 
 ## Introduction
 
-This document specifies the grammar for a custom, Drools-inspired rule language designed for a high-performance Rete-based rule engine. The language allows users to define data structures, business rules, and queries in a declarative, SQL-like syntax.
+This document specifies the grammar for a custom, Rules Forge Language-inspired rule language designed for a high-performance Rete-based rule engine. The language allows users to define data structures, business rules, and queries in a declarative, SQL-like syntax.
 
-The primary goal is to provide a powerful yet readable way to express complex conditional logic and data aggregations. This implementation is a functional subset of standard Java Drools, focusing on the most common and powerful features.
+The primary goal is to provide a powerful yet readable way to express complex conditional logic and data aggregations. This implementation is a functional subset of standard Java RuleForge, focusing on the most common and powerful features.
 
 The language is composed of several top-level statements:
 
@@ -14,15 +14,15 @@ The language is composed of several top-level statements:
 - `query`: To define reusable, parameterized lookups into the engine's working memory.
 - `rule`: The core construct for defining conditional logic.
 
-The consequence of a rule (the `then` block) is written in **JavaScript** (via QuickJS), providing a flexible and powerful scripting environment. A custom `drools` API is injected into the JavaScript context to allow the rule to interact with the engine (e.g., by inserting or retracting facts).
+The consequence of a rule (the `then` block) is written in **JavaScript** (via QuickJS), providing a flexible and powerful scripting environment. A custom `rfl` API is injected into the JavaScript context to allow the rule to interact with the engine (e.g., by inserting or retracting facts).
 
 ## Language Constructs
 
 ### File Structure
 
-A DRL file is a sequence of zero or more top-level statements. The typical order is `package`, `import`s, `global`s, `declare`s, `query`s, and finally `rule`s.
+A RFL file is a sequence of zero or more top-level statements. The typical order is `package`, `import`s, `global`s, `declare`s, `query`s, and finally `rule`s.
 
-```drl
+```rfl
 package com.example.rules
 
 import com.example.model.Customer
@@ -41,6 +41,83 @@ then
 end
 ```
 
+### Import Statement (`import`)
+
+The `import` statement allows you to include declarations, rules, and queries from other RFL files. This enables modular rule organization and code reuse.
+
+**Syntax:**
+- `import <package.path>` - Import a single file
+- `import <package.path>.*` - Import all `.rfl` files in a directory (wildcard)
+
+The import path uses dot notation, which is converted to a file path relative to the configured base directories.
+
+**Examples:**
+
+```rfl
+// Import a single file: resolves to "myapp/common.rfl"
+import myapp.common
+
+// Import all files in a directory: resolves to "myapp/types/*.rfl"
+import myapp.types.*
+```
+
+**File Organization Example:**
+
+```
+src/
+├── common/
+│   └── types.rfl          // Shared type declarations
+├── validation/
+│   └── rules.rfl          // Validation rules (imports common.types)
+└── pricing/
+    └── rules.rfl          // Pricing rules (imports common.types)
+```
+
+```rfl
+// common/types.rfl
+package myapp.common
+
+declare Customer
+    id: int
+    name: String
+    status: String
+end
+
+declare Order
+    customerId: int
+    total: double
+end
+```
+
+```rfl
+// validation/rules.rfl
+package myapp.validation
+
+import myapp.common.types
+
+rule "Validate Customer"
+when
+    $c : Customer(name == "")
+then
+    console.log("Invalid customer: empty name");
+end
+```
+
+**C++ Integration:**
+
+When building a KnowledgeBase, specify base directories for import resolution:
+
+```cpp
+std::vector<std::string> base_dirs = {"./src", "./lib"};
+auto kb = build_knowledge_base("validation/rules.rfl", base_dirs, result);
+```
+
+**Key Points:**
+- Imported files are parsed and merged into a single KnowledgeBase
+- Circular imports are detected and reported as errors
+- Duplicate imports of the same file are handled (loaded only once)
+- All declarations, rules, and queries from imported files are available
+
 ### Type Declaration (`declare`)
 
 The `declare` statement defines a new fact type and its fields.
@@ -57,7 +134,7 @@ The `declare` statement defines a new fact type and its fields.
 
 **Example:**
 
-```drl
+```rfl
 declare Customer
     id: int
     name: String
@@ -89,7 +166,7 @@ Attributes control the rule's execution behavior.
 
 **Example:**
 
-```drl
+```rfl
 rule "High Priority Exclusive Rule"
     salience 100
     activation-group "exclusive-group"
@@ -154,7 +231,7 @@ The Left-Hand Side (LHS) contains a set of patterns that must be satisfied for t
 
 Arithmetic expressions can be used on the right-hand side of comparisons for dynamic calculations:
 
-```drl
+```rfl
 // Compare against calculated value
 Transaction(timestamp > ($startTime - 60000))  // Within last minute
 
@@ -192,7 +269,7 @@ For Complex Event Processing (CEP) with timestamp fields:
 
 **Examples:**
 
-```drl
+```rfl
 // Both syntaxes are supported for not/exists:
 not Order(customerId == $c.id)                    // Without parentheses
 not (Order(customerId == $c.id))                  // With parentheses
@@ -211,7 +288,7 @@ Modifies the data source for a pattern.
   - **Shorthand:** Use `count(1)` to count all matching facts.
   - **CEP Support:** The source pattern can include `from entry-point` for streaming data.
   - **Examples:**
-    ```drl
+    ```rfl
     // Basic sum
     $total: Number() from accumulate( $p: Purchase(), sum($p.value) )
 
@@ -255,25 +332,25 @@ if (credit.category == "Excellent") {
 
 These local variables are scoped to the rule's RHS and can be used for intermediate calculations.
 
-##### `drools` API
+##### `rfl` API
 
-A special `drools` object is available to interact with the engine:
+A special `rfl` object is available to interact with the engine:
 
 | Method | Description |
 |--------|-------------|
-| `drools.insert({type: "...", ...})` | Inserts a new fact into working memory. |
-| `drools.insertLogical({type: "...", ...})` | Inserts a fact that is logically dependent on the activating facts. Auto-retracted when conditions become false. |
-| `drools.update(fact, {field: value, ...})` | Updates an existing fact's fields and propagates changes through the RETE network. |
-| `drools.retract(fact)` | Retracts a fact from working memory. |
-| `drools.halt()` | Immediately stops rule execution. No more rules will fire in the current `fireAllRules()` cycle. |
-| `drools.setFocus("group")` | Sets the agenda focus to the specified agenda-group. |
-| `drools.getRule()` | Returns an object with information about the current rule (e.g., `{name: "RuleName"}`). |
+| `rfl.insert({type: "...", ...})` | Inserts a new fact into working memory. |
+| `rfl.insertLogical({type: "...", ...})` | Inserts a fact that is logically dependent on the activating facts. Auto-retracted when conditions become false. |
+| `rfl.update(fact, {field: value, ...})` | Updates an existing fact's fields and propagates changes through the RETE network. |
+| `rfl.retract(fact)` | Retracts a fact from working memory. |
+| `rfl.halt()` | Immediately stops rule execution. No more rules will fire in the current `fireAllRules()` cycle. |
+| `rfl.setFocus("group")` | Sets the agenda focus to the specified agenda-group. |
+| `rfl.getRule()` | Returns an object with information about the current rule (e.g., `{name: "RuleName"}`). |
 
 ##### `modify` Block Syntax
 
-A structured way to update facts using Drools-style setter calls:
+A structured way to update facts using RuleForge-style setter calls:
 
-```drl
+```rfl
 modify($person) {
     setAge(30),
     setStatus("updated")
@@ -282,34 +359,34 @@ modify($person) {
 
 This is automatically transformed to:
 ```javascript
-drools.update(person, {age: 30, status: "updated"})
+rfl.update(person, {age: 30, status: "updated"})
 ```
 
 ##### Examples
 
 ```javascript
 // Insert a new fact
-drools.insert({type: "Offer", message: "Welcome, " + c.name});
+rfl.insert({type: "Offer", message: "Welcome, " + c.name});
 
 // Logical insertion - auto-retracted when conditions no longer match
-drools.insertLogical({type: "Alert", reason: "High value customer"});
+rfl.insertLogical({type: "Alert", reason: "High value customer"});
 
 // Update an existing fact
-drools.update(c, {status: "Gold", points: c.points + 100});
+rfl.update(c, {status: "Gold", points: c.points + 100});
 
 // Retract an existing fact
-drools.retract(c);
+rfl.retract(c);
 
 // Stop rule execution
 if (criticalError) {
-    drools.halt();
+    rfl.halt();
 }
 
 // Change agenda focus
-drools.setFocus("cleanup");
+rfl.setFocus("cleanup");
 
 // Get current rule info
-let ruleName = drools.getRule().name;
+let ruleName = rfl.getRule().name;
 ```
 
 ### Queries
@@ -320,7 +397,7 @@ Queries are named, reusable sets of patterns that can be called from C++. They c
 
 **Example:**
 
-```drl
+```rfl
 // A query with one parameter
 query findCustomer(NameHolder $name)
     $c: Customer(name == $name.value)
@@ -490,8 +567,8 @@ public:
 kb->register_accumulator("median", std::make_unique<MedianAccumulator>());
 ```
 
-Then use in DRL:
-```drl
+Then use in RFL:
+```rfl
 $m: Median() from accumulate( $s: Sample(), median($s.value) )
 ```
 
@@ -503,8 +580,9 @@ $m: Median() from accumulate( $s: Sample(), median($s.value) )
 - **v1.1**: Added `no-loop`, `activation-group`, `lock-on-active` attributes
 - **v1.2**: Added `contains`, `matches`, `memberOf` operators
 - **v1.3**: Added null-safe dereference (`!.`), index access (`[]`)
-- **v1.4**: Added entry points, custom accumulators, `drools.halt()`, `drools.setFocus()`, `drools.getRule()`
+- **v1.4**: Added entry points, custom accumulators, `rfl.halt()`, `rfl.setFocus()`, `rfl.getRule()`
 - **v1.5**: Added `enabled`, `auto-focus`, `duration` attributes; `coincides`, `during` temporal operators; `modify` block syntax
 - **v1.6**: Added support for `not Pattern(...)` and `exists Pattern(...)` without parentheses; full JavaScript local variable support (`var`, `let`, `const`) in RHS
 - **v1.7**: Added support for `from entry-point` inside accumulate patterns for CEP use cases
 - **v1.8**: Added built-in `Number` type for accumulate results; `count(1)` shorthand syntax; arithmetic expressions in constraints (`$ts - 60000`); improved JS comment handling in RHS
+- **v1.9**: Added multi-file import support with `import package.path` and wildcard `import package.*`; circular dependency detection; base directory configuration for import resolution

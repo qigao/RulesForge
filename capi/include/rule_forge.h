@@ -88,8 +88,8 @@ DRILLS_CAPI_API const char *ruleforge_get_last_error_message(void);
 // On failure, 'out_kb' will be NULL.
 ruleforge_status_t DRILLS_CAPI_API ruleforge_kb_create(ruleforge_knowledge_base_t *out_kb);
 
-// Loads DRL rules into the Knowledge Base.
-// drl_source_json: A JSON string containing the DRL source.
+// Loads RFL rules into the Knowledge Base.
+// drl_source_json: A JSON string containing the RFL source.
 // Returns DRILLS_OK on success.
 ruleforge_status_t DRILLS_CAPI_API ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb,
                                                          const char *drl_source_json);
