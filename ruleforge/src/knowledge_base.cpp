@@ -1,5 +1,5 @@
 #include "knowledge_base.hpp"
-#include "fmtlog.h"
+#include "logging_control.hpp"
 
 #include "rfl_accumulators.hpp"
 #include "rete/beta_builder.hpp"

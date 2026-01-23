@@ -11,7 +11,6 @@ target_include_directories(
 )
 
 # Find dependencies
-find_package(magic_enum CONFIG REQUIRED)
 find_package(pegtl CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
 find_package(xxHash CONFIG REQUIRED)

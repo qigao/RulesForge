@@ -5,13 +5,13 @@
 
 #include "semantic_analyzer.hpp"
 
-#include <magic_enum/magic_enum.hpp>
+
 #include <tao/pegtl.hpp>
 #include <tao/pegtl/position.hpp>
 
 #include "rfl_rete_defs.hpp"
 #include "js_semantic_analyzer.hpp"
-#include "fmtlog.h"
+#include "logging_control.hpp"
 namespace pegtl = tao::pegtl;
 
 namespace
@@ -52,7 +52,7 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
   logd(
       "Analyzing constraint node type {} for pattern '{}' in rule '{}' at "
       "depth {}",
-      magic_enum::enum_name(node->type),
+      ENUM_NAME(node->type),
       pattern.binding,
       rule.name,
       depth);
@@ -134,14 +134,11 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
                && std::holds_alternative<std::string>(
                    *constraint.right_literal))
     {
-      logd("analyze_constraint_node_recursive: Processing right_literal as potential binding");
       // This handles cases where a binding was parsed as a literal string,
       // e.g., "field == $p"
       auto const& potential_binding =
           std::get<std::string>(*constraint.right_literal);
-      logd("analyze_constraint_node_recursive: potential_binding='{}'", potential_binding);
       if (potential_binding.rfind('$', 0) == 0) {
-        logd("analyze_constraint_node_recursive: Found potential binding '{}'", potential_binding);
         auto it = existing_symbols.find(potential_binding);
         bool found_in_existing = (it != existing_symbols.end());
 
@@ -150,7 +147,6 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
         }
 
         if (found_in_existing || it != new_symbols.end()) {
-          logd("analyze_constraint_node_recursive: Binding '{}' found, converting to bound_field", potential_binding);
           constraint.right_bound_field = {{potential_binding, "this"}};
           constraint.right_literal = std::nullopt;
 
@@ -160,8 +156,7 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
             constraint.right_bound_field = *info.source_field_of_binding;
           }
         } else {
-          logd("analyze_constraint_node_recursive: Binding '{}' NOT FOUND, should add error", potential_binding);
-          analyzer.add_error(pos,
+           analyzer.add_error(pos,
                              "In rule '" + rule.name
                                  + "', constraint uses undeclared binding '"
                                  + potential_binding + "'.");
@@ -377,7 +372,7 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
 {
   logd("Analyzing pattern in rule '{}': type={}, fact_type={}, binding={}",
             rule.name,
-            magic_enum::enum_name(pattern.type),
+            ENUM_NAME(pattern.type),
             pattern.fact_type,
             pattern.binding);
   if (pattern.type == PatternType::NOT || pattern.type == PatternType::EXISTS) {

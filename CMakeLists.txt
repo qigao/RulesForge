@@ -34,14 +34,15 @@ project(
 
 # Set the features of the project
 include(ProjectOptions.cmake)
-
+find_package(TurboNet CONFIG REQUIRED PATHS ${EXTERNAL_ROOT}/turbonet)
+find_package(c-ares CONFIG REQUIRED)
+find_package(base64 CONFIG REQUIRED)
 # Output files directory
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_EXECUTABLE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 # Cmake modules
-include(cmake/ext_libs.cmake)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Add subdirectories

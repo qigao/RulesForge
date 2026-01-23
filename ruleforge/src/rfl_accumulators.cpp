@@ -1,5 +1,5 @@
 #include "rfl_accumulators.hpp"
-#include "fmtlog.h"
+#include "logging_control.hpp"
 
 #include <iostream>
 #include <limits>   // for std::numeric_limits

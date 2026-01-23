@@ -1,11 +1,11 @@
-#include "fmtlog.h"
+#include "logging_control.hpp"
 
 #include "knowledge_base.hpp"
 #include "rete/beta_builder.hpp"
 #include "rete/rete_node.hpp"
 #include "stateful_session.hpp"
 
-#include <magic_enum/magic_enum.hpp>
+
 
 BetaNetworkBuilder::BetaNetworkBuilder(StatefulSession& session, std::vector<ParsedPattern> const& patterns,
                                        bool is_query, int param_count) :
@@ -76,7 +76,7 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::build() {
 
 std::shared_ptr<ReteNode> BetaNetworkBuilder::create_node_for_pattern(ParsedPattern& pattern, int& pattern_depth) {
     logd("Entering BetaNetworkBuilder::create_node_for_pattern for pattern type: {}, fact_type: {}",
-              magic_enum::enum_name(pattern.type), pattern.fact_type);
+              ENUM_NAME(pattern.type), pattern.fact_type);
 
     if (pattern.type == PatternType::EVAL) {
         logd("Creating EvalNode");

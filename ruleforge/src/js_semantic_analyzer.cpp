@@ -1,5 +1,5 @@
 #include "js_semantic_analyzer.hpp"
-#include "fmtlog.h"
+#include "logging_control.hpp"
 #include <regex>
 #include <set>
 #include <sstream>
@@ -81,17 +81,12 @@ std::string strip_js_comments(const std::string &code) {
 
 JSSemanticAnalyzer::JSSemanticAnalyzer(SymbolTable const &symbols, ParsedRule const &rule,
                                        SemanticAnalyzer &base_analyzer)
-    : symbols_(symbols), rule_(rule), analyzer_(base_analyzer) {
-  logd("JSSemanticAnalyzer: Initializing for rule '{}'", rule_.name);
-}
+    : symbols_(symbols), rule_(rule), analyzer_(base_analyzer) {}
 
 bool JSSemanticAnalyzer::analyze_js_rhs(ParsedRule &rule) {
   if (rule.rhs_code.empty()) {
     return true; // Empty RHS is valid
   }
-
-  logd("JSSemanticAnalyzer: Analyzing JavaScript RHS for rule '{}'", rule.name);
-  logd("Original RHS code: {}", rule.rhs_code);
 
   size_t initial_error_count = analyzer_.get_errors().size();
 
@@ -137,9 +132,6 @@ bool JSSemanticAnalyzer::analyze_js_rhs(ParsedRule &rule) {
 
   // Step 5: Update the rule with processed code
   rule.rhs_code = processed_code;
-
-  logd("Processed RHS code: {}", rule.rhs_code);
-  logd("JSSemanticAnalyzer: Successfully analyzed rule '{}'", rule.name);
   return true;
 }
 
@@ -198,9 +190,6 @@ std::string JSSemanticAnalyzer::substitute_variables(const std::string &js_code)
   std::string substituted_code;
   substituted_code.reserve(js_code.size());
 
-  logd("substitute_variables: Processing code '{}'", js_code);
-  logd("substitute_variables: Symbol table has {} entries", symbols_.size());
-
   bool has_unbound_variables = false;
   std::set<std::string> unbound_vars;
 
@@ -214,9 +203,6 @@ std::string JSSemanticAnalyzer::substitute_variables(const std::string &js_code)
 
     std::string full_binding = "$" + match[1].str(); // Reconstruct full binding for lookup
     std::string var_name = match[1].str();           // Variable name without $
-
-    logd("substitute_variables: Found variable '{}', checking if '{}' exists in symbols",
-         match.str(), full_binding);
 
     // Check if the binding exists in symbols
     if (symbols_.count(full_binding)) {
@@ -264,7 +250,6 @@ std::string JSSemanticAnalyzer::substitute_variables(const std::string &js_code)
     }
   }
 
-  logd("substitute_variables: Result: '{}'", substituted_code);
   return substituted_code;
 }
 
@@ -338,14 +323,13 @@ bool JSSemanticAnalyzer::validate_variable_bindings(const std::vector<JSVariable
 bool JSSemanticAnalyzer::validate_function_calls(const std::vector<JSFunctionCall> &calls) {
   // For now, just validate that rfl function calls are known
   std::set<std::string> known_rfl_methods = {"insert", "insertLogical", "retract", "update",
-                                                "setFocus"};
+                                             "setFocus"};
 
   for (const auto &call : calls) {
     if (call.object_name == "rfl") {
       if (known_rfl_methods.find(call.method_name) == known_rfl_methods.end()) {
-        analyzer_.add_error(rule_.pos, "In rule '" + rule_.name +
-                                           "', unknown rfl method: rfl." + call.method_name +
-                                           "()");
+        analyzer_.add_error(rule_.pos, "In rule '" + rule_.name + "', unknown rfl method: rfl." +
+                                           call.method_name + "()");
         return false;
       }
     }

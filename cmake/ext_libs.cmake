@@ -1,1 +1,0 @@
-set(OPENCV_ROOT ${EXTERNAL_ROOT}/opencv)

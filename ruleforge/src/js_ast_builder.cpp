@@ -1,5 +1,5 @@
 #include "js_ast_builder.hpp"
-#include "fmtlog.h"
+#include "logging_control.hpp"
 #include <regex>
 #include <sstream>
 #include <set>

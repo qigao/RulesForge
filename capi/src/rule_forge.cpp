@@ -5,11 +5,11 @@
 #include <cstring>
 
 // Include C++ backend
-#include "rfl_parser.hpp"
 #include "errors.hpp"
 #include "fact_builder.hpp"
 #include "knowledge_base.hpp"
 #include "query_result.hpp"
+#include "rfl_parser.hpp"
 #include "stateful_session.hpp"
 
 // Include JSON parsing
@@ -28,19 +28,19 @@ static void set_error_fmt(const char *prefix, const char *detail) {
   snprintf(last_error, sizeof(last_error), "%s%s", prefix, detail);
 }
 
-DRILLS_CAPI_API ruleforge_status_t ruleforge_init() {
+CXX_API ruleforge_status_t ruleforge_init() {
   last_error[0] = '\0';
   return DRILLS_OK;
 }
 
-DRILLS_CAPI_API ruleforge_status_t ruleforge_cleanup() {
+CXX_API ruleforge_status_t ruleforge_cleanup() {
   last_error[0] = '\0';
   return DRILLS_OK;
 }
 
-DRILLS_CAPI_API const char *ruleforge_get_last_error_message() { return last_error; }
+CXX_API const char *ruleforge_get_last_error_message() { return last_error; }
 
-DRILLS_CAPI_API const char *ruleforge_get_version() { return RULEFORGE_VERSION_STRING; }
+CXX_API const char *ruleforge_get_version() { return RULEFORGE_VERSION_STRING; }
 
 // Knowledge Base functions
 // Helper function for crossing C++/pure C boundaries safely
@@ -48,7 +48,7 @@ struct KnowledgeBaseWrapper {
   std::shared_ptr<KnowledgeBase> kb;
 };
 
-DRILLS_CAPI_API ruleforge_status_t ruleforge_kb_create(ruleforge_knowledge_base_t *out_kb) {
+CXX_API ruleforge_status_t ruleforge_kb_create(ruleforge_knowledge_base_t *out_kb) {
   if (!out_kb) {
     set_error("Output Knowledge Base pointer is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -67,8 +67,7 @@ DRILLS_CAPI_API ruleforge_status_t ruleforge_kb_create(ruleforge_knowledge_base_
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb,
-                                                         const char *drl_source) {
+CXX_API ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const char *drl_source) {
   if (!kb) {
     set_error("Knowledge Base handle is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -101,8 +100,8 @@ DRILLS_CAPI_API ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_bas
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t
-ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base_t kb, const char *csv_source) {
+CXX_API ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base_t kb,
+                                                        const char *csv_source) {
   if (!kb) {
     set_error("Knowledge Base handle is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -134,7 +133,7 @@ ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base_t kb, const char *
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t ruleforge_kb_destroy(ruleforge_knowledge_base_t kb) {
+CXX_API ruleforge_status_t ruleforge_kb_destroy(ruleforge_knowledge_base_t kb) {
   if (!kb) {
     set_error("Knowledge Base handle is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -155,8 +154,8 @@ struct StatefulSessionWrapper {
   std::unique_ptr<StatefulSession> session;
 };
 
-DRILLS_CAPI_API ruleforge_status_t
-ruleforge_session_create(ruleforge_knowledge_base_t kb, ruleforge_stateful_session_t *out_session) {
+CXX_API ruleforge_status_t ruleforge_session_create(ruleforge_knowledge_base_t kb,
+                                           ruleforge_stateful_session_t *out_session) {
   if (!kb) {
     set_error("Knowledge Base handle is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -183,8 +182,8 @@ struct QueryResultWrapper {
   std::unique_ptr<QueryResult> query_result;
 };
 
-DRILLS_CAPI_API ruleforge_status_t ruleforge_session_add_fact_json(
-    ruleforge_stateful_session_t session, const char *fact_type, const char *fact_json) {
+CXX_API ruleforge_status_t ruleforge_session_add_fact_json(ruleforge_stateful_session_t session,
+                                                   const char *fact_type, const char *fact_json) {
   if (!session || !fact_type || !fact_json) {
     set_error("Session handle, fact type, or fact JSON is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -224,8 +223,8 @@ DRILLS_CAPI_API ruleforge_status_t ruleforge_session_add_fact_json(
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t ruleforge_session_fire_all_rules(
-    ruleforge_stateful_session_t session, int max_rules, int *out_fired_count) {
+ruleforge_status_t ruleforge_session_fire_all_rules(ruleforge_stateful_session_t session,
+                                                    int max_rules, int *out_fired_count) {
   if (!session) {
     set_error("Session handle is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -244,7 +243,7 @@ DRILLS_CAPI_API ruleforge_status_t ruleforge_session_fire_all_rules(
   }
 }
 
-DRILLS_CAPI_API int ruleforge_session_get_fact_count(ruleforge_stateful_session_t session) {
+CXX_API int ruleforge_session_get_fact_count(ruleforge_stateful_session_t session) {
   if (!session) {
     set_error("Session handle is NULL");
     return -1;
@@ -259,9 +258,9 @@ DRILLS_CAPI_API int ruleforge_session_get_fact_count(ruleforge_stateful_session_
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t
-ruleforge_session_query(ruleforge_stateful_session_t session, const char *query_name,
-                        ruleforge_query_result_t *out_query_result) {
+CXX_API ruleforge_status_t ruleforge_session_query(ruleforge_stateful_session_t session,
+                                           const char *query_name,
+                                           ruleforge_query_result_t *out_query_result) {
   if (!session) {
     set_error("Session handle is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -293,7 +292,7 @@ ruleforge_session_query(ruleforge_stateful_session_t session, const char *query_
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t ruleforge_session_destroy(ruleforge_stateful_session_t session) {
+CXX_API ruleforge_status_t ruleforge_session_destroy(ruleforge_stateful_session_t session) {
   if (!session) {
     set_error("Session handle is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -310,7 +309,7 @@ DRILLS_CAPI_API ruleforge_status_t ruleforge_session_destroy(ruleforge_stateful_
 }
 
 // Query result functions
-DRILLS_CAPI_API int ruleforge_query_result_get_size(ruleforge_query_result_t query_result) {
+CXX_API int ruleforge_query_result_get_size(ruleforge_query_result_t query_result) {
   if (!query_result) {
     set_error("Query Result handle is NULL");
     return -1;
@@ -325,9 +324,9 @@ DRILLS_CAPI_API int ruleforge_query_result_get_size(ruleforge_query_result_t que
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t
-ruleforge_query_result_get_fact_at_index(ruleforge_query_result_t query_result, int row_index,
-                                         const char *binding_name, ruleforge_fact_t *out_fact) {
+CXX_API ruleforge_status_t ruleforge_query_result_get_fact_at_index(ruleforge_query_result_t query_result,
+                                                            int row_index, const char *binding_name,
+                                                            ruleforge_fact_t *out_fact) {
   if (!query_result || !binding_name || !out_fact) {
     set_error("Query Result handle, binding name, or output Fact pointer is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -365,8 +364,7 @@ ruleforge_query_result_get_fact_at_index(ruleforge_query_result_t query_result, 
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t
-ruleforge_query_result_destroy(ruleforge_query_result_t query_result) {
+CXX_API ruleforge_status_t ruleforge_query_result_destroy(ruleforge_query_result_t query_result) {
   if (!query_result) {
     set_error("Query Result handle is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -383,11 +381,9 @@ ruleforge_query_result_destroy(ruleforge_query_result_t query_result) {
 }
 
 // Fact functions
-DRILLS_CAPI_API ruleforge_status_t ruleforge_fact_get_field_as_string(ruleforge_fact_t fact,
-                                                                      const char *field_name,
-                                                                      char *buffer,
-                                                                      size_t buffer_size,
-                                                                      size_t *out_actual_length) {
+CXX_API ruleforge_status_t ruleforge_fact_get_field_as_string(ruleforge_fact_t fact, const char *field_name,
+                                                      char *buffer, size_t buffer_size,
+                                                      size_t *out_actual_length) {
   if (!fact || !field_name || !buffer || !out_actual_length) {
     set_error("Fact handle, field name, buffer, or actual length pointer is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -422,9 +418,8 @@ DRILLS_CAPI_API ruleforge_status_t ruleforge_fact_get_field_as_string(ruleforge_
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t ruleforge_fact_get_field_as_double(ruleforge_fact_t fact,
-                                                                      const char *field_name,
-                                                                      double *out_value) {
+CXX_API ruleforge_status_t ruleforge_fact_get_field_as_double(ruleforge_fact_t fact, const char *field_name,
+                                                      double *out_value) {
   if (!fact || !field_name || !out_value) {
     set_error("Fact handle, field name, or output value pointer is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -457,9 +452,8 @@ DRILLS_CAPI_API ruleforge_status_t ruleforge_fact_get_field_as_double(ruleforge_
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t ruleforge_fact_get_field_as_int(ruleforge_fact_t fact,
-                                                                   const char *field_name,
-                                                                   int64_t *out_value) {
+CXX_API ruleforge_status_t ruleforge_fact_get_field_as_int(ruleforge_fact_t fact, const char *field_name,
+                                                   int64_t *out_value) {
   if (!fact || !field_name || !out_value) {
     set_error("Fact handle, field name, or output value pointer is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -486,9 +480,8 @@ DRILLS_CAPI_API ruleforge_status_t ruleforge_fact_get_field_as_int(ruleforge_fac
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t ruleforge_fact_get_field_as_bool(ruleforge_fact_t fact,
-                                                                    const char *field_name,
-                                                                    int *out_value) {
+CXX_API ruleforge_status_t ruleforge_fact_get_field_as_bool(ruleforge_fact_t fact, const char *field_name,
+                                                    int *out_value) {
   if (!fact || !field_name || !out_value) {
     set_error("Fact handle, field name, or output value pointer is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -517,8 +510,8 @@ DRILLS_CAPI_API ruleforge_status_t ruleforge_fact_get_field_as_bool(ruleforge_fa
 
 // --- Session Observability Functions ---
 
-DRILLS_CAPI_API ruleforge_status_t
-ruleforge_session_enable_tracing(ruleforge_stateful_session_t session, int enabled) {
+CXX_API ruleforge_status_t ruleforge_session_enable_tracing(ruleforge_stateful_session_t session,
+                                                    int enabled) {
   if (!session) {
     set_error("Session handle is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -534,9 +527,10 @@ ruleforge_session_enable_tracing(ruleforge_stateful_session_t session, int enabl
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t
-ruleforge_session_get_execution_trace(ruleforge_stateful_session_t session, int include_network,
-                                      char *buffer, size_t buffer_size, size_t *out_actual_length) {
+CXX_API ruleforge_status_t ruleforge_session_get_execution_trace(ruleforge_stateful_session_t session,
+                                                         int include_network, char *buffer,
+                                                         size_t buffer_size,
+                                                         size_t *out_actual_length) {
   if (!session || !buffer || !out_actual_length) {
     set_error("Session handle, buffer, or actual length pointer is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -560,7 +554,7 @@ ruleforge_session_get_execution_trace(ruleforge_stateful_session_t session, int 
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t
+CXX_API ruleforge_status_t
 ruleforge_session_get_rule_performance_summary(ruleforge_stateful_session_t session, char *buffer,
                                                size_t buffer_size, size_t *out_actual_length) {
   if (!session || !buffer || !out_actual_length) {
@@ -586,8 +580,7 @@ ruleforge_session_get_rule_performance_summary(ruleforge_stateful_session_t sess
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t
-ruleforge_session_clear_trace(ruleforge_stateful_session_t session) {
+CXX_API ruleforge_status_t ruleforge_session_clear_trace(ruleforge_stateful_session_t session) {
   if (!session) {
     set_error("Session handle is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;
@@ -605,7 +598,7 @@ ruleforge_session_clear_trace(ruleforge_stateful_session_t session) {
 
 // --- Session Memory Statistics Functions ---
 
-DRILLS_CAPI_API int64_t ruleforge_session_get_memory_used(ruleforge_stateful_session_t session) {
+CXX_API int64_t ruleforge_session_get_memory_used(ruleforge_stateful_session_t session) {
   if (!session) {
     set_error("Session handle is NULL");
     return -1;
@@ -620,7 +613,7 @@ DRILLS_CAPI_API int64_t ruleforge_session_get_memory_used(ruleforge_stateful_ses
   }
 }
 
-DRILLS_CAPI_API int64_t ruleforge_session_get_memory_peak(ruleforge_stateful_session_t session) {
+CXX_API int64_t ruleforge_session_get_memory_peak(ruleforge_stateful_session_t session) {
   if (!session) {
     set_error("Session handle is NULL");
     return -1;
@@ -635,9 +628,9 @@ DRILLS_CAPI_API int64_t ruleforge_session_get_memory_peak(ruleforge_stateful_ses
   }
 }
 
-DRILLS_CAPI_API ruleforge_status_t
-ruleforge_session_get_memory_stats(ruleforge_stateful_session_t session, char *buffer,
-                                   size_t buffer_size, size_t *out_actual_length) {
+CXX_API ruleforge_status_t ruleforge_session_get_memory_stats(ruleforge_stateful_session_t session,
+                                                      char *buffer, size_t buffer_size,
+                                                      size_t *out_actual_length) {
   if (!session || !buffer || !out_actual_length) {
     set_error("Session handle, buffer, or actual length pointer is NULL");
     return DRILLS_ERROR_INVALID_ARGUMENT;

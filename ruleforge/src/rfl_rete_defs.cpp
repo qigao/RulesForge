@@ -1,8 +1,8 @@
 #include "rfl_rete_defs.hpp"
-#include "fmtlog.h"
+#include "logging_control.hpp"
 
 #include <iostream>
-#include <magic_enum/magic_enum.hpp>
+
 #include <sstream>
 #include <tao/pegtl/contrib/parse_tree.hpp>
 #include <tao/pegtl/parse.hpp>
@@ -411,7 +411,8 @@ std::optional<ConstraintValue> Fact::get_field(std::string const& name) const {
     }
 
     logd("  > Did not find key '{}' in fields map.", name);
-    if constexpr(FMTLOG_ACTIVE_LEVEL <= FMTLOG_LEVEL_DBG) {
+#ifndef NDEBUG
+    {
         std::stringstream ss;
         ss << "  > Available fields in map: {";
         bool first = true;
@@ -423,12 +424,13 @@ std::optional<ConstraintValue> Fact::get_field(std::string const& name) const {
         ss << "}";
         logd("{}", ss.str());
     }
+#endif
 
     return std::nullopt;
 }
 
 Token::Token(std::shared_ptr<TokenWME const> w, PropagationType pt) : wme(std::move(w)), type(pt) {
-    logd("Token created with PropagationType: {}", magic_enum::enum_name(pt));
+    logd("Token created with PropagationType: {}", ENUM_NAME(pt));
 }
 
 std::shared_ptr<Fact const> Token::get_fact() const { return wme ? wme->fact : nullptr; }
@@ -479,11 +481,11 @@ bool ScheduledExpiration::operator>(ScheduledExpiration const& other) const {
 
 // --- Implementations for custom constructors / operators ---
 ConstraintNode::ConstraintNode(NodeType t) : type(t) {
-    logd("ConstraintNode created with NodeType: {}", magic_enum::enum_name(t));
+    logd("ConstraintNode created with NodeType: {}", ENUM_NAME(t));
 }
 
 ConstraintNode::ConstraintNode() : type(NodeType::LEAF) {
-    logd("ConstraintNode created with default NodeType: {}", magic_enum::enum_name(NodeType::LEAF));
+    logd("ConstraintNode created with default NodeType: {}", ENUM_NAME(NodeType::LEAF));
 }
 
 ConstraintNode::ConstraintNode(ConstraintNode const& other) : type(other.type), constraint(other.constraint) {

@@ -1,4 +1,4 @@
-#include "fmtlog.h"
+#include "logging_control.hpp"
 
 #include "rfl_js_manager.hpp"
 #include "query_result.hpp"
@@ -8,7 +8,7 @@
 #include "tms.hpp"
 
 #include <iostream>
-#include <magic_enum/magic_enum.hpp>
+
 #include <sstream>
 
 // Local helper to prevent code duplication
@@ -521,7 +521,7 @@ void StatefulSession::retract_fact(std::shared_ptr<Fact> fact) {
 
     tms_->on_fact_retracted(fact_to_retract.get());
     logd("Retracting fact ID: {}, Type: {}, Propagation: {}", fact_to_retract->id, fact_to_retract->type,
-              magic_enum::enum_name(PropagationType::RETRACT));
+              ENUM_NAME(PropagationType::RETRACT));
 
     auto alpha_it = alpha_entry_points_.find(fact_to_retract->type);
     if (alpha_it != alpha_entry_points_.end()) {

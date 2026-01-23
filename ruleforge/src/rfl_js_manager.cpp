@@ -1,5 +1,5 @@
 #include "rfl_js_manager.hpp"
-#include "fmtlog.h"
+#include "logging_control.hpp"
 
 #include "rfl_rete_defs.hpp"
 #include "i_network_callback.hpp"
@@ -10,7 +10,7 @@
 #include <iostream>
 #include <sstream>
 #include <limits>
-#include <magic_enum/magic_enum.hpp>
+
 #include <vector>
 #include <glaze/glaze.hpp>
 #include <jsoncons/json.hpp>
@@ -602,8 +602,8 @@ void JSScriptingManager::create_rfl_api(Token& current_token) {
     JS_SetPropertyStr(context_, rfl, "retract", retract_func);
     JS_SetPropertyStr(context_, rfl, "update", update_func);
     JS_SetPropertyStr(context_, rfl, "halt", halt_func);  // P1 FIX: Add halt
-    JS_SetPropertyStr(context_, rfl, "setFocus", set_focus_func); 
-    JS_SetPropertyStr(context_, rfl, "getRule", get_rule_func); 
+    JS_SetPropertyStr(context_, rfl, "setFocus", set_focus_func);
+    JS_SetPropertyStr(context_, rfl, "getRule", get_rule_func);
     JS_SetPropertyStr(context_, global, "rfl", rfl);
 
     JS_FreeValue(context_, global);

@@ -1,11 +1,11 @@
 #include "rfl_parser.hpp"
 #include "errors.hpp"
 #include "knowledge_base.hpp"
+#include "logging_control.hpp"
 
 #include <chrono>
-#include <fmtlog.h>
 #include <iostream>
-#include <magic_enum/magic_enum.hpp>
+
 #include <string>
 #include <vector>
 
@@ -53,7 +53,7 @@ void print_rule_ast(ParsedRule const &rule) {
     if (i > 0)
       std::cout << indent(1) << "--- OR ---\n";
     for (auto const &pattern : rule.condition_groups[i]) {
-      std::cout << indent(1) << "PATTERN: " << std::string(magic_enum::enum_name(pattern.type));
+      std::cout << indent(1) << "PATTERN: " << std::string(ENUM_NAME(pattern.type));
       if (!pattern.fact_type.empty()) {
         std::cout << " [ " << pattern.fact_type;
         if (!pattern.binding.empty())

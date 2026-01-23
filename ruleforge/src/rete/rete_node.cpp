@@ -1,4 +1,4 @@
-#include "fmtlog.h"
+#include "logging_control.hpp"
 
 #include "knowledge_base.hpp"
 #include "rete/rete_node.hpp"
@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <iostream>
 #include <list>
-#include <magic_enum/magic_enum.hpp>
+
 #include <regex>
 #include <sstream>
 #include <typeinfo>
@@ -465,7 +465,7 @@ BetaConditionNode::BetaConditionNode(std::vector<ParsedConstraint> const& joins,
 
 void BetaConditionNode::left_activate(StatefulSession& session, Token const& token) {
     logd("Node {}:{} left_activate. Token depth {}, type {}", this->id, typeid(*this).name(), token.wme->depth,
-              magic_enum::enum_name(token.type));
+              ENUM_NAME(token.type));
     auto const& wme = token.wme;
     if (token.type == PropagationType::RETRACT) {
         auto it = left_memory.find(wme.get());
@@ -497,7 +497,7 @@ void BetaConditionNode::left_activate(StatefulSession& session, Token const& tok
 
 void BetaConditionNode::right_activate(StatefulSession& session, std::shared_ptr<Fact> fact, PropagationType p_type) {
     logd("Node {}:{} right_activate. Fact ID {}, type {}", this->id, typeid(*this).name(), fact->id,
-              magic_enum::enum_name(p_type));
+              ENUM_NAME(p_type));
 
     // If the fact is being retracted, we must first check if it was in our memory.
     if (p_type == PropagationType::RETRACT) {
@@ -635,7 +635,7 @@ void EntryPointNode::left_activate(StatefulSession&, Token const&) {
 
 void EntryPointNode::right_activate(StatefulSession& session, std::shared_ptr<Fact> fact, PropagationType p_type) {
     logd("Node {}:EntryPointNode right_activate. Fact ID {}, type {}", this->id, fact->id,
-              magic_enum::enum_name(p_type));
+              ENUM_NAME(p_type));
     for (auto& weak_child : children) {
         if (auto child = weak_child.lock()) { child->right_activate(session, fact, p_type); }
     }
@@ -714,7 +714,7 @@ std::optional<ConstraintValue> HashedJoinNode::get_key(std::shared_ptr<Fact> con
 
 void HashedJoinNode::left_activate(StatefulSession& session, Token const& token) {
     logd("Node {}:HashedJoinNode left_activate. Token depth {}, type {}", this->id, token.wme->depth,
-              magic_enum::enum_name(token.type));
+              ENUM_NAME(token.type));
     auto key_opt = get_key(token);
     if (!key_opt) return;
     auto const& key = *key_opt;
@@ -747,7 +747,7 @@ void HashedJoinNode::left_activate(StatefulSession& session, Token const& token)
 
 void HashedJoinNode::right_activate(StatefulSession& session, std::shared_ptr<Fact> fact, PropagationType p_type) {
     logd("Node {}:HashedJoinNode right_activate. Fact ID {}, type {}", this->id, fact->id,
-              magic_enum::enum_name(p_type));
+              ENUM_NAME(p_type));
     auto key_opt = get_key(fact);
     if (!key_opt) return;
     auto const& key = *key_opt;
@@ -814,7 +814,7 @@ CrossProductJoinNode::CrossProductJoinNode(std::vector<ParsedConstraint> joins, 
 
 void CrossProductJoinNode::left_activate(StatefulSession& session, Token const& token) {
     logd("Node {}:CrossProductJoinNode left_activate. Token depth {}, type {}", this->id, token.wme->depth,
-              magic_enum::enum_name(token.type));
+              ENUM_NAME(token.type));
     if (token.type == PropagationType::RETRACT) {
         if (left_memory_.erase(token.wme.get()) > 0) {
             logd("  -> Retracted token from left memory. Propagating retract to {} children.", children.size());
@@ -834,7 +834,7 @@ void CrossProductJoinNode::left_activate(StatefulSession& session, Token const& 
 void CrossProductJoinNode::right_activate(StatefulSession& session, std::shared_ptr<Fact> fact,
                                           PropagationType p_type) {
     logd("Node {}:CrossProductJoinNode right_activate. Fact ID {}, type {}", this->id, fact->id,
-              magic_enum::enum_name(p_type));
+              ENUM_NAME(p_type));
 
     if (p_type == PropagationType::RETRACT) {
         if (right_memory_.erase(fact->id) > 0) {
@@ -923,7 +923,7 @@ AccumulateNode::AccumulateNode(IAccumulator const* prototype, ParsedAccumulate&&
 
 void AccumulateNode::left_activate(StatefulSession& session, Token const& token) {
     logd("Node {}:AccumulateNode left_activate. Token depth {}, type {}", this->id, token.wme->depth,
-              magic_enum::enum_name(token.type));
+              ENUM_NAME(token.type));
     auto const& wme = token.wme;
     if (token.type == PropagationType::RETRACT) {
         auto it = left_memory.find(wme.get());
@@ -960,7 +960,7 @@ void AccumulateNode::left_activate(StatefulSession& session, Token const& token)
 
 void AccumulateNode::right_activate(StatefulSession& session, std::shared_ptr<Fact> fact, PropagationType p_type) {
     logd("Node {}:AccumulateNode right_activate. Fact ID {}, type {}", this->id, fact->id,
-              magic_enum::enum_name(p_type));
+              ENUM_NAME(p_type));
     if (p_type == PropagationType::MODIFY || !accumulator_prototype->supports_reverse()) {
         if (p_type == PropagationType::ASSERT || p_type == PropagationType::MODIFY) {
             right_memory[fact->id] = fact;
@@ -1082,7 +1082,7 @@ UnnestNode::UnnestNode(ParsedUnnest const& unnest_info, map<std::string, int> co
 
 void UnnestNode::left_activate(StatefulSession& session, Token const& token) {
     logd("Node {}:UnnestNode left_activate. Token depth {}, type {}", this->id, token.wme->depth,
-              magic_enum::enum_name(token.type));
+              ENUM_NAME(token.type));
     auto const& wme = token.wme;
     if (token.type == PropagationType::RETRACT) {
         auto it = parent_to_children_map.find(wme.get());
@@ -1133,7 +1133,7 @@ EvalNode::EvalNode(std::string expr, map<std::string, int> bindings) :
 void EvalNode::left_activate(StatefulSession& session, Token const& token) {
     auto const& wme = token.wme;
     logd("Node {}:EvalNode left_activate. Token depth {}, type {}", this->id, wme->depth,
-              magic_enum::enum_name(token.type));
+              ENUM_NAME(token.type));
     if (token.type == PropagationType::RETRACT) {
         if (memory.erase(wme.get()) > 0) {
             logd("  -> Retracted token from memory. Propagating retract to children.");
@@ -1172,7 +1172,7 @@ TerminalNode::TerminalNode(ParsedRule const& r, map<std::string, int> b) :
 
 void TerminalNode::left_activate(StatefulSession& session, Token const& token) {
     logd("Node {}:TerminalNode left_activate for rule '{}'. Token type: {}", this->id, rule_name,
-              magic_enum::enum_name(token.type));
+              ENUM_NAME(token.type));
     auto wme_ptr = token.wme.get();
 
     auto const* rule = session.get_knowledge_base()->find_rule_by_name(rule_name);
@@ -1214,7 +1214,7 @@ void TerminalNode::print_node(std::ostream& os) const {
 QueryTerminalNode::QueryTerminalNode(map<std::string, int> bindings) : binding_to_token_idx(std::move(bindings)) {}
 
 void QueryTerminalNode::left_activate(StatefulSession& session, Token const& token) {
-    logd("Node {}:QueryTerminalNode left_activate. Token type: {}", this->id, magic_enum::enum_name(token.type));
+    logd("Node {}:QueryTerminalNode left_activate. Token type: {}", this->id, ENUM_NAME(token.type));
     auto const& wme = token.wme;
     if (token.type == PropagationType::ASSERT) {
         results[wme.get()] = token;

@@ -9,48 +9,54 @@ set(RULEFORGE_VERSION_PATCH 0)
 set(CAPI_TARGET_NAME rule_forge)
 
 # Add the shared library target
-add_library(${CAPI_TARGET_NAME} SHARED
-    src/rule_forge.cpp
+add_library(${CAPI_TARGET_NAME} SHARED src/rule_forge.cpp)
+
+target_compile_definitions(${CAPI_TARGET_NAME} PRIVATE SHARED_CXX)
+generate_export_header(
+    ${CAPI_TARGET_NAME}
+    BASE_NAME
+    RULEFORGE_CAPI
+    EXPORT_MACRO_NAME
+    RULEFORGE_CAPI_EXPORT
+    NO_EXPORT_MACRO_NAME
+    RULEFORGE_CAPI_NO_EXPORT
+    DEPRECATED_MACRO_NAME
+    RULEFORGE_CAPI_DEPRECATED
 )
+find_package(pegtl)
 
-target_compile_definitions(${CAPI_TARGET_NAME} PRIVATE DRILLS_CAPI_EXPORTS)
-generate_export_header(${CAPI_TARGET_NAME}
-    BASE_NAME RULEFORGE_CAPI
-    EXPORT_MACRO_NAME RULEFORGE_CAPI_EXPORT
-    NO_EXPORT_MACRO_NAME RULEFORGE_CAPI_NO_EXPORT
-    DEPRECATED_MACRO_NAME RULEFORGE_CAPI_DEPRECATED
-)
-find_package(pegtl )
-
-
-# Include directories for the CAPI.
-# PUBLIC: Only the C API header - this is what consumers need
-target_include_directories(${CAPI_TARGET_NAME} PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
+# Include directories for the CAPI. PUBLIC: Only the C API header - this is what
+# consumers need
+target_include_directories(
+    ${CAPI_TARGET_NAME}
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+           $<INSTALL_INTERFACE:include>
 )
 # PRIVATE: Internal implementation headers - not exposed to consumers
-target_include_directories(${CAPI_TARGET_NAME} PRIVATE
-    ${CMAKE_SOURCE_DIR}/ruleforge/include
-    ${CMAKE_SOURCE_DIR}/shared/pubcxx/include
+target_include_directories(
+    ${CAPI_TARGET_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/ruleforge/include
+                                ${CMAKE_SOURCE_DIR}/shared/pubcxx/include
 )
 
-target_link_libraries(${CAPI_TARGET_NAME} PRIVATE
-    RuleForge pubcxx hashmap taocpp::pegtl
+target_link_libraries(
+    ${CAPI_TARGET_NAME}
+    PRIVATE pubcxx hashmap taocpp::pegtl RuleForge
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
-    # Link against pthread for WASM if threading is used
-    # Emscripten provides its own pthread library
+    # Link against pthread for WASM if threading is used Emscripten provides its
+    # own pthread library
     target_link_libraries(${CAPI_TARGET_NAME} PRIVATE pthread)
 elseif(ANDROID)
-    # Android specific settings
-    # Set the C++ Standard Library to be used.
-    # Common options: c++_static, c++_shared, gnustl_static, gnustl_shared, stlport_static, stlport_shared
-    # c++_static (libc++_static.a) is generally recommended for static linking.
-    set_target_properties(${CAPI_TARGET_NAME} PROPERTIES
-        ANDROID_STL c++_static
-        ANDROID_NATIVE_API_LEVEL 21 # Minimum API level for Android NDK
+    # Android specific settings Set the C++ Standard Library to be used. Common
+    # options: c++_static, c++_shared, gnustl_static, gnustl_shared,
+    # stlport_static, stlport_shared c++_static (libc++_static.a) is generally
+    # recommended for static linking.
+    set_target_properties(
+        ${CAPI_TARGET_NAME}
+        PROPERTIES ANDROID_STL c++_static
+                   ANDROID_NATIVE_API_LEVEL 21 # Minimum API level for Android
+                                               # NDK
     )
     # Link against Android specific libraries if needed, e.g., log for logging
     # target_link_libraries(${CAPI_TARGET_NAME} PUBLIC log android)
@@ -58,23 +64,27 @@ endif()
 add_subdirectory(tests)
 add_subdirectory(examples)
 # Set output directory for the shared library
-set_target_properties(${CAPI_TARGET_NAME} PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+set_target_properties(
+    ${CAPI_TARGET_NAME}
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+               LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+               ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 
 # Install rules (optional, but good practice for a library)
-install(TARGETS ${CAPI_TARGET_NAME}
+install(
+    TARGETS ${CAPI_TARGET_NAME}
     EXPORT RuleForgeTargets
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
 
-install(DIRECTORY include/
+install(
+    DIRECTORY include/
     DESTINATION include
-    FILES_MATCHING PATTERN "*.h"
+    FILES_MATCHING
+    PATTERN "*.h"
 )
 
 # --- CMake Package Config ---
@@ -83,12 +93,14 @@ include(CMakePackageConfigHelpers)
 # Generate version file
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/RuleForgeConfigVersion.cmake"
-    VERSION ${RULEFORGE_VERSION_MAJOR}.${RULEFORGE_VERSION_MINOR}.${RULEFORGE_VERSION_PATCH}
+    VERSION
+        ${RULEFORGE_VERSION_MAJOR}.${RULEFORGE_VERSION_MINOR}.${RULEFORGE_VERSION_PATCH}
     COMPATIBILITY SameMajorVersion
 )
 
 # Export targets
-install(EXPORT RuleForgeTargets
+install(
+    EXPORT RuleForgeTargets
     FILE RuleForgeTargets.cmake
     NAMESPACE RuleForge::
     DESTINATION lib/cmake/RuleForge
@@ -101,8 +113,7 @@ configure_package_config_file(
     INSTALL_DESTINATION lib/cmake/RuleForge
 )
 
-install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/RuleForgeConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/RuleForgeConfigVersion.cmake"
-    DESTINATION lib/cmake/RuleForge
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/RuleForgeConfig.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/RuleForgeConfigVersion.cmake"
+        DESTINATION lib/cmake/RuleForge
 )

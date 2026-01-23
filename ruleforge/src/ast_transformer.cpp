@@ -1,10 +1,10 @@
 #include "ast_transformer.hpp"
-#include "fmtlog.h"
+#include "logging_control.hpp"
 
 #include "rfl_rete_defs.hpp"   // For ConstraintNode, NodeType, etc.
 
 #include <iostream>
-#include <magic_enum/magic_enum.hpp>
+
 #include <memory>   // For std::unique_ptr
 
 // Helper function to correctly negate a constraint, with special handling for booleans.
@@ -37,7 +37,7 @@ void negate_constraint(ParsedConstraint& c) {
 // Helper function to recursively negate a constraint tree using De Morgan's laws.
 void negate_constraint_tree(std::unique_ptr<ConstraintNode>& root) {
     if (!root) return;
-    logd("Negating constraint tree. Initial type: {}", magic_enum::enum_name(root->type));
+    logd("Negating constraint tree. Initial type: {}", ENUM_NAME(root->type));
 
     if (root->type == NodeType::LEAF) {
         negate_constraint(root->constraint);
@@ -50,7 +50,7 @@ void negate_constraint_tree(std::unique_ptr<ConstraintNode>& root) {
     else if (root->type == NodeType::OR)
         root->type = NodeType::AND;
 
-    logd("Negated constraint tree. Final type: {}", magic_enum::enum_name(root->type));
+    logd("Negated constraint tree. Final type: {}", ENUM_NAME(root->type));
     for (auto& child : root->children) { negate_constraint_tree(child); }
 }
 
@@ -78,7 +78,7 @@ void AstTransformer::expand_foralls_in_list(std::vector<ParsedPattern>& patterns
     for (auto it = patterns.begin(); it != patterns.end(); ++it) {
         auto& pattern = *it;
         logd("AstTransformer::expand_foralls_in_list() processing pattern type {}",
-             magic_enum::enum_name(pattern.type));
+             ENUM_NAME(pattern.type));
         // Recurse into nested patterns first
         if (!pattern.nested_patterns.empty()) { expand_foralls_in_list(pattern.nested_patterns); }
 

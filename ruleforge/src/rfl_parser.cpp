@@ -1,5 +1,5 @@
 #include "rfl_parser.hpp"
-#include "fmtlog.h"
+#include "logging_control.hpp"
 
 #include "ast_builder.hpp"
 #include "ast_transformer.hpp"

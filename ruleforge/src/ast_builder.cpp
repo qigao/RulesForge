@@ -2,14 +2,14 @@
 #include <cctype>
 #include <stdexcept>
 #include <variant>
-
+#include "tlog_helper.h"
 #include "ast_builder.hpp"
 
 #include <tao/pegtl/contrib/parse_tree.hpp>
 #include <tao/pegtl/string_input.hpp>
 
 #include "rfl_parser_state.hpp"
-#include "fmtlog.h"
+#include "logging_control.hpp"
 
 namespace
 {
@@ -563,7 +563,7 @@ ParsedPattern AstBuilder::build_pattern(pegtl::parse_tree::node const& n)
     logd("build_pattern: standard_pattern_body for '{}' has {} direct children",
          pattern.fact_type, body->children.size());
     for (size_t i = 0; i < body->children.size(); ++i) {
-      logd("  child[{}]: type={}", i, body->children[i]->type);
+      logd("  child[{}]: type={}", i, tlog::format(body->children[i]->type));
     }
 
     // Try find_child first (direct child), then fallback to find_descendant
@@ -614,7 +614,7 @@ ParsedPattern AstBuilder::build_pattern(pegtl::parse_tree::node const& n)
 void AstBuilder::build_from_clause(pegtl::parse_tree::node const& n,
                                    ParsedPattern& pattern)
 {
-  logd("build_from_clause: node type={}, has {} children", n.type, n.children.size());
+  logd("build_from_clause: node type={}, has {} children", tlog::format(n.type), n.children.size());
   if (n.children.empty()) {
     logd("build_from_clause: returning early - no children");
     return;
@@ -624,7 +624,7 @@ void AstBuilder::build_from_clause(pegtl::parse_tree::node const& n,
     logd("build_from_clause: returning early - null from_body");
     return;
   }
-  logd("build_from_clause: from_body type={}", from_body->type);
+  logd("build_from_clause: from_body type={}", tlog::format(from_body->type));
   if (from_body->is_type<grammar::from_accumulate_clause>()) {
     logd("build_from_clause: detected from_accumulate_clause");
     ParsedAccumulate acc_info;
@@ -976,7 +976,7 @@ std::unique_ptr<ConstraintNode> AstBuilder::build_constraint_item(
             // Only treat as arithmetic if it contains operators
             if (arith_str.find_first_of("+-*/") != std::string::npos) {
               leaf_node->constraint.right_arith_expr = arith_str;
-              leaf_node->constraint.right_arith_ast = parse_arith_expr_string(arith_str); 
+              leaf_node->constraint.right_arith_ast = parse_arith_expr_string(arith_str);
             } else {
               // It's a simple variable reference
               size_t pos = rhs_full_name.find('.');
@@ -1008,7 +1008,7 @@ std::unique_ptr<ConstraintNode> AstBuilder::build_constraint_item(
         // Only treat as arithmetic if it contains operators
         if (arith_str.find_first_of("+-*/") != std::string::npos) {
           leaf_node->constraint.right_arith_expr = arith_str;
-          leaf_node->constraint.right_arith_ast = parse_arith_expr_string(arith_str); 
+          leaf_node->constraint.right_arith_ast = parse_arith_expr_string(arith_str);
         } else {
           leaf_node->constraint.right_literal = build_literal(*rhs_node);
         }
