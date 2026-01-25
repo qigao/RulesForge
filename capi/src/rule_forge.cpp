@@ -80,6 +80,9 @@ CXX_API ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, 
     ParsingResult result;
     auto kb_wrapper = static_cast<KnowledgeBaseWrapper *>(kb);
 
+    // Save the native functions before rebuilding
+    auto saved_native_functions = kb_wrapper->kb->get_native_functions();
+
     // Use the real RFL parser
     kb_wrapper->kb = build_knowledge_base(drl_source, result, "C_API_Source");
 
@@ -90,6 +93,11 @@ CXX_API ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, 
       }
       snprintf(last_error, sizeof(last_error), "%s", error_msg.c_str());
       return DRILLS_ERROR_COMPILATION_FAILED;
+    }
+
+    // Restore the native functions
+    for (auto const& [name, func] : saved_native_functions) {
+      kb_wrapper->kb->register_native_function(name, func.callback, func.user_data);
     }
 
     last_error[0] = '\0';
@@ -114,6 +122,9 @@ CXX_API ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowle
     ParsingResult result;
     auto kb_wrapper = static_cast<KnowledgeBaseWrapper *>(kb);
 
+    // Save the native functions before rebuilding
+    auto saved_native_functions = kb_wrapper->kb->get_native_functions();
+
     kb_wrapper->kb = build_knowledge_base_from_csv_string(csv_source, result, "C_API_CSV_Source");
 
     if (!result.success) {
@@ -123,6 +134,11 @@ CXX_API ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowle
       }
       snprintf(last_error, sizeof(last_error), "%s", error_msg.c_str());
       return DRILLS_ERROR_COMPILATION_FAILED;
+    }
+
+    // Restore the native functions
+    for (auto const& [name, func] : saved_native_functions) {
+      kb_wrapper->kb->register_native_function(name, func.callback, func.user_data);
     }
 
     last_error[0] = '\0';
@@ -145,6 +161,37 @@ CXX_API ruleforge_status_t ruleforge_kb_destroy(ruleforge_knowledge_base_t kb) {
     return DRILLS_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to destroy Knowledge Base: ", e.what());
+    return DRILLS_ERROR_GENERIC;
+  }
+}
+
+CXX_API ruleforge_status_t ruleforge_kb_register_native_function(
+    ruleforge_knowledge_base_t kb,
+    const char *function_name,
+    ruleforge_native_function_t callback,
+    void *user_data) {
+  if (!kb) {
+    set_error("Knowledge Base handle is NULL");
+    return DRILLS_ERROR_INVALID_ARGUMENT;
+  }
+  if (!function_name) {
+    set_error("Function name is NULL");
+    return DRILLS_ERROR_INVALID_ARGUMENT;
+  }
+  if (!callback) {
+    set_error("Callback function is NULL");
+    return DRILLS_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto kb_wrapper = static_cast<KnowledgeBaseWrapper *>(kb);
+    kb_wrapper->kb->register_native_function(
+        function_name,
+        reinterpret_cast<NativeFunctionCallback>(callback),
+        user_data);
+    last_error[0] = '\0';
+    return DRILLS_OK;
+  } catch (const std::exception &e) {
+    set_error_fmt("Failed to register native function: ", e.what());
     return DRILLS_ERROR_GENERIC;
   }
 }

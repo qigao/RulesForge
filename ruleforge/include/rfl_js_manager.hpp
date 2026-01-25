@@ -6,7 +6,7 @@
 #include "i_network_callback.hpp"
 #include "js_handle_manager.hpp"
 #include "token_handle_manager.hpp"
-
+#include "knowledge_base.hpp"
 #include <chrono>
 #include <map>
 #include <quickjs.h>
@@ -64,6 +64,7 @@ public:
 
     JSContext* get_js_context();
     void load_functions(std::vector<ParsedFunction> const& functions);
+    void register_native_functions(std::map<std::string, NativeFunction> const& functions);
     bool execute_eval(std::string const& code, Token const& token, map<std::string, int> const& bindings);
     void execute_rhs(std::string const& rhs_code, std::string const& rule_name, Token& token,
                      map<std::string, int> const& bindings);
@@ -114,6 +115,18 @@ private:
     std::chrono::milliseconds execution_timeout_;
     std::chrono::steady_clock::time_point rhs_start_time_;
     bool timeout_occurred_ = false;
+
+    // Native function data storage
+    struct NativeFuncData {
+        NativeFunctionCallback callback;
+        void* user_data;
+        JSScriptingManager* manager;  // Back-reference to manager
+        int func_id;  // Unique ID for this function
+    };
+    std::map<std::string, std::unique_ptr<NativeFuncData>> native_func_data_;
+
+    // Friend function for native wrapper
+    friend JSValue native_function_wrapper(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic);
 };
 
 #endif   // RFL_JS_MANAGER_HPP

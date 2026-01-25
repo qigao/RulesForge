@@ -18,6 +18,17 @@
 
 struct ParsedFunction;
 
+// Helper struct for native function data (needs to be accessible to static function)
+struct NativeFuncDataHelper {
+    NativeFunctionCallback callback;
+    void* user_data;
+    JSScriptingManager* manager;
+};
+
+// Global map to store native function data by unique ID
+static std::map<int, NativeFuncDataHelper*> g_native_func_by_id;
+static int g_next_func_id = 1;
+
 // Helper to create a new Fact from a JavaScript object.
 std::shared_ptr<Fact> JSScriptingManager::fact_from_js_object(JSValue fact_obj) {
     if (!JS_IsObject(fact_obj)) {
@@ -130,6 +141,11 @@ JSScriptingManager::~JSScriptingManager() {
         JSHandleManager::instance().unregister(handle_id_);
     }
 
+    // Clean up native function registrations from global map
+    for (auto const& [name, data] : native_func_data_) {
+        g_native_func_by_id.erase(data->func_id);
+    }
+
     if (context_) {
         JS_FreeContext(context_);
     }
@@ -179,6 +195,130 @@ void JSScriptingManager::load_functions(std::vector<ParsedFunction> const& funct
             std::cerr << "JavaScript function load error: " << e.what() << std::endl;
         }
     }
+}
+
+// Forward declaration
+class JSScriptingManager;
+
+// Static callback wrapper for native functions
+static JSValue native_function_wrapper(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    try {
+        // magic contains the function ID
+        auto it = g_native_func_by_id.find(magic);
+        if (it == g_native_func_by_id.end()) {
+            return JS_ThrowInternalError(ctx, "Native function ID %d not found in registry", magic);
+        }
+        
+        auto* data = it->second;
+        if (!data) {
+            return JS_ThrowInternalError(ctx, "Invalid native function data pointer");
+        }
+        
+        // Convert JS arguments to JSON strings
+        std::vector<std::string> arg_storage;
+        std::vector<const char*> args;
+        
+        for (int i = 0; i < argc; i++) {
+            // Convert each argument to JSON string
+            JSValue json_str = JS_JSONStringify(ctx, argv[i], JS_NULL, JS_NULL);
+            if (JS_IsException(json_str)) {
+                // Fallback to string conversion
+                const char* str = JS_ToCString(ctx, argv[i]);
+                if (str) {
+                    arg_storage.push_back(str);
+                    JS_FreeCString(ctx, str);
+                } else {
+                    arg_storage.push_back("null");
+                }
+            } else {
+                const char* str = JS_ToCString(ctx, json_str);
+                if (str) {
+                    arg_storage.push_back(str);
+                    JS_FreeCString(ctx, str);
+                }
+                JS_FreeValue(ctx, json_str);
+            }
+            args.push_back(arg_storage.back().c_str());
+        }
+        
+        // Call the native C function
+        char* result = nullptr;
+        int status = data->callback(data->user_data, argc, args.data(), &result);
+        
+        if (status != 0) {  // DRILLS_OK = 0
+            std::string error_msg = "Native function failed";
+            if (result) {
+                error_msg += ": ";
+                error_msg += result;
+                free(result);
+            }
+            return JS_ThrowInternalError(ctx, "%s", error_msg.c_str());
+        }
+        
+        JSValue ret = JS_UNDEFINED;
+        if (result) {
+            // Parse JSON result
+            ret = JS_ParseJSON(ctx, result, strlen(result), nullptr);
+            free(result);
+            
+            if (JS_IsException(ret)) {
+                return JS_ThrowInternalError(ctx, "Failed to parse native function result as JSON");
+            }
+        }
+        
+        return ret;
+    } catch (std::exception const& e) {
+        return JS_ThrowInternalError(ctx, "C++ exception in native function: %s", e.what());
+    } catch (...) {
+        return JS_ThrowInternalError(ctx, "Unknown C++ exception in native function");
+    }
+}
+
+void JSScriptingManager::register_native_functions(std::map<std::string, NativeFunction> const& functions) {
+    if (functions.empty()) {
+        logd("No native functions to register");
+        return;
+    }
+    
+    JSValue global = JS_GetGlobalObject(context_);
+    
+    for (auto const& [name, native_func] : functions) {
+        logd("Registering native function '{}'", name);
+        
+        // Assign unique ID
+        int func_id = g_next_func_id++;
+        
+        // Store function data in manager
+        native_func_data_[name] = std::make_unique<NativeFuncData>(
+            NativeFuncData{native_func.callback, native_func.user_data, this, func_id}
+        );
+        
+        // Register in global map for lookup by ID
+        g_native_func_by_id[func_id] = reinterpret_cast<NativeFuncDataHelper*>(native_func_data_[name].get());
+        
+        // Create JS function using JS_NewCFunction2 with magic parameter
+        // Cast to JSCFunction* to match the expected signature
+        JSValue js_func = JS_NewCFunction2(
+            context_,
+            reinterpret_cast<JSCFunction*>(native_function_wrapper),
+            name.c_str(),
+            0,  // length (variable args)
+            JS_CFUNC_generic_magic,
+            func_id  // magic = function ID
+        );
+        
+        // Register the function globally
+        JS_SetPropertyStr(context_, global, name.c_str(), js_func);
+        
+        // Verify it was registered
+        JSValue test_val = JS_GetPropertyStr(context_, global, name.c_str());
+        bool is_func = JS_IsFunction(context_, test_val);
+        JS_FreeValue(context_, test_val);
+        
+        logi("Native function '{}' registered successfully with ID {} (is_function: {})", name, func_id, is_func);
+    }
+    
+    JS_FreeValue(context_, global);
 }
 
 JSValue JSScriptingManager::populate_js_object_from_fact(Fact const& fact) {

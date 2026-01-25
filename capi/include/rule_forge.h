@@ -75,6 +75,28 @@ CXX_C_API ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_know
 // The handle becomes invalid after this call.
 CXX_C_API ruleforge_status_t ruleforge_kb_destroy(ruleforge_knowledge_base_t kb);
 
+
+// --- Native Function Registration ---
+// Callback signature for native C functions callable from rules
+// ctx: User-provided context
+// argc: Number of arguments
+// argv: Array of argument strings (JSON-encoded)
+// out_result: Output result (JSON-encoded string, caller must free with free())
+// Returns DRILLS_OK on success
+typedef ruleforge_status_t (*ruleforge_native_function_t)(
+    void *ctx, int argc, const char **argv, char **out_result);
+
+// Register a native C function that can be called from rules
+// kb: Knowledge base
+// function_name: Name of the function (e.g., "republish", "webhook")
+// callback: C function pointer
+// user_data: User data passed to callback
+// Returns DRILLS_OK on success
+CXX_C_API ruleforge_status_t ruleforge_kb_register_native_function(
+    ruleforge_knowledge_base_t kb,
+    const char *function_name,
+    ruleforge_native_function_t callback,
+    void *user_data);
 // --- Stateful Session Management ---
 // Creates a new Stateful Session from a Knowledge Base.
 // Returns DRILLS_OK on success, and sets 'out_session' to the handle.
@@ -217,3 +239,4 @@ CXX_C_API ruleforge_status_t ruleforge_fact_get_field_as_bool(
 #endif
 
 #endif // __RULE_FORGE_H__
+

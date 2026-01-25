@@ -27,6 +27,12 @@ StatefulSession::StatefulSession(private_key, std::shared_ptr<KnowledgeBase cons
     logd("StatefulSession::StatefulSession -> Creating session. KB Rules: {}, KB Queries: {}",
          kb_->get_rules().size(), kb_->get_parser_state().parsed_queries.size());
     scripting_manager_ = std::make_unique<JSScriptingManager>(*this);
+    
+    // Register native functions from knowledge base
+    auto const& native_funcs = kb_->get_native_functions();
+    logi("StatefulSession: Registering {} native functions from knowledge base", native_funcs.size());
+    scripting_manager_->register_native_functions(native_funcs);
+    
     tms_ = std::make_unique<TruthMaintenanceSystem>(*this);
     // PROD-002: Initialize schema validator
     schema_validator_ = std::make_unique<SchemaValidator>(kb_->get_parser_state().parsed_declarations);

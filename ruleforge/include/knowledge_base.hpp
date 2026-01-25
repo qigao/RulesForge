@@ -21,6 +21,14 @@ struct ParsedRule;
 struct ParsedPattern;
 struct ConstraintNode;
 
+// Native function callback type (shared with JSScriptingManager)
+using NativeFunctionCallback = int (*)(void* ctx, int argc, const char** argv, char** out_result);
+
+struct NativeFunction {
+    NativeFunctionCallback callback;
+    void* user_data;
+};
+
 class KnowledgeBase : public std::enable_shared_from_this<KnowledgeBase> {
 public:
     struct private_key {
@@ -78,6 +86,10 @@ public:
      */
     void register_accumulator(std::string const& name, std::unique_ptr<IAccumulator> prototype);
 
+    // --- Native Function Registration ---
+    void register_native_function(std::string const& name, NativeFunctionCallback callback, void* user_data);
+    std::map<std::string, NativeFunction> const& get_native_functions() const { return native_functions_; }
+
     std::vector<ParsedRule> const& get_rules() const { return processed_rules_; }
 
     parser_state const& get_parser_state() const { return parser_state_; }
@@ -97,6 +109,7 @@ private:
     std::shared_ptr<AccumulatorRegistry> accumulator_registry_;
     map<std::string, std::chrono::milliseconds> type_expiration_policies_;
     FactTypeRegistry fact_type_registry_;
+    std::map<std::string, NativeFunction> native_functions_;
 };
 
 #endif   // KNOWLEDGE_BASE_HPP

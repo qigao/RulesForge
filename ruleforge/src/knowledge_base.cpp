@@ -49,6 +49,11 @@ void KnowledgeBase::register_accumulator(std::string const& name, std::unique_pt
     accumulator_registry_->register_accumulator(name, std::move(prototype));
 }
 
+void KnowledgeBase::register_native_function(std::string const& name, NativeFunctionCallback callback, void* user_data) {
+    logd("KnowledgeBase::register_native_function -> Registering native function '{}'", name);
+    native_functions_[name] = NativeFunction{callback, user_data};
+}
+
 void KnowledgeBase::build(parser_state& state) {
     logd("KnowledgeBase::build -> Building from parser state with {} rules.", state.parsed_rules.size());
     this->parser_state_ = state;
