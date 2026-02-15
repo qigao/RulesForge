@@ -1,7 +1,7 @@
-﻿#include "pubcxx/singleton.hpp"
+#include "tinytest.h"
+#include "pubcxx/singleton.hpp"
 
 #include <atomic>
-#include <catch2/catch_test_macros.hpp>
 #include <thread>
 #include <vector>
 
@@ -19,19 +19,21 @@ private:
     std::atomic_uint32_t count_{0};
 };
 
-TEST_CASE("SingletonMultiThreadTest", "[multiThread]") {
-    auto const count = std::thread::hardware_concurrency();
-    Counter::Construct();
-    Counter::GetInstance();
-    auto threads = std::vector<std::thread>{};
+suite("Singleton MultiThread") {
+    it("handles concurrent access correctly") {
+        auto const count = std::thread::hardware_concurrency();
+        Counter::Construct();
+        Counter::GetInstance();
+        auto threads = std::vector<std::thread>{};
 
-    threads.reserve(count);
-    for (auto i = 0u; i < count; ++i) {
-        threads.emplace_back([&] { Counter::GetInstance()->Add(); });
+        threads.reserve(count);
+        for (auto i = 0u; i < count; ++i) {
+            threads.emplace_back([&] { Counter::GetInstance()->Add(); });
+        }
+
+        for (auto& thread : threads) { thread.join(); }
+
+        check_uint_eq(init, 1);
+        check_uint_eq(Counter::GetInstance()->GetCount(), count);
     }
-
-    for (auto& thread : threads) { thread.join(); }
-
-    REQUIRE(init == 1);
-    REQUIRE(Counter::GetInstance()->GetCount() == count);
 }

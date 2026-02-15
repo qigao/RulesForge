@@ -2,14 +2,14 @@
 
 #include "rfl_js_manager.hpp"
 #include "query_result.hpp"
-#include "rete/beta_builder.hpp"
+#include "rete/compiled_network.hpp"
 #include "rete/rete_node.hpp"
 #include "stateful_session.hpp"
 #include "tms.hpp"
 
-#include <iostream>
-
 #include <sstream>
+
+using namespace ruleforge;
 
 // Local helper to prevent code duplication
 namespace {
@@ -24,15 +24,12 @@ namespace {
 }   // namespace
 
 StatefulSession::StatefulSession(private_key, std::shared_ptr<KnowledgeBase const> kb) : kb_(std::move(kb)) {
-    logd("StatefulSession::StatefulSession -> Creating session. KB Rules: {}, KB Queries: {}",
-         kb_->get_rules().size(), kb_->get_parser_state().parsed_queries.size());
     scripting_manager_ = std::make_unique<JSScriptingManager>(*this);
-    
+
     // Register native functions from knowledge base
     auto const& native_funcs = kb_->get_native_functions();
-    logi("StatefulSession: Registering {} native functions from knowledge base", native_funcs.size());
     scripting_manager_->register_native_functions(native_funcs);
-    
+
     tms_ = std::make_unique<TruthMaintenanceSystem>(*this);
     // PROD-002: Initialize schema validator
     schema_validator_ = std::make_unique<SchemaValidator>(kb_->get_parser_state().parsed_declarations);
@@ -49,118 +46,45 @@ StatefulSession::~StatefulSession() {
     logd("StatefulSession::~StatefulSession -> Destroying session. Final fact count: {}", all_facts_.size());
 }
 
-void StatefulSession::build_network() {
-    logd("Building Rete network...");
-    logd("StatefulSession::build_network -> Rules: {}, Queries: {}", kb_->get_rules().size(),
-         kb_->get_parser_state().parsed_queries.size());
-    for (auto const& rule : kb_->get_rules()) {
-        if (!rule.enabled) {
-            logd("Skipping disabled rule: '{}'", rule.name);
-            continue;
-        }
-        logd("Building network for rule: '{}'", rule.name);
-        if (rule.condition_groups.empty() || (rule.condition_groups.size() == 1 && rule.condition_groups[0].empty())) {
-            // This is a special case for rules with no conditions. It's an immediate activation.
-            logd("  -> Rule '{}' has no conditions, creating immediate activation.", rule.name);
-            Token dummy_token{get_dummy_wme(), PropagationType::ASSERT};
-            size_t hash = std::hash<TokenWME const*>{}(dummy_token.wme.get()) ^ reinterpret_cast<uintptr_t>(&rule);
-            add_activation(Activation{&rule, dummy_token, hash, {}});
-            continue;
-        }
-
-        for (auto const& condition_group : rule.condition_groups) {
-            logd("  -> Building condition group for rule '{}'", rule.name);
-            BetaNetworkBuilder builder(*this, condition_group, false, 0);
-            auto last_node = builder.build();
-            auto terminal_node = create_node<TerminalNode>(rule, builder.get_bindings());
-            if (last_node) { last_node->add_child(terminal_node); }
-        }
-    }
-
-    // Build the network for queries.
-    for (auto& query : kb_->get_parser_state().parsed_queries) {
-        logd("Building network for query: '{}'", query.name);
-        BetaNetworkBuilder builder(*this, query.patterns, true, query.parameter_count);
-        auto last_node = builder.build();
-        // Give the terminal node the full set of bindings so it can interpret tokens correctly.
-        auto query_terminal_node = create_node<QueryTerminalNode>(builder.get_bindings());
-        query_nodes_[query.name] = query_terminal_node;
-        if (last_node) { last_node->add_child(query_terminal_node); }
-
-        if (query.parameter_count > 0) {
-            auto query_input_node = create_node<QueryInputNode>(query_terminal_node);
-            parameterized_query_inputs_[query.name] = query_input_node;
-            if (builder.first_beta_node_in_chain) {
-                // Connect input node to the start of the beta chain.
-                query_input_node->add_child(builder.first_beta_node_in_chain);
-            } else if (!last_node) {
-                // The input node should propagate directly to the terminal node.
-                logd("  -> Query '{}' has no body, connecting input directly to terminal.", query.name);
-                query_input_node->add_child(query_terminal_node);
-            }
-        }
-    }
+void StatefulSession::allocate_network_memory(MemSlotCounts const& counts) {
+    net_mem_.allocate(counts);
 }
 
 void StatefulSession::prime_network_state() {
-    logd("Priming Rete network state...");
-    logd("StatefulSession::prime_network_state -> Nodes: {}", all_nodes_.size());
-    Token dummy_token{get_dummy_wme(), PropagationType::ASSERT};
+    // Handle rules with no conditions — immediate activation
+    for (auto const& rule : kb_->get_rules()) {
+        if (!rule.enabled) continue;
+        if (rule.condition_groups.empty() || (rule.condition_groups.size() == 1 && rule.condition_groups[0].empty())) {
+            Token dummy_token{get_dummy_wme(), PropagationType::ASSERT};
+            size_t hash = std::hash<TokenWME const*>{}(dummy_token.wme.get()) ^ reinterpret_cast<uintptr_t>(&rule);
+            add_activation(Activation{&rule, dummy_token, hash, {}});
+        }
+    }
 
-    for (auto const& node : all_nodes_) {
-        // Is the current node a beta node that could be a root?
-        if (std::dynamic_pointer_cast<BaseJoinNode>(node) || std::dynamic_pointer_cast<NotNode>(node) ||
-            std::dynamic_pointer_cast<ExistsNode>(node) || std::dynamic_pointer_cast<AccumulateNode>(node) ||
-            std::dynamic_pointer_cast<EvalNode>(node)) {
-            bool has_beta_parent = false;
-            logd("  -> Checking node ID {} for beta parents. Parent count: {}", node->id,
-                 node->get_parents().size());
-            for (auto const& weak_parent : node->get_parents()) {
-                if (auto parent = weak_parent.lock()) {
-                    logd("    -> Checking parent ID {}", parent->id);
-                    // If a node is fed by another join, not, exists, etc., it's not a root.
-                    if (dynamic_cast<BaseJoinNode*>(parent.get()) || dynamic_cast<NotNode*>(parent.get()) ||
-                        dynamic_cast<ExistsNode*>(parent.get()) || dynamic_cast<AccumulateNode*>(parent.get()) ||
-                        dynamic_cast<EvalNode*>(parent.get()) || dynamic_cast<UnnestNode*>(parent.get()) ||
-                        dynamic_cast<QueryInputNode*>(parent.get())) {
-                        logd("      -> Parent ID {} IS a beta node. Marking as having beta parent.", parent->id);
-                        has_beta_parent = true;
-                        break;
-                    }
+    // Prime beta root nodes with dummy token
+    Token dummy_token{get_dummy_wme(), PropagationType::ASSERT};
+    auto const& net = kb_->network();
+    for (auto const& node : net.all_nodes) {
+        if (!node->is_beta_node()) continue;
+        bool has_beta_parent = false;
+        logd("  -> Checking node ID {} for beta parents. Parent count: {}", node->id,
+             node->get_parents().size());
+        for (auto const& weak_parent : node->get_parents()) {
+            if (auto parent = weak_parent.lock()) {
+                logd("    -> Checking parent ID {}", parent->id);
+                if (parent->is_beta_node()) {
+                    logd("      -> Parent ID {} IS a beta node. Marking as having beta parent.", parent->id);
+                    has_beta_parent = true;
+                    break;
                 }
             }
-            // A node is a root of a beta chain if it has no beta-node parents.
-            // Its parents can be AlphaNodes, EntryPointNodes, or nothing.
-            if (!has_beta_parent) {
-                logd("  -> Priming beta root node ID {}", node->id);
-                node->left_activate(*this, dummy_token);
-            }
+        }
+        if (!has_beta_parent) {
+            logd("  -> Priming beta root node ID {}", node->id);
+            node->left_activate(*this, dummy_token);
         }
     }
     logd("Finished priming Rete network.");
-}
-
-std::vector<std::shared_ptr<ReteNode>>
-StatefulSession::build_alpha_chain(ConstraintNode const* node, std::vector<std::shared_ptr<ReteNode>> parent_tails) {
-    if (!node || node->children.empty()) { return parent_tails; }
-
-    // The logic here assumes the root `node` is an AND of all its children.
-    // We chain the alpha nodes one after another.
-    std::vector<std::shared_ptr<ReteNode>> current_tails = parent_tails;
-    for (auto const& constraint_leaf : node->children) {
-        auto alpha_node = create_node<AlphaNode>(constraint_leaf->constraint);
-        logd("  AlphaNode ID: {}, Constraint: {}", alpha_node->id,
-             constraint_to_string(constraint_leaf->constraint));
-
-        // Connect all current tails to this new alpha node.
-        for (auto& parent : current_tails) { parent->add_child(alpha_node); }
-        // The new tail of the chain IS the node we just added.
-        // All subsequent nodes will be attached to this one.
-        current_tails = {alpha_node};
-    }
-
-    // Return the final tail(s) of the single chain.
-    return current_tails;
 }
 
 JSContext* StatefulSession::get_js_context() { return scripting_manager_->get_js_context(); }
@@ -199,8 +123,8 @@ void StatefulSession::add_fact(std::shared_ptr<Fact> fact) {
 
     all_facts_[fact->id] = fact;
     logd("Fact count after add: {}", all_facts_.size());
-    auto it = alpha_entry_points_.find(fact->type);
-    if (it != alpha_entry_points_.end()) {
+    auto it = kb_->network().alpha_entry_points.find(fact->type);
+    if (it != kb_->network().alpha_entry_points.end()) {
         logd("Propagating fact ID {} to entry point for type '{}' (Node ID {})", fact->id, fact->type,
                   it->second->id);
         it->second->right_activate(*this, fact, PropagationType::ASSERT);
@@ -215,11 +139,19 @@ void StatefulSession::add_facts(std::vector<std::shared_ptr<Fact>> const& facts)
     logd("Adding {} facts in batch. Fact count before: {}", facts.size(), all_facts_.size());
 
     // Phase 1: Prepare all facts without network propagation
-    phmap::flat_hash_map<std::string, std::vector<std::shared_ptr<Fact>>> facts_by_type;
-    for (auto& fact : facts) {
+    all_facts_.reserve(all_facts_.size() + facts.size());
+    ruleforge::unordered_map<std::string, std::vector<std::shared_ptr<Fact>>> facts_by_type;
+    for (auto const& fact : facts) {
         if (!fact) continue;
         if (fact->id == 0) fact->id = next_fact_id_++;
-        assign_nested_fact_ids(*fact);
+
+        // Only scan for nested fact IDs if any field is a FactList
+        for (auto& [key, val] : fact->fields) {
+            if (std::holds_alternative<FactList>(val)) {
+                assign_nested_fact_ids(*fact);
+                break;
+            }
+        }
 
         tracer_.trace_fact_added(fact->id, fact->type);
 
@@ -229,19 +161,19 @@ void StatefulSession::add_facts(std::vector<std::shared_ptr<Fact>> const& facts)
 
     logd("Fact count after batch add: {}", all_facts_.size());
 
-    // Phase 2: Batch propagate by type to minimize network overhead
-    for (auto const& [type, type_facts] : facts_by_type) {
-        auto it = alpha_entry_points_.find(type);
-        if (it != alpha_entry_points_.end()) {
+    // Phase 2: Batch propagate by type — deferred mode queues at beta nodes
+    deferred_mode_ = true;
+    for (auto& [type, type_facts] : facts_by_type) {
+        auto it = kb_->network().alpha_entry_points.find(type);
+        if (it != kb_->network().alpha_entry_points.end()) {
             logd("Batch propagating {} facts of type '{}' to entry point (Node ID {})",
                      type_facts.size(), type, it->second->id);
-            for (auto& fact : type_facts) {
-                it->second->right_activate(*this, fact, PropagationType::ASSERT);
-            }
+            it->second->right_activate_batch_deferred(*this, type_facts, PropagationType::ASSERT);
         } else {
             logd("No entry point found for fact type '{}'", type);
         }
     }
+    deferred_mode_ = false;
 }
 void StatefulSession::insert_into(std::string const& stream_name, std::shared_ptr<Fact> fact) {
     if (!fact) return;
@@ -260,8 +192,8 @@ void StatefulSession::insert_into(std::string const& stream_name, std::shared_pt
     all_facts_[fact->id] = fact;
 
     // Route to named entry point
-    auto stream_it = named_entry_points_.find(stream_name);
-    if (stream_it != named_entry_points_.end()) {
+    auto stream_it = kb_->network().named_entry_points.find(stream_name);
+    if (stream_it != kb_->network().named_entry_points.end()) {
         auto type_it = stream_it->second.find(fact->type);
         if (type_it != stream_it->second.end()) {
             logd("Propagating fact ID {} to named entry-point '{}' for type '{}' (Node ID {})",
@@ -281,7 +213,7 @@ void StatefulSession::retract_facts(std::vector<std::shared_ptr<Fact>> const& fa
     logd("Retracting {} facts in batch", facts.size());
 
     // Group by type for efficient processing
-    phmap::flat_hash_map<std::string, std::vector<std::shared_ptr<Fact>>> facts_by_type;
+    ruleforge::unordered_map<std::string, std::vector<std::shared_ptr<Fact>>> facts_by_type;
     for (auto& fact : facts) {
         if (!fact) continue;
         facts_by_type[fact->type].push_back(fact);
@@ -289,8 +221,8 @@ void StatefulSession::retract_facts(std::vector<std::shared_ptr<Fact>> const& fa
 
     // Batch retract by type
     for (auto const& [type, type_facts] : facts_by_type) {
-        auto it = alpha_entry_points_.find(type);
-        if (it != alpha_entry_points_.end()) {
+        auto it = kb_->network().alpha_entry_points.find(type);
+        if (it != kb_->network().alpha_entry_points.end()) {
             for (auto& fact : type_facts) {
                 it->second->right_activate(*this, fact, PropagationType::RETRACT);
                 all_facts_.erase(fact->id);
@@ -303,8 +235,6 @@ void StatefulSession::retract_facts(std::vector<std::shared_ptr<Fact>> const& fa
 void StatefulSession::_internal_add_fact(std::shared_ptr<Fact> fact) {
     if (!fact) return;
     if (fact->id == 0) { fact->id = next_fact_id_++; }
-    logd("StatefulSession::_internal_add_fact -> Adding fact ID {}. Fact count before: {}", fact->id,
-              all_facts_.size());
     all_facts_[fact->id] = fact;
     logd("StatefulSession::_internal_add_fact -> Fact count after: {}", all_facts_.size());
 }
@@ -319,8 +249,7 @@ void StatefulSession::_internal_add_facts_batch(std::vector<std::shared_ptr<Fact
 }
 
 void StatefulSession::_internal_remove_fact(int64_t fact_id) {
-    logd("StatefulSession::_internal_remove_fact -> Removing fact ID {}. Fact count before: {}", fact_id,
-              all_facts_.size());
+
     all_facts_.erase(fact_id);
     logd("StatefulSession::_internal_remove_fact -> Fact count after: {}", all_facts_.size());
 }
@@ -339,8 +268,11 @@ void StatefulSession::assign_nested_fact_ids(Fact& fact) {
 int StatefulSession::fire_all_rules(int max_rules) {
     int total_fired_count = 0;
 
+    // Flush any pending facts from deferred batch insertion
+    flush_pending_nodes();
+
     // P1 FIX: Reset halt flag at start of each fire_all_rules cycle
-    halt_requested_ = false;
+    //halt_requested_ = false;
 
     // P1 FIX: Reset lock-on-active blocked rules at start of cycle
     lock_on_active_blocked_.clear();
@@ -356,14 +288,14 @@ int StatefulSession::fire_all_rules(int max_rules) {
         }
     }
 
-    logd("Starting fire_all_rules cycle. Focus: '{}', Agenda size: {}. Fact count: {}. Max rules: {}",
-         get_focus(), agenda_queue_.size(), all_facts_.size(), max_rules);
+/*     logd("Starting fire_all_rules cycle. Focus: '{}', Agenda size: {}. Fact count: {}. Max rules: {}",
+         get_focus(), agenda_queue_.size(), all_facts_.size(), max_rules); */
     while (true) {
         auto now = std::chrono::steady_clock::now();
         while (!delayed_activations_.empty() && delayed_activations_.top().fire_time <= now) {
             auto delayed = delayed_activations_.top();
             delayed_activations_.pop();
-            logd("Delayed activation ready for rule '{}', adding to agenda", delayed.activation.rule->name);
+         //   logd("Delayed activation ready for rule '{}', adding to agenda", delayed.activation.rule->name);
             agenda_map_[delayed.activation.hash_value] = delayed.activation;
             agenda_queue_.push({delayed.activation.rule->salience, delayed.activation.hash_value});
             // Track activation-group membership
@@ -501,18 +433,19 @@ void StatefulSession::retract_fact(std::shared_ptr<Fact> fact) {
     logd("Fact count after retract: {}", all_facts_.size());
 
     // Clean up agenda: remove activations that depend on the retracted fact
+    // Uses fact_index directly to avoid vector allocation per activation
     std::vector<size_t> activations_to_remove;
     for (auto const& [hash, activation] : agenda_map_) {
         if (activation.token.wme) {
-            // Check if this activation's token contains the retracted fact
-            std::vector<std::shared_ptr<Fact>> token_facts = activation.token.get_facts();
-            for (auto const& token_fact : token_facts) {
-                if (token_fact && token_fact->id == fact_to_retract->id) {
+            auto curr = activation.token.wme;
+            while (curr && curr->depth > 0) {
+                if (curr->fact && curr->fact->id == fact_to_retract->id) {
                     activations_to_remove.push_back(hash);
                     logd("Removing activation for rule '{}' because it depends on retracted fact ID {}",
                               activation.rule->name, fact_to_retract->id);
                     break;
                 }
+                curr = curr->parent;
             }
         }
     }
@@ -529,21 +462,23 @@ void StatefulSession::retract_fact(std::shared_ptr<Fact> fact) {
     logd("Retracting fact ID: {}, Type: {}, Propagation: {}", fact_to_retract->id, fact_to_retract->type,
               ENUM_NAME(PropagationType::RETRACT));
 
-    auto alpha_it = alpha_entry_points_.find(fact_to_retract->type);
-    if (alpha_it != alpha_entry_points_.end()) {
+    auto alpha_it = kb_->network().alpha_entry_points.find(fact_to_retract->type);
+    if (alpha_it != kb_->network().alpha_entry_points.end()) {
         alpha_it->second->right_activate(*this, fact_to_retract, PropagationType::RETRACT);
     }
 
-    // Clean up WMEs that reference the retracted fact (directly or in parent chain)
+    // Clean up WMEs that reference the retracted fact via flat fact_index
     std::vector<size_t> hashes_to_retract;
     for (auto const& [hash, wme_ptr] : wme_cache_) {
         if (!wme_ptr) continue;
-        // Check if this WME or any ancestor references the retracted fact
-        for (auto const* current = wme_ptr.get(); current; current = current->parent.get()) {
-            if (current->fact && current->fact->id == fact_to_retract->id) {
+        if (!wme_ptr) continue;
+        auto curr = wme_ptr;
+        while (curr && curr->depth > 0) {
+            if (curr->fact && curr->fact->id == fact_to_retract->id) {
                 hashes_to_retract.push_back(hash);
                 break;
             }
+            curr = curr->parent;
         }
     }
     for (size_t hash : hashes_to_retract) {
@@ -559,15 +494,14 @@ void StatefulSession::update_fact(std::shared_ptr<Fact> fact, std::function<void
     if (!fact || all_facts_.find(fact->id) == all_facts_.end()) return;
     logd("Updating fact ID: {}, Type: '{}'", fact->id, fact->type);
     modifier(*fact);
-    auto alpha_it = alpha_entry_points_.find(fact->type);
-    if (alpha_it != alpha_entry_points_.end()) {
+    auto alpha_it = kb_->network().alpha_entry_points.find(fact->type);
+    if (alpha_it != kb_->network().alpha_entry_points.end()) {
         alpha_it->second->right_activate(*this, fact, PropagationType::MODIFY);
     }
 }
 
 void StatefulSession::logical_insert(Token& token, std::shared_ptr<Fact> fact) {
     if (!token.wme) return;
-    logd("StatefulSession::logical_insert -> fact_id={} justified by token WME {}", fact->id, token.wme->get_id());
     if (all_facts_.find(fact->id) == all_facts_.end()) {
         logd("  -> Fact ID {} is new, adding to working memory.", fact->id);
         add_fact(fact);
@@ -576,7 +510,6 @@ void StatefulSession::logical_insert(Token& token, std::shared_ptr<Fact> fact) {
 }
 
 void StatefulSession::logical_retract(TokenWME const* wme) {
-    logd("StatefulSession::logical_retract for wme {}", (wme ? wme->get_id() : 0));
     tms_->remove_justifications_by_token(wme);
 }
 
@@ -589,19 +522,20 @@ QueryResult StatefulSession::execute_query(std::string const& query_name,
                                            std::vector<std::shared_ptr<Fact>> const& args) {
 
     logd("Executing query -> name='{}', args={}", query_name, args.size());
-    auto it = query_nodes_.find(query_name);
+    auto const& net = kb_->network();
+    auto it = net.query_nodes.find(query_name);
     // PROD-003: Return error result instead of throwing
-    if (it == query_nodes_.end()) {
+    if (it == net.query_nodes.end()) {
         return QueryResult::error("Query '" + query_name + "' not found.");
     }
     auto& terminal_node = it->second;
 
-    auto param_it = parameterized_query_inputs_.find(query_name);
-    if (param_it != parameterized_query_inputs_.end()) { param_it->second->execute(*this, args); }
+    auto param_it = net.parameterized_query_inputs.find(query_name);
+    if (param_it != net.parameterized_query_inputs.end()) { param_it->second->execute(*this, args); }
 
-    std::vector<map<std::string, std::shared_ptr<Fact>>> raw_results;
-    for (auto const& [wme, token] : terminal_node->get_results()) {
-        map<std::string, std::shared_ptr<Fact>> row;
+    std::vector<ruleforge::map<std::string, std::shared_ptr<Fact>>> raw_results;
+    for (auto const& [wme, token] : terminal_node->get_results(*this)) {
+        ruleforge::map<std::string, std::shared_ptr<Fact>> row;
         auto facts = token.get_facts();
         for (auto const& [binding, depth] : terminal_node->get_bindings()) {
             if (!binding.empty() && depth < facts.size()) { row[binding] = facts[depth]; }
@@ -613,7 +547,6 @@ QueryResult StatefulSession::execute_query(std::string const& query_name,
 }
 
 void StatefulSession::set_focus(std::string const& group_name) {
-    logd("StatefulSession::set_focus -> {}", group_name);
     agenda_group_focus_stack_.push_back(group_name);
 }
 
@@ -625,8 +558,8 @@ void StatefulSession::set_global(std::string const& name, JSValue obj) {
     scripting_manager_->set_global(name, obj);
 }
 
-map<std::string, JSValue> const& StatefulSession::get_global_values() const {
-    static map<std::string, JSValue> empty;
+ruleforge::map<std::string, JSValue> const& StatefulSession::get_global_values() const {
+    static ruleforge::map<std::string, JSValue> empty;
     return empty;
 }
 
@@ -640,7 +573,7 @@ bool StatefulSession::has_type_declaration(std::string const& type_name) const {
 }
 
 bool StatefulSession::execute_eval(std::string const& code, Token const& token,
-                                   map<std::string, int> const& bindings) {
+                                   ruleforge::map<std::string, int> const& bindings) {
     return scripting_manager_->execute_eval(code, token, bindings);
 }
 
@@ -672,7 +605,6 @@ void StatefulSession::add_activation(Activation const& activation) {
         }
     }
 
-    // P1 FIX: Check lock-on-active - rule cannot be re-activated while its agenda-group is active
     if (activation.rule->lock_on_active) {
         if (lock_on_active_blocked_.count(activation.rule)) {
             logd("Skipping lock-on-active blocked activation for rule '{}'", activation.rule->name);
@@ -720,9 +652,9 @@ void StatefulSession::remove_activation(size_t activation_hash) {
     }
 }
 
-map<int, std::shared_ptr<ReteNode>> StatefulSession::get_nodes() const {
-    map<int, std::shared_ptr<ReteNode>> node_map;
-    for (auto const& node : all_nodes_) { node_map[node->id] = node; }
+ruleforge::map<int, std::shared_ptr<ReteNode>> StatefulSession::get_nodes() const {
+    ruleforge::map<int, std::shared_ptr<ReteNode>> node_map;
+    for (auto const& node : kb_->network().all_nodes) { node_map[node->id] = node; }
     return node_map;
 }
 
@@ -784,6 +716,19 @@ SessionMetrics StatefulSession::get_metrics() const {
     metrics.last_fire_time = std::chrono::steady_clock::now();
 
     return metrics;
+}
+
+void StatefulSession::flush_pending_nodes() {
+    auto const& net = kb_->network();
+    bool any_flushed = true;
+    while (any_flushed) {
+        any_flushed = false;
+        for (auto const& node : net.all_nodes) {
+            if (node->flush_pending(*this)) {
+                any_flushed = true;
+            }
+        }
+    }
 }
 
 

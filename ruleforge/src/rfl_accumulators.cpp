@@ -1,7 +1,6 @@
 #include "rfl_accumulators.hpp"
 #include "logging_control.hpp"
 
-#include <iostream>
 #include <limits>   // for std::numeric_limits
 #include <set>      // for std::multiset
 

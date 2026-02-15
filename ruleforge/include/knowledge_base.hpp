@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Forward declarations
@@ -20,6 +21,7 @@ struct IAccumulator;
 struct ParsedRule;
 struct ParsedPattern;
 struct ConstraintNode;
+struct CompiledNetwork;
 
 // Native function callback type (shared with JSScriptingManager)
 using NativeFunctionCallback = int (*)(void* ctx, int argc, const char** argv, char** out_result);
@@ -43,7 +45,7 @@ public:
     KnowledgeBase& operator=(KnowledgeBase const&) = delete;
 
     // --- FACTORIES ---
-    static std::shared_ptr<KnowledgeBase> create(parser_state& state);
+    static std::shared_ptr<KnowledgeBase> create(parser_state&& state);
 
     std::unique_ptr<StatefulSession> create_session();
     ParsedRule const* find_rule_by_name(std::string const& name) const;
@@ -98,18 +100,23 @@ public:
     partition_and_get_alpha_root(ParsedPattern const& pattern,
                                  std::vector<ParsedConstraint>& out_join_constraints) const;
 
+    CompiledNetwork const& network() const;
+
 private:
     friend class BetaNetworkBuilder;
     friend class StatefulSession;
 
-    void build(parser_state& state);
+    void build(parser_state&& state);
+    void compile_network();
 
     parser_state parser_state_;
     std::vector<ParsedRule> processed_rules_;
+    std::unordered_map<std::string, size_t> rule_name_index_;  // name -> index in processed_rules_
     std::shared_ptr<AccumulatorRegistry> accumulator_registry_;
-    map<std::string, std::chrono::milliseconds> type_expiration_policies_;
+    ruleforge::map<std::string, std::chrono::milliseconds> type_expiration_policies_;
     FactTypeRegistry fact_type_registry_;
     std::map<std::string, NativeFunction> native_functions_;
+    std::unique_ptr<CompiledNetwork> compiled_network_;
 };
 
 #endif   // KNOWLEDGE_BASE_HPP

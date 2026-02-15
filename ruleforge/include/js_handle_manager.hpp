@@ -51,7 +51,7 @@ private:
     
     std::mutex mutex_;
     std::atomic<HandleId> next_id_{1};  // Start at 1, 0 is invalid
-    unordered_map<HandleId, JSScriptingManager*> handles_;
+    ruleforge::unordered_map<HandleId, JSScriptingManager*> handles_;
 };
 
 #endif // JS_HANDLE_MANAGER_HPP

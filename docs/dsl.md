@@ -229,17 +229,92 @@ The Left-Hand Side (LHS) contains a set of patterns that must be satisfied for t
 
 ##### Arithmetic Expressions
 
-Arithmetic expressions can be used on the right-hand side of comparisons for dynamic calculations:
+Arithmetic expressions can be used on the right-hand side of comparisons for dynamic calculations. Powered by the exprtk library, expressions support a rich set of mathematical operations and functions.
 
+**Basic Operators:**
 ```rfl
-// Compare against calculated value
-Transaction(timestamp > ($startTime - 60000))  // Within last minute
-
-// Time window calculations
-Event(timestamp > ($ts - 3600000), timestamp < $ts)  // Last hour
+// Basic arithmetic: +, -, *, /, ^ (power)
+Transaction(amount > ($basePrice * 1.2))
+Order(total >= ($subtotal + $tax))
+Loan(payment < ($principal / $months))
+Investment(value > ($initial ^ 2))
 ```
 
-Supported operators: `+`, `-`, `*`, `/`
+**Mathematical Functions:**
+```rfl
+// Trigonometric functions
+Sensor(angle > sin($theta))
+Navigation(heading == cos($bearing))
+
+// Exponential and logarithmic
+Growth(rate > exp($factor))
+Scale(level == log($value))
+
+// Power and roots
+Distance(length == sqrt($x^2 + $y^2))  // Pythagorean theorem
+Volume(size > pow($radius, 3))
+
+// Rounding functions
+Price(cents == floor($amount * 100))
+Score(rounded == ceil($raw))
+
+// Absolute value and sign
+Deviation(error < abs($expected - $actual))
+
+// Min/Max
+Limit(value == min($a, $b))
+Threshold(cap == max($x, $y))
+
+// Clamping
+Normalized(score == clamp(0, $raw, 100))
+```
+
+**Available Functions:**
+| Category | Functions |
+|----------|-----------|
+| Trigonometric | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh` |
+| Exponential | `exp`, `log`, `log10`, `log2` |
+| Power/Root | `sqrt`, `pow`, `^` (power operator) |
+| Rounding | `floor`, `ceil`, `round`, `trunc` |
+| Comparison | `min`, `max`, `clamp` |
+| Other | `abs`, `sgn`, `frac`, `mod` |
+
+**Constants:**
+| Constant | Value |
+|----------|-------|
+| `pi` | 3.14159265358979... |
+| `inf` | Infinity |
+| `epsilon` | Machine epsilon |
+
+**Complex Expressions:**
+```rfl
+// Compound interest calculation
+Account(balance > $principal * (1 + $rate)^$years)
+
+// Distance formula
+Location(distance < sqrt(($x - $targetX)^2 + ($y - $targetY)^2))
+
+// Normalized score with bounds
+Result(score == clamp(0, ($raw - $min) / ($max - $min) * 100, 100))
+
+// Time decay
+Signal(strength > $initial * exp(-$decay * $time))
+```
+
+**In Accumulate Expressions:**
+```rfl
+// Sum of computed values
+$total: Number() from accumulate(
+    $item: LineItem($qty: quantity, $price: unitPrice),
+    sum($qty * $price)
+)
+
+// Complex aggregation
+$risk: Number() from accumulate(
+    $t: Transaction($amt: amount, $factor: riskFactor),
+    sum($amt * sqrt($factor))
+)
+```
 
 ##### Temporal Operators
 
@@ -586,3 +661,4 @@ $m: Median() from accumulate( $s: Sample(), median($s.value) )
 - **v1.7**: Added support for `from entry-point` inside accumulate patterns for CEP use cases
 - **v1.8**: Added built-in `Number` type for accumulate results; `count(1)` shorthand syntax; arithmetic expressions in constraints (`$ts - 60000`); improved JS comment handling in RHS
 - **v1.9**: Added multi-file import support with `import package.path` and wildcard `import package.*`; circular dependency detection; base directory configuration for import resolution
+- **v2.0**: Enhanced arithmetic expressions with exprtk library - full math function support (sin, cos, sqrt, exp, log, pow, abs, min, max, floor, ceil, clamp, etc.), constants (pi, inf), and complex expressions; expressions compiled once at load time for optimal runtime performance

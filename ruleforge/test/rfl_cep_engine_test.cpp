@@ -1,4 +1,4 @@
-#include "catch2/catch_test_macros.hpp"
+#include "tinytest.h"
 #include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "stateful_session.hpp"
@@ -15,7 +15,7 @@ struct CepTestFixture {
             package com.example.cep;
 
             declare LoginAttempt
-                @role( event ) // Mark as event for temporal reasoning
+                @role( event )
                 id: long
                 username: String
                 ipAddress: String
@@ -53,10 +53,12 @@ struct CepTestFixture {
         ParsingResult result;
         kb = build_knowledge_base(cep_drl, result);
         if (!result.success) {
-            for (auto const& err : result.errors) { FAIL(err.to_string()); }
+            for (auto const& err : result.errors) {
+                throw std::runtime_error("RFL parsing failed: " + err.to_string());
+            }
+            throw std::runtime_error("RFL parsing failed: Unknown error");
         }
-        REQUIRE(result.success);
-        REQUIRE(kb != nullptr);
+        if (!kb) { throw std::runtime_error("KnowledgeBase is null"); }
     }
 
     std::shared_ptr<Fact> create_login_event(int64_t id, std::string const& user, std::string const& ip,
@@ -72,40 +74,42 @@ struct CepTestFixture {
     }
 };
 
-TEST_CASE_METHOD(CepTestFixture, "Engine: CEP Operators", "[engine][cep]") {
+suite("Engine CEP Operators") {
+    group("CEP detection") {
+        it("detects repeated failed logins") {
+            CepTestFixture fixture;
+            auto session = fixture.kb->create_session();
+            session->add_fact(fixture.create_login_event(1, "Alice", "1.2.3.4", "fail", 1000));
+            session->add_fact(fixture.create_login_event(2, "Alice", "1.2.3.4", "fail", 5000));
+            session->add_fact(fixture.create_login_event(3, "Alice", "1.2.3.4", "fail", 8000));
 
-    SECTION("Successful detection") {
-        auto session = kb->create_session();
-        session->add_fact(create_login_event(1, "Alice", "1.2.3.4", "fail", 1000));
-        session->add_fact(create_login_event(2, "Alice", "1.2.3.4", "fail", 5000));
-        session->add_fact(create_login_event(3, "Alice", "1.2.3.4", "fail", 8000));
+            int fired = session->fire_all_rules();
+            check(fired == 1);
+            check(session->get_fact_count() == 1);
+        }
 
-        int fired = session->fire_all_rules();
-        CHECK(fired == 1);
-        CHECK(session->get_fact_count() == 1);
-    }
+        it("does not fire when events are too far apart") {
+            CepTestFixture fixture;
+            auto session = fixture.kb->create_session();
+            session->add_fact(fixture.create_login_event(10, "Bob", "5.6.7.8", "fail", 100000));
+            session->add_fact(fixture.create_login_event(11, "Bob", "5.6.7.8", "fail", 105000));
+            session->add_fact(fixture.create_login_event(12, "Bob", "5.6.7.8", "fail", 111000));
 
-    SECTION("Events too far apart (violates 'within' constraint)") {
-        auto session = kb->create_session();
-        session->add_fact(create_login_event(10, "Bob", "5.6.7.8", "fail", 100000));
-        session->add_fact(create_login_event(11, "Bob", "5.6.7.8", "fail", 105000));
-        session->add_fact(create_login_event(12, "Bob", "5.6.7.8", "fail", 111000));   // 111k - 100k > 10k
+            int fired = session->fire_all_rules();
+            check(fired == 0);
+            check(session->get_fact_count() == 3);
+        }
 
-        int fired = session->fire_all_rules();
-        CHECK(fired == 0);
-        CHECK(session->get_fact_count() == 3);
-    }
+        it("handles events out of order") {
+            CepTestFixture fixture;
+            auto session = fixture.kb->create_session();
+            session->add_fact(fixture.create_login_event(20, "Carl", "9.0.0.1", "fail", 8000));
+            session->add_fact(fixture.create_login_event(21, "Carl", "9.0.0.1", "fail", 5000));
+            session->add_fact(fixture.create_login_event(22, "Carl", "9.0.0.1", "fail", 1000));
 
-    SECTION("Events out of order (violates 'after' constraint)") {
-        auto session = kb->create_session();
-        session->add_fact(create_login_event(20, "Carl", "9.0.0.1", "fail", 8000));
-        session->add_fact(create_login_event(21, "Carl", "9.0.0.1", "fail", 5000));
-        session->add_fact(create_login_event(22, "Carl", "9.0.0.1", "fail", 1000));
-
-        int fired = session->fire_all_rules();
-        CHECK(fired == 1);
-        CHECK(session->get_fact_count() == 1);
+            int fired = session->fire_all_rules();
+            check(fired == 1);
+            check(session->get_fact_count() == 1);
+        }
     }
 }
-
-

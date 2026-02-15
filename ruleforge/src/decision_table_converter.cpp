@@ -1,6 +1,5 @@
 #include "decision_table_converter.hpp"
 
-#include <iostream>
 #include <sstream>
 
 // Helper to replace "$1" with the actual value from the CSV cell.
@@ -37,11 +36,11 @@ DecisionTableConverter::DecisionTableConverter(DecisionTable table) : table_(std
     // 2. Process the header to define columns.
     for (std::string const& header_text : table_.headers) {
         if (header_text.rfind("CONDITION: ", 0) == 0) {
-            column_defs_.push_back({"CONDITION", header_text.substr(11)});
+            column_defs_.push_back({ColumnType::Condition, header_text.substr(11)});
         } else if (header_text.rfind("ACTION: ", 0) == 0) {
-            column_defs_.push_back({"ACTION", header_text.substr(8)});
+            column_defs_.push_back({ColumnType::Action, header_text.substr(8)});
         } else {
-            column_defs_.push_back({header_text, ""});   // It's a metadata column like "Rule Name".
+            column_defs_.push_back({parse_column_type(header_text), ""});
         }
     }
 }
@@ -63,9 +62,9 @@ std::string DecisionTableConverter::generate_drl() {
         // Find the column indices for rule name and attributes first.
         size_t rule_name_col = -1, salience_col = -1, agenda_group_col = -1;
         for (size_t i = 0; i < column_defs_.size(); ++i) {
-            if (column_defs_[i].type == "Rule Name") rule_name_col = i;
-            if (column_defs_[i].type == "Salience") salience_col = i;
-            if (column_defs_[i].type == "agenda-group") agenda_group_col = i;
+            if (column_defs_[i].type == ColumnType::RuleName) rule_name_col = i;
+            if (column_defs_[i].type == ColumnType::Salience) salience_col = i;
+            if (column_defs_[i].type == ColumnType::AgendaGroup) agenda_group_col = i;
         }
 
         if (rule_name_col != -1 && rule_name_col < record.size() && !record[rule_name_col].empty()) {
@@ -90,7 +89,7 @@ std::string DecisionTableConverter::generate_drl() {
             auto const& def = column_defs_[col_idx];
             auto const& value = record[col_idx];
 
-            if (def.type == "CONDITION" && !value.empty() && value != "*") {
+            if (def.type == ColumnType::Condition && !value.empty() && value != "*") {
                 drl_ss << "    " << substitute(def.template_text, value) << "\n";
             }
         }
@@ -102,7 +101,7 @@ std::string DecisionTableConverter::generate_drl() {
             auto const& def = column_defs_[col_idx];
             auto const& value = record[col_idx];
 
-            if (def.type == "ACTION" && !value.empty() && value != "*") {
+            if (def.type == ColumnType::Action && !value.empty() && value != "*") {
                 // Add the necessary semicolon to make it a valid statement.
                 drl_ss << "    " << substitute(def.template_text, value) << ";\n";
             }

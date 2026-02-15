@@ -66,7 +66,7 @@ private:
         }
     };
     
-    unordered_map<std::string_view, Value, StringViewHash> map_;
+    ruleforge::unordered_map<std::string_view, Value, StringViewHash> map_;
     
 public:
     auto begin() const { return map_.begin(); }

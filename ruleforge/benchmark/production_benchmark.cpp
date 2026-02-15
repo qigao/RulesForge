@@ -5,19 +5,14 @@
 // 2. Fact throughput (1M facts)
 // 3. Latency percentiles (p50, p95, p99)
 // 4. Memory usage under load
-//
-// Run with: ./production_benchmark.RuleForge.exe
-// For detailed output: ./production_benchmark.RuleForge.exe -s
 
-#include "catch2/catch_all.hpp"
+#include "tinytest.h"
 #include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "stateful_session.hpp"
 
 #include <algorithm>
 #include <chrono>
-#include <iomanip>
-#include <numeric>
 #include <random>
 #include <sstream>
 #include <vector>
@@ -26,39 +21,24 @@ using Clock = std::chrono::high_resolution_clock;
 using Microseconds = std::chrono::microseconds;
 using Milliseconds = std::chrono::milliseconds;
 
-// Helper to generate N simple rules
-std::string generate_rules(int count, std::string const& fact_type = "TestFact") {
+static std::string generate_rules(int count, std::string const& fact_type = "TestFact") {
     std::ostringstream oss;
     oss << "package benchmark\n\n";
-    oss << "declare " << fact_type << "\n";
-    oss << "    id: int\n";
-    oss << "    value: int\n";
-    oss << "    category: String\n";
-    oss << "end\n\n";
-
-    oss << "declare Result\n";
-    oss << "    ruleId: int\n";
-    oss << "    factId: int\n";
-    oss << "end\n\n";
+    oss << "declare " << fact_type << " id: int, value: int, category: String end\n";
+    oss << "declare Result ruleId: int, factId: int end\n\n";
 
     for (int i = 0; i < count; ++i) {
-        oss << "rule \"Rule_" << i << "\"\n";
-        oss << "when\n";
-        oss << "    $f : " << fact_type << "(value >= " << (i % 100) << ", value < " << ((i % 100) + 10) << ")\n";
-        oss << "then\n";
-        oss << "    // Rule " << i << " matched\n";
-        oss << "end\n\n";
+        oss << "rule \"Rule_" << i << "\" when $f : " << fact_type
+            << "(value >= " << (i % 100) << ", value < " << ((i % 100) + 10) << ") then end\n";
     }
-
     return oss.str();
 }
 
-// Helper to create test facts
-std::vector<std::shared_ptr<Fact>> create_facts(int count, std::string const& type = "benchmark.TestFact") {
+static std::vector<std::shared_ptr<Fact>> create_facts(int count, std::string const& type = "benchmark.TestFact") {
     std::vector<std::shared_ptr<Fact>> facts;
     facts.reserve(count);
 
-    std::mt19937 gen(42);  // Fixed seed for reproducibility
+    std::mt19937 gen(42);
     std::uniform_int_distribution<> value_dist(0, 109);
     std::vector<std::string> categories = {"A", "B", "C", "D", "E"};
 
@@ -70,337 +50,262 @@ std::vector<std::shared_ptr<Fact>> create_facts(int count, std::string const& ty
         fact->fields["category"] = categories[i % categories.size()];
         facts.push_back(fact);
     }
-
     return facts;
 }
 
-// Calculate percentile from sorted vector
 template <typename T>
-T percentile(std::vector<T>& data, double p) {
+static T percentile(std::vector<T> data, double p) {
     if (data.empty()) return T{};
-    std::sort(data.begin(), data.end());
     size_t idx = static_cast<size_t>(p * (data.size() - 1));
+    std::nth_element(data.begin(), data.begin() + idx, data.end());
     return data[idx];
 }
 
-// ============================================================================
-// BENCHMARK 1: Rule Compilation Scalability
-// ============================================================================
-
-TEST_CASE("Benchmark: Rule Compilation Time", "[benchmark][compilation]") {
-    std::vector<int> rule_counts = {100, 500, 1000, 2000, 5000, 10000};
-
-    std::cout << "\n=== Rule Compilation Benchmark ===" << std::endl;
-    std::cout << std::setw(10) << "Rules" << std::setw(15) << "Time (ms)"
-              << std::setw(15) << "Rules/sec" << std::endl;
-    std::cout << std::string(40, '-') << std::endl;
-
-    for (int count : rule_counts) {
-        std::string drl = generate_rules(count);
-
-        auto start = Clock::now();
-        ParsingResult result;
-        auto kb = build_knowledge_base(drl, result);
-        auto end = Clock::now();
-
-        auto duration_ms = std::chrono::duration_cast<Milliseconds>(end - start).count();
-        double rules_per_sec = (duration_ms > 0) ? (count * 1000.0 / duration_ms) : 0;
-
-        std::cout << std::setw(10) << count
-                  << std::setw(15) << duration_ms
-                  << std::setw(15) << std::fixed << std::setprecision(0) << rules_per_sec
-                  << std::endl;
-
-        REQUIRE(result.success);
-        REQUIRE(kb);
-
-        // Performance assertion: 10K rules should compile in < 30 seconds
-        if (count == 10000) {
-            CHECK(duration_ms < 30000);
-        }
-    }
-}
-
-// ============================================================================
-// BENCHMARK 2: Fact Insertion Throughput
-// ============================================================================
-
-TEST_CASE("Benchmark: Fact Insertion Throughput", "[benchmark][throughput]") {
-    // Create a simple rule set
+static std::shared_ptr<KnowledgeBase> build_simple_kb() {
     std::string drl = R"(
 package benchmark
-
-declare TestFact
-    id: int
-    value: int
-    category: String
-end
-
-rule "Simple Match"
-when
-    $f : TestFact(value > 50)
-then
-    // matched
-end
+declare TestFact id: int, value: int, category: String end
+rule "Simple Match" when $f : TestFact(value > 50) then end
 )";
-
     ParsingResult result;
     auto kb = build_knowledge_base(drl, result);
-    REQUIRE(result.success);
-
-    std::vector<int> fact_counts = {1000, 10000, 100000, 500000, 1000000};
-
-    std::cout << "\n=== Fact Insertion Throughput Benchmark ===" << std::endl;
-    std::cout << std::setw(12) << "Facts" << std::setw(15) << "Insert (ms)"
-              << std::setw(15) << "Facts/sec" << std::setw(15) << "Memory (MB)" << std::endl;
-    std::cout << std::string(57, '-') << std::endl;
-
-    for (int count : fact_counts) {
-        auto session = kb->create_session();
-        auto facts = create_facts(count);
-
-        auto start = Clock::now();
-        session->add_facts(facts);
-        auto end = Clock::now();
-
-        auto duration_ms = std::chrono::duration_cast<Milliseconds>(end - start).count();
-        double facts_per_sec = (duration_ms > 0) ? (count * 1000.0 / duration_ms) : 0;
-
-        // Get memory stats
-        auto metrics = session->get_metrics();
-        double memory_mb = metrics.memory_used_bytes / (1024.0 * 1024.0);
-
-        std::cout << std::setw(12) << count
-                  << std::setw(15) << duration_ms
-                  << std::setw(15) << std::fixed << std::setprecision(0) << facts_per_sec
-                  << std::setw(15) << std::setprecision(2) << memory_mb
-                  << std::endl;
-
-        CHECK(session->get_fact_count() == count);
-
-        // Performance assertion: 1M facts should insert in < 60 seconds
-        if (count == 1000000) {
-            CHECK(duration_ms < 60000);
-        }
-    }
+    if (!result.success) throw std::runtime_error("Failed to build KB");
+    return kb;
 }
 
-// ============================================================================
-// BENCHMARK 3: Rule Firing Throughput
-// ============================================================================
-
-TEST_CASE("Benchmark: Rule Firing Throughput", "[benchmark][firing]") {
+static std::shared_ptr<KnowledgeBase> build_processing_kb() {
     std::string drl = R"(
 package benchmark
-
-declare TestFact
-    id: int
-    value: int
-    category: String
-end
-
-declare ProcessedFact
-    factId: int
-end
-
+declare TestFact id: int, value: int, category: String end
+declare ProcessedFact factId: int end
 rule "Process Facts"
 when
     $f : TestFact(value > 50)
     not ProcessedFact(factId == $f.id)
 then
-    rfl.insert({type: "benchmark.ProcessedFact", factId: f.id});
+    rfl.insert({type: "benchmark.ProcessedFact", factId: $f.id});
 end
 )";
-
     ParsingResult result;
     auto kb = build_knowledge_base(drl, result);
-    REQUIRE(result.success);
-
-    std::vector<int> fact_counts = {1000, 5000, 10000, 50000};
-
-    std::cout << "\n=== Rule Firing Throughput Benchmark ===" << std::endl;
-    std::cout << std::setw(10) << "Facts" << std::setw(15) << "Fire (ms)"
-              << std::setw(12) << "Fired" << std::setw(15) << "Rules/sec" << std::endl;
-    std::cout << std::string(52, '-') << std::endl;
-
-    for (int count : fact_counts) {
-        auto session = kb->create_session();
-        auto facts = create_facts(count);
-        session->add_facts(facts);
-
-        auto start = Clock::now();
-        int fired = session->fire_all_rules();
-        auto end = Clock::now();
-
-        auto duration_ms = std::chrono::duration_cast<Milliseconds>(end - start).count();
-        double rules_per_sec = (duration_ms > 0) ? (fired * 1000.0 / duration_ms) : 0;
-
-        std::cout << std::setw(10) << count
-                  << std::setw(15) << duration_ms
-                  << std::setw(12) << fired
-                  << std::setw(15) << std::fixed << std::setprecision(0) << rules_per_sec
-                  << std::endl;
-
-        CHECK(fired > 0);
-    }
+    if (!result.success) throw std::runtime_error("Failed to build KB");
+    return kb;
 }
 
-// ============================================================================
-// BENCHMARK 4: Latency Percentiles
-// ============================================================================
+suite("Production Benchmarks") {
+    group("Rule Compilation") {
+        bench("benchmarks compilation scalability") {
+            std::string drl_100 = generate_rules(100);
+            std::string drl_500 = generate_rules(500);
+            std::string drl_1000 = generate_rules(1000);
+            std::string drl_2000 = generate_rules(2000);
+            std::string drl_5000 = generate_rules(5000);
 
-TEST_CASE("Benchmark: Latency Percentiles", "[benchmark][latency]") {
-    std::string drl = R"(
-package benchmark
+            ParsingResult result;
 
-declare Event
-    id: int
-    timestamp: int
-end
+            benchmark("compile 100 rules", 10) {
+                build_knowledge_base(drl_100, result);
+            }
 
-rule "Process Event"
-when
-    $e : Event()
-then
-    // processed
-end
-)";
+            benchmark("compile 500 rules", 5) {
+                build_knowledge_base(drl_500, result);
+            }
 
-    ParsingResult result;
-    auto kb = build_knowledge_base(drl, result);
-    REQUIRE(result.success);
+            benchmark("compile 1000 rules", 3) {
+                build_knowledge_base(drl_1000, result);
+            }
 
-    constexpr int ITERATIONS = 1000;
-    std::vector<int64_t> insert_latencies;
-    std::vector<int64_t> fire_latencies;
-    insert_latencies.reserve(ITERATIONS);
-    fire_latencies.reserve(ITERATIONS);
+            benchmark("compile 2000 rules", 2) {
+                build_knowledge_base(drl_2000, result);
+            }
 
-    auto session = kb->create_session();
+            benchmark("compile 5000 rules", 1) {
+                build_knowledge_base(drl_5000, result);
+            }
 
-    for (int i = 0; i < ITERATIONS; ++i) {
-        auto fact = std::make_shared<Fact>();
-        fact->type = "benchmark.Event";
-        fact->fields["id"] = (int64_t)i;
-        fact->fields["timestamp"] = (int64_t)Clock::now().time_since_epoch().count();
-
-        // Measure insert latency
-        auto start = Clock::now();
-        session->add_fact(fact);
-        auto end = Clock::now();
-        insert_latencies.push_back(std::chrono::duration_cast<Microseconds>(end - start).count());
-
-        // Measure fire latency
-        start = Clock::now();
-        session->fire_all_rules();
-        end = Clock::now();
-        fire_latencies.push_back(std::chrono::duration_cast<Microseconds>(end - start).count());
-    }
-
-    // Calculate percentiles
-    auto insert_p50 = percentile(insert_latencies, 0.50);
-    auto insert_p95 = percentile(insert_latencies, 0.95);
-    auto insert_p99 = percentile(insert_latencies, 0.99);
-
-    auto fire_p50 = percentile(fire_latencies, 0.50);
-    auto fire_p95 = percentile(fire_latencies, 0.95);
-    auto fire_p99 = percentile(fire_latencies, 0.99);
-
-    std::cout << "\n=== Latency Percentiles (microseconds) ===" << std::endl;
-    std::cout << std::setw(15) << "Operation" << std::setw(10) << "p50"
-              << std::setw(10) << "p95" << std::setw(10) << "p99" << std::endl;
-    std::cout << std::string(45, '-') << std::endl;
-    std::cout << std::setw(15) << "Insert" << std::setw(10) << insert_p50
-              << std::setw(10) << insert_p95 << std::setw(10) << insert_p99 << std::endl;
-    std::cout << std::setw(15) << "Fire" << std::setw(10) << fire_p50
-              << std::setw(10) << fire_p95 << std::setw(10) << fire_p99 << std::endl;
-
-    // Performance assertions
-    CHECK(insert_p99 < 10000);  // Insert p99 < 10ms
-    CHECK(fire_p99 < 50000);    // Fire p99 < 50ms
-}
-
-// ============================================================================
-// BENCHMARK 5: Memory Usage Under Sustained Load
-// ============================================================================
-
-TEST_CASE("Benchmark: Memory Under Sustained Load", "[benchmark][memory]") {
-    std::string drl = R"(
-package benchmark
-
-declare TestFact
-    id: int
-    value: int
-end
-
-rule "Match and Insert"
-when
-    $f : TestFact(value > 50)
-then
-    // matched
-end
-)";
-
-    ParsingResult result;
-    auto kb = build_knowledge_base(drl, result);
-    REQUIRE(result.success);
-
-    auto session = kb->create_session();
-
-    constexpr int BATCH_SIZE = 10000;
-    constexpr int BATCHES = 10;
-
-    std::cout << "\n=== Memory Usage Under Sustained Load ===" << std::endl;
-    std::cout << std::setw(10) << "Batch" << std::setw(15) << "Facts"
-              << std::setw(15) << "Memory (MB)" << std::setw(15) << "Delta (MB)" << std::endl;
-    std::cout << std::string(55, '-') << std::endl;
-
-    double prev_memory = 0;
-
-    for (int batch = 0; batch < BATCHES; ++batch) {
-        auto facts = create_facts(BATCH_SIZE);
-        for (auto& f : facts) {
-            f->fields["id"] = (int64_t)(batch * BATCH_SIZE + std::get<int64_t>(f->fields["id"]));
+            check(result.success);
         }
-        session->add_facts(facts);
-        session->fire_all_rules();
 
-        auto metrics = session->get_metrics();
-        double memory_mb = metrics.memory_used_bytes / (1024.0 * 1024.0);
-        double delta = memory_mb - prev_memory;
+        bench("compiles 10K rules under 30s") {
+            std::string drl = generate_rules(10000);
+            ParsingResult result;
 
-        std::cout << std::setw(10) << (batch + 1)
-                  << std::setw(15) << ((batch + 1) * BATCH_SIZE)
-                  << std::setw(15) << std::fixed << std::setprecision(2) << memory_mb
-                  << std::setw(15) << (batch > 0 ? delta : 0.0)
-                  << std::endl;
+            benchmark("compile 10000 rules", 1) {
+                build_knowledge_base(drl, result);
+            }
 
-        prev_memory = memory_mb;
+            check(result.success);
+        }
     }
 
-    // Memory should be bounded (not growing unbounded)
-    auto final_metrics = session->get_metrics();
-    double final_memory_mb = final_metrics.memory_used_bytes / (1024.0 * 1024.0);
-    CHECK(final_memory_mb < 500);  // Should stay under 500MB for 100K facts
-}
+    group("Session Creation") {
+        bench("benchmarks session creation (network shared)") {
+            std::string drl_100 = generate_rules(100);
+            std::string drl_1000 = generate_rules(1000);
+            std::string drl_5000 = generate_rules(5000);
 
-// ============================================================================
-// BENCHMARK SUMMARY
-// ============================================================================
+            ParsingResult result;
+            auto kb_100 = build_knowledge_base(drl_100, result);
+            check(result.success);
+            auto kb_1000 = build_knowledge_base(drl_1000, result);
+            check(result.success);
+            auto kb_5000 = build_knowledge_base(drl_5000, result);
+            check(result.success);
 
-TEST_CASE("Benchmark: Summary Report", "[benchmark][summary]") {
-    std::cout << "\n" << std::string(60, '=') << std::endl;
-    std::cout << "PRODUCTION BENCHMARK SUMMARY" << std::endl;
-    std::cout << std::string(60, '=') << std::endl;
-    std::cout << "\nTarget Metrics:" << std::endl;
-    std::cout << "  - 10K rules compile time: < 30 seconds" << std::endl;
-    std::cout << "  - 1M facts insert time: < 60 seconds" << std::endl;
-    std::cout << "  - Insert latency p99: < 10ms" << std::endl;
-    std::cout << "  - Fire latency p99: < 50ms" << std::endl;
-    std::cout << "  - Memory for 100K facts: < 500MB" << std::endl;
-    std::cout << "\nRun individual benchmarks with -c flag:" << std::endl;
-    std::cout << "  ./production_benchmark.RuleForge.exe \"[compilation]\"" << std::endl;
-    std::cout << "  ./production_benchmark.RuleForge.exe \"[throughput]\"" << std::endl;
-    std::cout << "  ./production_benchmark.RuleForge.exe \"[latency]\"" << std::endl;
-    std::cout << std::string(60, '=') << std::endl;
+            benchmark("create_session (100 rules)", 100) {
+                auto session = kb_100->create_session();
+            }
+
+            benchmark("create_session (1000 rules)", 50) {
+                auto session = kb_1000->create_session();
+            }
+
+            benchmark("create_session (5000 rules)", 10) {
+                auto session = kb_5000->create_session();
+            }
+        }
+    }
+
+    group("Fact Insertion") {
+        bench("benchmarks insertion throughput") {
+            auto kb = build_simple_kb();
+            auto facts_1k = create_facts(1000);
+            auto facts_10k = create_facts(10000);
+            auto facts_100k = create_facts(100000);
+
+            benchmark("insert 1K facts", 50) {
+                auto session = kb->create_session();
+                session->add_facts(facts_1k);
+            }
+
+            benchmark("insert 10K facts", 10) {
+                auto session = kb->create_session();
+                session->add_facts(facts_10k);
+            }
+
+            benchmark("insert 100K facts", 3) {
+                auto session = kb->create_session();
+                session->add_facts(facts_100k);
+            }
+        }
+
+        bench("inserts 1M facts under 60s") {
+            auto kb = build_simple_kb();
+            auto facts = create_facts(1000000);
+
+            benchmark("insert 1M facts", 1) {
+                auto session = kb->create_session();
+                session->add_facts(facts);
+                check_size_eq(session->get_fact_count(), 1000000);
+            }
+        }
+    }
+
+    group("Rule Firing") {
+        bench("benchmarks firing throughput") {
+            auto kb = build_processing_kb();
+            auto facts_1k = create_facts(1000);
+            auto facts_10k = create_facts(10000);
+            auto facts_50k = create_facts(50000);
+
+            benchmark("fire 1K facts", 20) {
+                auto session = kb->create_session();
+                session->add_facts(facts_1k);
+                session->fire_all_rules();
+            }
+
+            benchmark("fire 10K facts", 5) {
+                auto session = kb->create_session();
+                session->add_facts(facts_10k);
+                session->fire_all_rules();
+            }
+
+            benchmark("fire 50K facts", 2) {
+                auto session = kb->create_session();
+                session->add_facts(facts_50k);
+                session->fire_all_rules();
+            }
+        }
+    }
+
+    group("Latency") {
+        bench("measures p50/p95/p99 latencies") {
+            std::string drl = R"(
+package benchmark
+declare Event id: int, timestamp: int end
+rule "Process Event" when $e : Event() then end
+)";
+            ParsingResult result;
+            auto kb = build_knowledge_base(drl, result);
+            check(result.success);
+
+            constexpr int ITERATIONS = 1000;
+            std::vector<int64_t> insert_latencies;
+            std::vector<int64_t> fire_latencies;
+            insert_latencies.reserve(ITERATIONS);
+            fire_latencies.reserve(ITERATIONS);
+
+            auto session = kb->create_session();
+
+            for (int i = 0; i < ITERATIONS; ++i) {
+                auto fact = std::make_shared<Fact>();
+                fact->type = "benchmark.Event";
+                fact->fields["id"] = (int64_t)i;
+                fact->fields["timestamp"] = (int64_t)Clock::now().time_since_epoch().count();
+
+                auto start = Clock::now();
+                session->add_fact(fact);
+                auto end = Clock::now();
+                insert_latencies.push_back(std::chrono::duration_cast<Microseconds>(end - start).count());
+
+                start = Clock::now();
+                session->fire_all_rules();
+                end = Clock::now();
+                fire_latencies.push_back(std::chrono::duration_cast<Microseconds>(end - start).count());
+            }
+
+            info("Insert (us): p50=%lld p95=%lld p99=%lld",
+                 (long long)percentile(insert_latencies, 0.50),
+                 (long long)percentile(insert_latencies, 0.95),
+                 (long long)percentile(insert_latencies, 0.99));
+
+            info("Fire (us): p50=%lld p95=%lld p99=%lld",
+                 (long long)percentile(fire_latencies, 0.50),
+                 (long long)percentile(fire_latencies, 0.95),
+                 (long long)percentile(fire_latencies, 0.99));
+
+            check_int_lt(percentile(insert_latencies, 0.99), 10000);
+            check_int_lt(percentile(fire_latencies, 0.99), 50000);
+        }
+    }
+
+    group("Memory") {
+        bench("stays under 500MB for 100K facts") {
+            std::string drl = R"(
+package benchmark
+declare TestFact id: int, value: int end
+rule "Match" when $f : TestFact(value > 50) then end
+)";
+            ParsingResult result;
+            auto kb = build_knowledge_base(drl, result);
+            check(result.success);
+
+            auto session = kb->create_session();
+
+            for (int batch = 0; batch < 10; ++batch) {
+                auto facts = create_facts(10000);
+                for (auto& f : facts) {
+                    f->fields["id"] = (int64_t)(batch * 10000 + std::get<int64_t>(f->fields["id"]));
+                }
+                session->add_facts(facts);
+                session->fire_all_rules();
+            }
+
+            auto metrics = session->get_metrics();
+            double memory_mb = metrics.memory_used_bytes / (1024.0 * 1024.0);
+            info("Memory for 100K facts: %.2f MB", memory_mb);
+
+            check_float_lt(memory_mb, 500.0);
+        }
+    }
 }

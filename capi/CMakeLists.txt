@@ -2,7 +2,7 @@ include(GenerateExportHeader)
 
 # Version information (keep in sync with rule_forge.h)
 set(RULEFORGE_VERSION_MAJOR 0)
-set(RULEFORGE_VERSION_MINOR 1)
+set(RULEFORGE_VERSION_MINOR 3)
 set(RULEFORGE_VERSION_PATCH 0)
 
 # Define the target name for the shared library
@@ -23,7 +23,6 @@ generate_export_header(
     DEPRECATED_MACRO_NAME
     RULEFORGE_CAPI_DEPRECATED
 )
-find_package(pegtl)
 
 # Include directories for the CAPI. PUBLIC: Only the C API header - this is what
 # consumers need
@@ -35,13 +34,10 @@ target_include_directories(
 # PRIVATE: Internal implementation headers - not exposed to consumers
 target_include_directories(
     ${CAPI_TARGET_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/ruleforge/include
-                                ${CMAKE_SOURCE_DIR}/shared/pubcxx/include
+                                ${CMAKE_SOURCE_DIR}/shared/hashmap/include
 )
 
-target_link_libraries(
-    ${CAPI_TARGET_NAME}
-    PRIVATE pubcxx hashmap taocpp::pegtl RuleForge
-)
+target_link_libraries(${CAPI_TARGET_NAME} PRIVATE RuleForge)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     # Link against pthread for WASM if threading is used Emscripten provides its

@@ -45,7 +45,7 @@ public:
     }
 
 private:
-     map<std::string, std::unique_ptr<IAccumulator>> prototypes_;
+     ruleforge::map<std::string, std::unique_ptr<IAccumulator>> prototypes_;
 };
 
 // --- Example Implementations ---
@@ -141,7 +141,7 @@ public:
     ConstraintValue get_result() const override;
     void clear() override;
     std::unique_ptr<IAccumulator> clone() const override;
-    // supports_reverse is false by default, which is correct for collect.
+    bool supports_reverse() const override { return true; }
 };
 
 // Implements `collectSet`
@@ -152,7 +152,7 @@ public:
     ConstraintValue get_result() const override;
     void clear() override;
     std::unique_ptr<IAccumulator> clone() const override;
-    // supports_reverse is false by default
+    bool supports_reverse() const override { return true; }
 };
 
 #endif   // RFL_ACCUMULATORS_HPP

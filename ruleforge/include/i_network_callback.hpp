@@ -8,6 +8,7 @@
 #include <quickjs.h>
 #include <string>
 #include <functional>
+#include "phmap.h"
 // Forward declarations for types used in the interface
 struct Fact;
 struct Token;
@@ -31,7 +32,7 @@ public:
     virtual void update_fact(std::shared_ptr<Fact> fact, std::function<void(Fact&)> modifier) = 0;
     virtual void logical_insert(Token& token, std::shared_ptr<Fact> fact) = 0;
     virtual void set_focus(std::string const& group_name) = 0;
-    virtual map<std::string, JSValue> const& get_global_values() const = 0;
+    virtual ruleforge::map<std::string, JSValue> const& get_global_values() const = 0;
 
     // P1 FIX: rfl.halt() support
     virtual void halt() = 0;

@@ -12,6 +12,7 @@
 
 #include "rule_forge.h"
 
+
 // RAII wrapper for RuleForge resources
 class RuleForgeGuard {
 public:
@@ -32,7 +33,7 @@ std::string read_file(const std::string &path) {
 
 // Print error and return false
 bool check_result(int result, const std::string &operation) {
-  if (result != DRILLS_OK) {
+  if (result != RULES_FORGE_OK) {
     std::cerr << "Error: " << operation << std::endl;
     const char *err = ruleforge_get_last_error_message();
     if (err && std::strlen(err) > 0) {
@@ -102,12 +103,12 @@ void print_field_value(ruleforge_fact_t fact, const std::string &field_name) {
   int64_t int_val = 0;
 
   if (ruleforge_fact_get_field_as_string(fact, field_name.c_str(), str_buffer, sizeof(str_buffer),
-                                         &actual_len) == DRILLS_OK) {
+                                         &actual_len) == RULES_FORGE_OK) {
     std::cout << str_buffer;
   } else if (ruleforge_fact_get_field_as_double(fact, field_name.c_str(), &double_val) ==
-             DRILLS_OK) {
+             RULES_FORGE_OK) {
     std::cout << std::fixed << std::setprecision(2) << double_val;
-  } else if (ruleforge_fact_get_field_as_int(fact, field_name.c_str(), &int_val) == DRILLS_OK) {
+  } else if (ruleforge_fact_get_field_as_int(fact, field_name.c_str(), &int_val) == RULES_FORGE_OK) {
     std::cout << int_val;
   } else {
     std::cout << "(unknown)";
@@ -312,7 +313,7 @@ int main(int argc, char *argv[]) {
       for (int i = 0; i < count; ++i) {
         ruleforge_fact_t fact = nullptr;
         if (ruleforge_query_result_get_fact_at_index(query_result, i, binding.c_str(), &fact) !=
-            DRILLS_OK) {
+            RULES_FORGE_OK) {
           std::cerr << "  Row " << i << ": Failed to get fact for binding '" << binding << "'"
                     << std::endl;
           continue;

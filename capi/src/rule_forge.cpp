@@ -15,6 +15,8 @@
 // Include JSON parsing
 #include <jsoncons/json.hpp>
 
+using namespace ruleforge;
+
 // Simple implementation for core C API functions
 extern "C" {
 
@@ -28,19 +30,19 @@ static void set_error_fmt(const char *prefix, const char *detail) {
   snprintf(last_error, sizeof(last_error), "%s%s", prefix, detail);
 }
 
-CXX_API ruleforge_status_t ruleforge_init() {
+RULEFORGE_API ruleforge_status_t ruleforge_init() {
   last_error[0] = '\0';
-  return DRILLS_OK;
+  return RULES_FORGE_OK;
 }
 
-CXX_API ruleforge_status_t ruleforge_cleanup() {
+RULEFORGE_API ruleforge_status_t ruleforge_cleanup() {
   last_error[0] = '\0';
-  return DRILLS_OK;
+  return RULES_FORGE_OK;
 }
 
-CXX_API const char *ruleforge_get_last_error_message() { return last_error; }
+RULEFORGE_API const char *ruleforge_get_last_error_message() { return last_error; }
 
-CXX_API const char *ruleforge_get_version() { return RULEFORGE_VERSION_STRING; }
+RULEFORGE_API const char *ruleforge_get_version() { return RULEFORGE_VERSION_STRING; }
 
 // Knowledge Base functions
 // Helper function for crossing C++/pure C boundaries safely
@@ -48,33 +50,33 @@ struct KnowledgeBaseWrapper {
   std::shared_ptr<KnowledgeBase> kb;
 };
 
-CXX_API ruleforge_status_t ruleforge_kb_create(ruleforge_knowledge_base_t *out_kb) {
+RULEFORGE_API ruleforge_status_t ruleforge_kb_create(ruleforge_knowledge_base_t *out_kb) {
   if (!out_kb) {
     set_error("Output Knowledge Base pointer is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     // Create empty knowledge base
     parser_state empty_state;
     auto kb_wrapper = new KnowledgeBaseWrapper();
-    kb_wrapper->kb = KnowledgeBase::create(empty_state);
+    kb_wrapper->kb = KnowledgeBase::create(std::move(empty_state));
     *out_kb = static_cast<ruleforge_knowledge_base_t>(kb_wrapper);
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to create Knowledge Base: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const char *drl_source) {
+RULEFORGE_API ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const char *drl_source) {
   if (!kb) {
     set_error("Knowledge Base handle is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   if (!drl_source) {
     set_error("RFL source is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     ParsingResult result;
@@ -92,7 +94,7 @@ CXX_API ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, 
         error_msg += err.to_string() + "; ";
       }
       snprintf(last_error, sizeof(last_error), "%s", error_msg.c_str());
-      return DRILLS_ERROR_COMPILATION_FAILED;
+      return RULES_FORGE_ERROR_COMPILATION_FAILED;
     }
 
     // Restore the native functions
@@ -101,22 +103,22 @@ CXX_API ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, 
     }
 
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to load RFL: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base_t kb,
+RULEFORGE_API ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base_t kb,
                                                         const char *csv_source) {
   if (!kb) {
     set_error("Knowledge Base handle is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   if (!csv_source) {
     set_error("CSV source is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     ParsingResult result;
@@ -133,7 +135,7 @@ CXX_API ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowle
         error_msg += err.to_string() + "; ";
       }
       snprintf(last_error, sizeof(last_error), "%s", error_msg.c_str());
-      return DRILLS_ERROR_COMPILATION_FAILED;
+      return RULES_FORGE_ERROR_COMPILATION_FAILED;
     }
 
     // Restore the native functions
@@ -142,45 +144,45 @@ CXX_API ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowle
     }
 
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to load CSV: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_kb_destroy(ruleforge_knowledge_base_t kb) {
+RULEFORGE_API ruleforge_status_t ruleforge_kb_destroy(ruleforge_knowledge_base_t kb) {
   if (!kb) {
     set_error("Knowledge Base handle is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto kb_wrapper = static_cast<KnowledgeBaseWrapper *>(kb);
     delete kb_wrapper;
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to destroy Knowledge Base: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_kb_register_native_function(
+RULEFORGE_API ruleforge_status_t ruleforge_kb_register_native_function(
     ruleforge_knowledge_base_t kb,
     const char *function_name,
     ruleforge_native_function_t callback,
     void *user_data) {
   if (!kb) {
     set_error("Knowledge Base handle is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   if (!function_name) {
     set_error("Function name is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   if (!callback) {
     set_error("Callback function is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto kb_wrapper = static_cast<KnowledgeBaseWrapper *>(kb);
@@ -189,10 +191,10 @@ CXX_API ruleforge_status_t ruleforge_kb_register_native_function(
         reinterpret_cast<NativeFunctionCallback>(callback),
         user_data);
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to register native function: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
@@ -201,15 +203,15 @@ struct StatefulSessionWrapper {
   std::unique_ptr<StatefulSession> session;
 };
 
-CXX_API ruleforge_status_t ruleforge_session_create(ruleforge_knowledge_base_t kb,
+RULEFORGE_API ruleforge_status_t ruleforge_session_create(ruleforge_knowledge_base_t kb,
                                            ruleforge_stateful_session_t *out_session) {
   if (!kb) {
     set_error("Knowledge Base handle is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   if (!out_session) {
     set_error("Output Session pointer is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto kb_wrapper = static_cast<KnowledgeBaseWrapper *>(kb);
@@ -217,10 +219,10 @@ CXX_API ruleforge_status_t ruleforge_session_create(ruleforge_knowledge_base_t k
     session_wrapper->session = kb_wrapper->kb->create_session();
     *out_session = static_cast<ruleforge_stateful_session_t>(session_wrapper);
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to create session: ", e.what());
-    return DRILLS_ERROR_SESSION_CREATION_FAILED;
+    return RULES_FORGE_ERROR_SESSION_CREATION_FAILED;
   }
 }
 
@@ -229,11 +231,11 @@ struct QueryResultWrapper {
   std::unique_ptr<QueryResult> query_result;
 };
 
-CXX_API ruleforge_status_t ruleforge_session_add_fact_json(ruleforge_stateful_session_t session,
+RULEFORGE_API ruleforge_status_t ruleforge_session_add_fact_json(ruleforge_stateful_session_t session,
                                                    const char *fact_type, const char *fact_json) {
   if (!session || !fact_type || !fact_json) {
     set_error("Session handle, fact type, or fact JSON is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
@@ -260,13 +262,13 @@ CXX_API ruleforge_status_t ruleforge_session_add_fact_json(ruleforge_stateful_se
     // Add the fact to the session
     session_wrapper->session->add_fact(std::move(builder).build());
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const jsoncons::json_exception &e) {
     set_error_fmt("JSON parsing failed: ", e.what());
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to add fact: ", e.what());
-    return DRILLS_ERROR_FACT_INSERTION_FAILED;
+    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
   }
 }
 
@@ -274,7 +276,7 @@ ruleforge_status_t ruleforge_session_fire_all_rules(ruleforge_stateful_session_t
                                                     int max_rules, int *out_fired_count) {
   if (!session) {
     set_error("Session handle is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
@@ -283,14 +285,14 @@ ruleforge_status_t ruleforge_session_fire_all_rules(ruleforge_stateful_session_t
       *out_fired_count = fired;
     }
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to fire rules: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
-CXX_API int ruleforge_session_get_fact_count(ruleforge_stateful_session_t session) {
+RULEFORGE_API int ruleforge_session_get_fact_count(ruleforge_stateful_session_t session) {
   if (!session) {
     set_error("Session handle is NULL");
     return -1;
@@ -305,20 +307,20 @@ CXX_API int ruleforge_session_get_fact_count(ruleforge_stateful_session_t sessio
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_session_query(ruleforge_stateful_session_t session,
+RULEFORGE_API ruleforge_status_t ruleforge_session_query(ruleforge_stateful_session_t session,
                                            const char *query_name,
                                            ruleforge_query_result_t *out_query_result) {
   if (!session) {
     set_error("Session handle is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   if (!query_name) {
     set_error("Query name is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   if (!out_query_result) {
     set_error("Output Query Result pointer is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
@@ -332,31 +334,31 @@ CXX_API ruleforge_status_t ruleforge_session_query(ruleforge_stateful_session_t 
 
     *out_query_result = static_cast<ruleforge_query_result_t>(result_wrapper);
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to execute query: ", e.what());
-    return DRILLS_ERROR_QUERY_FAILED;
+    return RULES_FORGE_ERROR_QUERY_FAILED;
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_session_destroy(ruleforge_stateful_session_t session) {
+RULEFORGE_API ruleforge_status_t ruleforge_session_destroy(ruleforge_stateful_session_t session) {
   if (!session) {
     set_error("Session handle is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
     delete session_wrapper;
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to destroy session: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
 // Query result functions
-CXX_API int ruleforge_query_result_get_size(ruleforge_query_result_t query_result) {
+RULEFORGE_API int ruleforge_query_result_get_size(ruleforge_query_result_t query_result) {
   if (!query_result) {
     set_error("Query Result handle is NULL");
     return -1;
@@ -371,23 +373,23 @@ CXX_API int ruleforge_query_result_get_size(ruleforge_query_result_t query_resul
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_query_result_get_fact_at_index(ruleforge_query_result_t query_result,
+RULEFORGE_API ruleforge_status_t ruleforge_query_result_get_fact_at_index(ruleforge_query_result_t query_result,
                                                             int row_index, const char *binding_name,
                                                             ruleforge_fact_t *out_fact) {
   if (!query_result || !binding_name || !out_fact) {
     set_error("Query Result handle, binding name, or output Fact pointer is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   if (row_index < 0) {
     set_error("Row index is negative");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto result_wrapper = static_cast<QueryResultWrapper *>(query_result);
 
     if (row_index >= static_cast<int>(result_wrapper->query_result->size())) {
       set_error("Row index out of bounds");
-      return DRILLS_ERROR_INVALID_ARGUMENT;
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
     // Use iterator to access row at index
@@ -398,85 +400,85 @@ CXX_API ruleforge_status_t ruleforge_query_result_get_fact_at_index(ruleforge_qu
     auto fact_opt = (*it).get(std::string(binding_name));
     if (!fact_opt) {
       set_error("Binding name not found");
-      return DRILLS_ERROR_INVALID_ARGUMENT;
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
     // Return the raw pointer - ownership remains with QueryResult
     *out_fact = static_cast<ruleforge_fact_t>(fact_opt->get());
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to get fact: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_query_result_destroy(ruleforge_query_result_t query_result) {
+RULEFORGE_API ruleforge_status_t ruleforge_query_result_destroy(ruleforge_query_result_t query_result) {
   if (!query_result) {
     set_error("Query Result handle is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto result_wrapper = static_cast<QueryResultWrapper *>(query_result);
     delete result_wrapper;
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to destroy query result: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
 // Fact functions
-CXX_API ruleforge_status_t ruleforge_fact_get_field_as_string(ruleforge_fact_t fact, const char *field_name,
+RULEFORGE_API ruleforge_status_t ruleforge_fact_get_field_as_string(ruleforge_fact_t fact, const char *field_name,
                                                       char *buffer, size_t buffer_size,
                                                       size_t *out_actual_length) {
   if (!fact || !field_name || !buffer || !out_actual_length) {
     set_error("Fact handle, field name, buffer, or actual length pointer is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto f = static_cast<const Fact *>(fact);
     auto field_opt = f->get_field(field_name);
     if (!field_opt) {
       set_error("Field not found");
-      return DRILLS_ERROR_INVALID_ARGUMENT;
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
     auto *field_ptr = std::get_if<std::string>(&(*field_opt));
     if (!field_ptr) {
       set_error("Field is not a string");
-      return DRILLS_ERROR_INVALID_ARGUMENT;
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
     const auto &field = *field_ptr;
 
     *out_actual_length = field.length();
     if (buffer_size <= field.length()) {
       set_error("Buffer too small");
-      return DRILLS_ERROR_INVALID_ARGUMENT;
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
     memcpy(buffer, field.c_str(), field.length() + 1);
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to get string field: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_fact_get_field_as_double(ruleforge_fact_t fact, const char *field_name,
+RULEFORGE_API ruleforge_status_t ruleforge_fact_get_field_as_double(ruleforge_fact_t fact, const char *field_name,
                                                       double *out_value) {
   if (!fact || !field_name || !out_value) {
     set_error("Fact handle, field name, or output value pointer is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto f = static_cast<const Fact *>(fact);
     auto field_opt = f->get_field(field_name);
     if (!field_opt) {
       set_error("Field not found");
-      return DRILLS_ERROR_INVALID_ARGUMENT;
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
     auto *double_ptr = std::get_if<double>(&(*field_opt));
@@ -488,99 +490,99 @@ CXX_API ruleforge_status_t ruleforge_fact_get_field_as_double(ruleforge_fact_t f
         *out_value = static_cast<double>(*int_ptr);
       } else {
         set_error("Field is not a numeric type");
-        return DRILLS_ERROR_INVALID_ARGUMENT;
+        return RULES_FORGE_ERROR_INVALID_ARGUMENT;
       }
     }
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to get double field: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_fact_get_field_as_int(ruleforge_fact_t fact, const char *field_name,
+RULEFORGE_API ruleforge_status_t ruleforge_fact_get_field_as_int(ruleforge_fact_t fact, const char *field_name,
                                                    int64_t *out_value) {
   if (!fact || !field_name || !out_value) {
     set_error("Fact handle, field name, or output value pointer is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto f = static_cast<const Fact *>(fact);
     auto field_opt = f->get_field(field_name);
     if (!field_opt) {
       set_error("Field not found");
-      return DRILLS_ERROR_INVALID_ARGUMENT;
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
     auto *field_ptr = std::get_if<int64_t>(&(*field_opt));
     if (!field_ptr) {
       set_error("Field is not an int");
-      return DRILLS_ERROR_INVALID_ARGUMENT;
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
     *out_value = *field_ptr;
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to get int field: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_fact_get_field_as_bool(ruleforge_fact_t fact, const char *field_name,
+RULEFORGE_API ruleforge_status_t ruleforge_fact_get_field_as_bool(ruleforge_fact_t fact, const char *field_name,
                                                     int *out_value) {
   if (!fact || !field_name || !out_value) {
     set_error("Fact handle, field name, or output value pointer is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto f = static_cast<const Fact *>(fact);
     auto field_opt = f->get_field(field_name);
     if (!field_opt) {
       set_error("Field not found");
-      return DRILLS_ERROR_INVALID_ARGUMENT;
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
     auto *field_ptr = std::get_if<int64_t>(&(*field_opt));
     if (!field_ptr) {
       set_error("Field is not a bool");
-      return DRILLS_ERROR_INVALID_ARGUMENT;
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
     *out_value = (*field_ptr != 0) ? 1 : 0;
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to get bool field: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
 // --- Session Observability Functions ---
 
-CXX_API ruleforge_status_t ruleforge_session_enable_tracing(ruleforge_stateful_session_t session,
+RULEFORGE_API ruleforge_status_t ruleforge_session_enable_tracing(ruleforge_stateful_session_t session,
                                                     int enabled) {
   if (!session) {
     set_error("Session handle is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
     session_wrapper->session->enable_tracing(enabled != 0);
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to enable tracing: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_session_get_execution_trace(ruleforge_stateful_session_t session,
+RULEFORGE_API ruleforge_status_t ruleforge_session_get_execution_trace(ruleforge_stateful_session_t session,
                                                          int include_network, char *buffer,
                                                          size_t buffer_size,
                                                          size_t *out_actual_length) {
   if (!session || !buffer || !out_actual_length) {
     set_error("Session handle, buffer, or actual length pointer is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
@@ -589,24 +591,24 @@ CXX_API ruleforge_status_t ruleforge_session_get_execution_trace(ruleforge_state
     *out_actual_length = trace.length();
     if (buffer_size <= trace.length()) {
       set_error("Buffer too small for trace");
-      return DRILLS_ERROR_INVALID_ARGUMENT;
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
     memcpy(buffer, trace.c_str(), trace.length() + 1);
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to get execution trace: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
-CXX_API ruleforge_status_t
+RULEFORGE_API ruleforge_status_t
 ruleforge_session_get_rule_performance_summary(ruleforge_stateful_session_t session, char *buffer,
                                                size_t buffer_size, size_t *out_actual_length) {
   if (!session || !buffer || !out_actual_length) {
     set_error("Session handle, buffer, or actual length pointer is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
@@ -615,37 +617,37 @@ ruleforge_session_get_rule_performance_summary(ruleforge_stateful_session_t sess
     *out_actual_length = summary.length();
     if (buffer_size <= summary.length()) {
       set_error("Buffer too small for summary");
-      return DRILLS_ERROR_INVALID_ARGUMENT;
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
     memcpy(buffer, summary.c_str(), summary.length() + 1);
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to get rule performance summary: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_session_clear_trace(ruleforge_stateful_session_t session) {
+RULEFORGE_API ruleforge_status_t ruleforge_session_clear_trace(ruleforge_stateful_session_t session) {
   if (!session) {
     set_error("Session handle is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
     session_wrapper->session->get_tracer().clear_trace();
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to clear trace: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 
 // --- Session Memory Statistics Functions ---
 
-CXX_API int64_t ruleforge_session_get_memory_used(ruleforge_stateful_session_t session) {
+RULEFORGE_API int64_t ruleforge_session_get_memory_used(ruleforge_stateful_session_t session) {
   if (!session) {
     set_error("Session handle is NULL");
     return -1;
@@ -660,7 +662,7 @@ CXX_API int64_t ruleforge_session_get_memory_used(ruleforge_stateful_session_t s
   }
 }
 
-CXX_API int64_t ruleforge_session_get_memory_peak(ruleforge_stateful_session_t session) {
+RULEFORGE_API int64_t ruleforge_session_get_memory_peak(ruleforge_stateful_session_t session) {
   if (!session) {
     set_error("Session handle is NULL");
     return -1;
@@ -675,12 +677,12 @@ CXX_API int64_t ruleforge_session_get_memory_peak(ruleforge_stateful_session_t s
   }
 }
 
-CXX_API ruleforge_status_t ruleforge_session_get_memory_stats(ruleforge_stateful_session_t session,
+RULEFORGE_API ruleforge_status_t ruleforge_session_get_memory_stats(ruleforge_stateful_session_t session,
                                                       char *buffer, size_t buffer_size,
                                                       size_t *out_actual_length) {
   if (!session || !buffer || !out_actual_length) {
     set_error("Session handle, buffer, or actual length pointer is NULL");
-    return DRILLS_ERROR_INVALID_ARGUMENT;
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
     auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
@@ -689,15 +691,15 @@ CXX_API ruleforge_status_t ruleforge_session_get_memory_stats(ruleforge_stateful
     *out_actual_length = stats.length();
     if (buffer_size <= stats.length()) {
       set_error("Buffer too small for stats");
-      return DRILLS_ERROR_INVALID_ARGUMENT;
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
     memcpy(buffer, stats.c_str(), stats.length() + 1);
     last_error[0] = '\0';
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to get memory stats: ", e.what());
-    return DRILLS_ERROR_GENERIC;
+    return RULES_FORGE_ERROR_GENERIC;
   }
 }
 

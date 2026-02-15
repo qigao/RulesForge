@@ -21,7 +21,7 @@ void print_constraint_node(ConstraintNode const *node, int level) {
     std::cout << indent(level) << "LEAF: ";
     if (c.field_binding)
       std::cout << *c.field_binding << " : ";
-    std::cout << c.left_field << " " << c.op << " ";
+    std::cout << c.left_field << " " << compare_op_str(c.op) << " ";
     if (c.right_literal) {
       std::cout << ::to_string(*c.right_literal);
     } else if (c.right_bound_field) {
@@ -137,8 +137,6 @@ private:
 
 int main(int argc, char *argv[]) {
   // Initialize fmtlog with TSCNS timing system
-  fmtlogWrapper<>::impl.init();
-  fmtlog::setLogLevel(fmtlog::INF);
 
   logi("Drills Engine starting up with fmtlog logging system");
   logi("Arguments: {}", argc);
@@ -153,7 +151,4 @@ int main(int argc, char *argv[]) {
     std::cerr << "\n[FATAL ERROR] " << e.what() << std::endl;
     return 1;
   }
-
-  // Poll and flush any remaining log messages
-  fmtlog::poll(true);
 }

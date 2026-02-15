@@ -9,6 +9,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 // ===================================================================
@@ -29,7 +30,7 @@ struct SymbolInfo {
  * @using SymbolTable
  * @brief Maps a binding name (e.g., "$p") to its SymbolInfo.
  */
-using SymbolTable = map<std::string, SymbolInfo>;
+using SymbolTable = ruleforge::map<std::string, SymbolInfo>;
 
 // ===================================================================
 // == SemanticAnalyzer Class Definition
@@ -54,26 +55,26 @@ public:
 
     std::vector<StructuredError> const& get_errors() const { return errors_; }
 
-    map<std::string, std::set<std::string>> const& get_type_schemas() const { return type_schemas_; }
+    ruleforge::map<std::string, std::set<std::string>> const& get_type_schemas() const { return type_schemas_; }
 
     std::optional<std::string> resolve_type(std::string const& type_name, std::string const& package_ctx,
                                             std::vector<std::string> const& imports_ctx);
-    void add_error(tao::pegtl::position const& pos, std::string const& message);
+    void add_error(SourcePosition const& pos, std::string const& message);
 
 private:
     void build_schema();
-    void analyze_rule(ParsedRule& rule);
+    void analyze_rule(ParsedRule& rule, std::unordered_set<std::string> const& rule_names);
     void analyze_query(ParsedQuery& query);
     void analyze_pattern_list(std::vector<ParsedPattern>& patterns, SymbolTable& symbols, int& depth,
                               ParsedRule const& rule);
     void analyze_pattern(ParsedPattern& pattern, SymbolTable& symbols, ParsedRule const& rule,
-                         tao::pegtl::position const& pattern_pos, int depth);
+                         SourcePosition const& pattern_pos, int depth);
     void analyze_rhs(ParsedRule& rule, SymbolTable const& symbols);
 
     parser_state& state_;
     std::string source_name_;
     std::vector<StructuredError> errors_;
-    map<std::string, std::set<std::string>> type_schemas_;
+    ruleforge::map<std::string, std::set<std::string>> type_schemas_;
 };
 
 #endif   // SEMANTIC_ANALYZER_HPP

@@ -12,13 +12,6 @@
 
 class ReteNetwork;
 
-// helper struct to manage the recursive parsing process
-struct RflParserContext {
-    parser_state state;
-    std::set<std::string> visited_files;
-    std::vector<std::string> const& base_dirs;
-    ParsingResult& result;
-};
 
 /**
  * @brief Parses a RFL string, analyzes it, and builds a KnowledgeBase.

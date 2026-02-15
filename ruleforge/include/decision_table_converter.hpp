@@ -5,6 +5,27 @@
 
 #include <string>
 
+/**
+ * @brief Column types for decision table (enum for O(1) comparison)
+ */
+enum class ColumnType : uint8_t {
+    Condition,
+    Action,
+    RuleName,
+    Salience,
+    AgendaGroup,
+    Other
+};
+
+inline ColumnType parse_column_type(std::string_view s) {
+    if (s == "CONDITION") return ColumnType::Condition;
+    if (s == "ACTION") return ColumnType::Action;
+    if (s == "Rule Name") return ColumnType::RuleName;
+    if (s == "Salience") return ColumnType::Salience;
+    if (s == "agenda-group") return ColumnType::AgendaGroup;
+    return ColumnType::Other;
+}
+
 class DecisionTableConverter {
 public:
     explicit DecisionTableConverter(DecisionTable table);
@@ -12,7 +33,7 @@ public:
 
 private:
     struct ColumnDefinition {
-        std::string type;   // "CONDITION", "ACTION", "Rule Name", "Salience"
+        ColumnType type;
         std::string template_text;
     };
 

@@ -1,11 +1,11 @@
-#include "catch2/catch_all.hpp"
-#include "catch2/matchers/catch_matchers_vector.hpp"   // For UnorderedEquals
+#include "tinytest.h"
 #include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "query_result.hpp"
 #include "stateful_session.hpp"
 
-// A dedicated fixture for query tests to handle KB and session creation.
+using namespace ruleforge;
+
 struct QueryTestFixture {
     std::shared_ptr<KnowledgeBase> kb;
     std::unique_ptr<StatefulSession> session;
@@ -14,14 +14,14 @@ struct QueryTestFixture {
         ParsingResult result;
         kb = build_knowledge_base(drl, result);
         if (!result.success) {
-            FAIL("RFL parsing failed: " << (result.errors.empty() ? "Unknown error" : result.errors[0].to_string()));
+            throw std::runtime_error("RFL parsing failed: " + (result.errors.empty() ? "Unknown error" : result.errors[0].to_string()));
         }
-        REQUIRE(kb != nullptr);
+        if (!kb) { throw std::runtime_error("KnowledgeBase is null"); }
         session = kb->create_session();
-        REQUIRE(session != nullptr);
+        if (!session) { throw std::runtime_error("Session is null"); }
     }
 
-    std::shared_ptr<Fact> createFact(std::string const& type, map<std::string, ConstraintValue> const& fields) {
+    std::shared_ptr<Fact> createFact(std::string const& type, ruleforge::unordered_map<std::string, ConstraintValue> const& fields) {
         auto fact = std::make_shared<Fact>();
         fact->type = type;
         fact->fields = fields;
@@ -30,110 +30,152 @@ struct QueryTestFixture {
     }
 };
 
-TEST_CASE_METHOD(QueryTestFixture, "Query: Non-Parameterized (Live) Queries", "[query][terminal]") {
-    build(R"(
-        declare Item name: String end
-        query "all-items" $i: Item() end
-    )");
+suite("Query Terminal Node") {
+    group("Non-Parameterized (Live) Queries") {
+        it("returns no results initially") {
+            QueryTestFixture fixture;
+            fixture.build(R"(
+                declare Item name: String end
+                query "all-items" $i: Item() end
+            )");
 
-    SECTION("Initially, the query should return no results") {
-        QueryResult results = session->execute_query("all-items");
-        REQUIRE(results.empty());
-    }
-
-    // Prepare facts for subsequent sections
-    auto item1 = createFact("Item", {{"name", "Book"}});
-    auto item2 = createFact("Item", {{"name", "Pen"}});
-
-    SECTION("After inserting facts, the live query should find them") {
-        QueryResult results = session->execute_query("all-items");
-        REQUIRE(results.size() == 2);
-    }
-
-    SECTION("After retracting a fact, query results should update") {
-        session->retract_fact(item1);
-        QueryResult results = session->execute_query("all-items");
-        REQUIRE(results.size() == 1);
-
-        // Use the safe and expressive API to check the result
-        auto name = results.single().getFieldAs<std::string>("$i", "name");
-        REQUIRE(name.has_value());
-        CHECK(name.value() == "Pen");
-    }
-}
-
-TEST_CASE_METHOD(QueryTestFixture, "Query: Parameterized with empty body", "[query][input][edgecase]") {
-    build(R"(
-        declare Item name: String end
-        query "get-item-with-empty-body"(Item $i) end
-    )");
-
-    auto itemA = std::make_shared<Fact>();
-    itemA->type = "Item";
-    itemA->id = 999;
-    itemA->fields["name"] = "Apple";
-
-    SECTION("Executing a body-less query finds the input parameter") {
-        QueryResult results = session->execute_query("get-item-with-empty-body", {itemA});
-        REQUIRE(results.size() == 1);
-        auto row = results.single();
-        REQUIRE(row.get("$i").has_value());
-        CHECK(row.get("$i").value()->id == itemA->id);
-    }
-}
-
-TEST_CASE_METHOD(QueryTestFixture, "Query: Parameterized with a join", "[query][input][join]") {
-    build(R"(
-        declare Customer id: int, name: String end
-        declare Order customerId: int, product: String end
-        query "find-orders-for-customer"(Customer $c)
-            $o: Order(customerId == $c.id)
-        end
-    )");
-
-    createFact("Order", {{"customerId", 101}, {"product", "Laptop"}});
-    auto order2 = createFact("Order", {{"customerId", 202}, {"product", "Mouse"}});
-    createFact("Order", {{"customerId", 101}, {"product", "Keyboard"}});
-
-    SECTION("Query for a customer with multiple orders") {
-        auto cust1_arg = std::make_shared<Fact>();
-        cust1_arg->type = "Customer";
-        cust1_arg->fields = {{"id", 101}, {"name", "Alice"}};
-
-        QueryResult results = session->execute_query("find-orders-for-customer", {cust1_arg});
-        REQUIRE(results.size() == 2);
-
-        for (auto const& row : results) {
-            REQUIRE(row.get("$c").has_value());   // Parameter should be present
-            REQUIRE(row.get("$o").has_value());
+            QueryResult results = fixture.session->execute_query("all-items");
+            check(results.empty());
         }
 
-        std::vector<std::string> products = results.getColumnFieldAs<std::string>("$o", "product");
-        REQUIRE_THAT(products, Catch::Matchers::UnorderedEquals(std::vector<std::string>{"Laptop", "Keyboard"}));
+        it("finds facts after insertion") {
+            QueryTestFixture fixture;
+            fixture.build(R"(
+                declare Item name: String end
+                query "all-items" $i: Item() end
+            )");
+
+            fixture.createFact("Item", {{"name", "Book"}});
+            fixture.createFact("Item", {{"name", "Pen"}});
+
+            QueryResult results = fixture.session->execute_query("all-items");
+            check(results.size() == 2);
+        }
+
+        it("updates results after retraction") {
+            QueryTestFixture fixture;
+            fixture.build(R"(
+                declare Item name: String end
+                query "all-items" $i: Item() end
+            )");
+
+            auto item1 = fixture.createFact("Item", {{"name", "Book"}});
+            fixture.createFact("Item", {{"name", "Pen"}});
+
+            fixture.session->retract_fact(item1);
+            QueryResult results = fixture.session->execute_query("all-items");
+            check(results.size() == 1);
+
+            auto name = results.single().getFieldAs<std::string>("$i", "name");
+            check(name.has_value());
+            check(name.value() == "Pen");
+        }
     }
 
-    // The rest of the test cases are unchanged but will now work with the completed API.
-    SECTION("Query for a customer with one order") {
-        auto cust2_arg = std::make_shared<Fact>();
-        cust2_arg->type = "Customer";
-        cust2_arg->fields = {{"id", 202}, {"name", "Bob"}};
+    group("Parameterized with empty body") {
+        it("finds the input parameter") {
+            QueryTestFixture fixture;
+            fixture.build(R"(
+                declare Item name: String end
+                query "get-item-with-empty-body"(Item $i) end
+            )");
 
-        QueryResult results = session->execute_query("find-orders-for-customer", {cust2_arg});
-        REQUIRE(results.size() == 1);
+            auto itemA = std::make_shared<Fact>();
+            itemA->type = "Item";
+            itemA->id = 999;
+            itemA->fields["name"] = "Apple";
 
-        auto fact_opt = results.single().get("$o");
-        REQUIRE(fact_opt.has_value());
-        CHECK((*fact_opt)->id == order2->id);
+            QueryResult results = fixture.session->execute_query("get-item-with-empty-body", {itemA});
+            check(results.size() == 1);
+            auto row = results.single();
+            check(row.get("$i").has_value());
+            check(row.get("$i").value()->id == itemA->id);
+        }
     }
 
-    SECTION("Query for a customer with no orders") {
-        auto cust3_arg = std::make_shared<Fact>();
-        cust3_arg->type = "Customer";
-        cust3_arg->fields = {{"id", 303}, {"name", "Charlie"}};
+    group("Parameterized with a join") {
+        it("finds orders for customer with multiple orders") {
+            QueryTestFixture fixture;
+            fixture.build(R"(
+                declare Customer id: int, name: String end
+                declare Order customerId: int, product: String end
+                query "find-orders-for-customer"(Customer $c)
+                    $o: Order(customerId == $c.id)
+                end
+            )");
 
-        QueryResult results = session->execute_query("find-orders-for-customer", {cust3_arg});
-        REQUIRE(results.empty());
+            fixture.createFact("Order", {{"customerId", (int64_t)101}, {"product", "Laptop"}});
+            fixture.createFact("Order", {{"customerId", (int64_t)202}, {"product", "Mouse"}});
+            fixture.createFact("Order", {{"customerId", (int64_t)101}, {"product", "Keyboard"}});
+
+            auto cust1_arg = std::make_shared<Fact>();
+            cust1_arg->type = "Customer";
+            cust1_arg->fields = {{"id", (int64_t)101}, {"name", "Alice"}};
+
+            QueryResult results = fixture.session->execute_query("find-orders-for-customer", {cust1_arg});
+            check(results.size() == 2);
+
+            for (auto const& row : results) {
+                check(row.get("$c").has_value());
+                check(row.get("$o").has_value());
+            }
+
+            std::vector<std::string> products = results.getColumnFieldAs<std::string>("$o", "product");
+            bool has_laptop = std::find(products.begin(), products.end(), "Laptop") != products.end();
+            bool has_keyboard = std::find(products.begin(), products.end(), "Keyboard") != products.end();
+            check(has_laptop);
+            check(has_keyboard);
+        }
+
+        it("finds single order for customer") {
+            QueryTestFixture fixture;
+            fixture.build(R"(
+                declare Customer id: int, name: String end
+                declare Order customerId: int, product: String end
+                query "find-orders-for-customer"(Customer $c)
+                    $o: Order(customerId == $c.id)
+                end
+            )");
+
+            fixture.createFact("Order", {{"customerId", (int64_t)101}, {"product", "Laptop"}});
+            auto order2 = fixture.createFact("Order", {{"customerId", (int64_t)202}, {"product", "Mouse"}});
+            fixture.createFact("Order", {{"customerId", (int64_t)101}, {"product", "Keyboard"}});
+
+            auto cust2_arg = std::make_shared<Fact>();
+            cust2_arg->type = "Customer";
+            cust2_arg->fields = {{"id", (int64_t)202}, {"name", "Bob"}};
+
+            QueryResult results = fixture.session->execute_query("find-orders-for-customer", {cust2_arg});
+            check(results.size() == 1);
+
+            auto fact_opt = results.single().get("$o");
+            check(fact_opt.has_value());
+            check((*fact_opt)->id == order2->id);
+        }
+
+        it("returns empty for customer with no orders") {
+            QueryTestFixture fixture;
+            fixture.build(R"(
+                declare Customer id: int, name: String end
+                declare Order customerId: int, product: String end
+                query "find-orders-for-customer"(Customer $c)
+                    $o: Order(customerId == $c.id)
+                end
+            )");
+
+            fixture.createFact("Order", {{"customerId", (int64_t)101}, {"product", "Laptop"}});
+
+            auto cust3_arg = std::make_shared<Fact>();
+            cust3_arg->type = "Customer";
+            cust3_arg->fields = {{"id", (int64_t)303}, {"name", "Charlie"}};
+
+            QueryResult results = fixture.session->execute_query("find-orders-for-customer", {cust3_arg});
+            check(results.empty());
+        }
     }
 }
-
-

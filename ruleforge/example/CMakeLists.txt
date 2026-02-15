@@ -6,7 +6,7 @@ foreach(example_source ${SOURCES})
     target_link_libraries(
         ${EXAMPLE_NAME}
         PRIVATE ${TARGET_NAME}
-                pubcxx taocpp::pegtl
+                pubcxx
     )
     target_include_directories(${EXAMPLE_NAME} PRIVATE ../include)
 

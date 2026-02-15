@@ -11,17 +11,11 @@ target_include_directories(
 )
 
 # Find dependencies
-find_package(pegtl CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
 # Link dependencies
 target_link_libraries(
-    ${TARGET_NAME}
-    PUBLIC
-    hashmap
-    xxHash::xxhash
-    taocpp::pegtl
-    yaml-cpp::yaml-cpp
+    ${TARGET_NAME} PUBLIC hashmap xxHash::xxhash yaml-cpp::yaml-cpp
 )
 target_compile_definitions(
     ${TARGET_NAME} PUBLIC ACTIVE_LOG_LEVEL=LOG_LEVEL_PUBCXX_TRACE

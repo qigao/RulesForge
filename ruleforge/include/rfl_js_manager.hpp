@@ -62,12 +62,20 @@ public:
     JSScriptingManager(JSScriptingManager&&) = delete;
     JSScriptingManager& operator=(JSScriptingManager&&) = delete;
 
+    // Native function data — public for friend function access
+    struct NativeFuncData {
+        NativeFunctionCallback callback;
+        void* user_data;
+        JSScriptingManager* manager;
+        int func_id;
+    };
+
     JSContext* get_js_context();
     void load_functions(std::vector<ParsedFunction> const& functions);
     void register_native_functions(std::map<std::string, NativeFunction> const& functions);
-    bool execute_eval(std::string const& code, Token const& token, map<std::string, int> const& bindings);
+    bool execute_eval(std::string const& code, Token const& token, ruleforge::map<std::string, int> const& bindings);
     void execute_rhs(std::string const& rhs_code, std::string const& rule_name, Token& token,
-                     map<std::string, int> const& bindings);
+                     ruleforge::map<std::string, int> const& bindings);
     void set_global(std::string const& name, JSValue obj);
     std::string const& get_current_rule_name() const { return current_rule_name_; }
 
@@ -80,7 +88,7 @@ private:
     void bind_globals();
     void bind_jmespath_functions();
     JSValue populate_js_object_from_fact(Fact const& fact);
-    void bind_variables(Token const& token, map<std::string, int> const& bindings);
+    void bind_variables(Token const& token, ruleforge::map<std::string, int> const& bindings);
 
     // Helper methods for JS object manipulation
     JSValue create_js_object();
@@ -116,14 +124,9 @@ private:
     std::chrono::steady_clock::time_point rhs_start_time_;
     bool timeout_occurred_ = false;
 
-    // Native function data storage
-    struct NativeFuncData {
-        NativeFunctionCallback callback;
-        void* user_data;
-        JSScriptingManager* manager;  // Back-reference to manager
-        int func_id;  // Unique ID for this function
-    };
     std::map<std::string, std::unique_ptr<NativeFuncData>> native_func_data_;
+    std::map<int, NativeFuncData*> func_by_id_;
+    int next_func_id_ = 1;
 
     // Friend function for native wrapper
     friend JSValue native_function_wrapper(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic);

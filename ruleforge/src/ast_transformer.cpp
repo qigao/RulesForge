@@ -3,34 +3,22 @@
 
 #include "rfl_rete_defs.hpp"   // For ConstraintNode, NodeType, etc.
 
-#include <iostream>
-
 #include <memory>   // For std::unique_ptr
 
 // Helper function to correctly negate a constraint, with special handling for booleans.
 void negate_constraint(ParsedConstraint& c) {
-    logd("Negating constraint: {}.{} {} {}", c.left_binding.value_or("fact"), c.left_field, c.op,
+    logd("Negating constraint: {}.{} {} {}", c.left_binding.value_or("fact"), c.left_field, compare_op_str(c.op),
          c.right_literal ? to_string(*c.right_literal) : "RHS_VAR");
 
-    if (c.op == "==")
-        c.op = "!=";
-    else if (c.op == "!=")
-        c.op = "==";
-    else if (c.op == ">")
-        c.op = "<=";
-    else if (c.op == "<=")
-        c.op = ">";
-    else if (c.op == ">=")
-        c.op = "<";
-    else if (c.op == "<")
-        c.op = ">=";
-    else if (c.op.empty()) {
+    if (c.op == CompareOp::None) {
         // This is the negation of an existence check, e.g., "not Person(name)".
         // It becomes a check for nil.
-        c.op = "==";
+        c.op = CompareOp::EQ;
         c.right_literal = NilValue{};
+    } else {
+        c.op = negate_compare_op(c.op);
     }
-    logd("  -> New constraint: {}.{} {} {}", c.left_binding.value_or("fact"), c.left_field, c.op,
+    logd("  -> New constraint: {}.{} {} {}", c.left_binding.value_or("fact"), c.left_field, compare_op_str(c.op),
          c.right_literal ? to_string(*c.right_literal) : "RHS_VAR");
 }
 

@@ -18,7 +18,7 @@
  */
 class QueryResultRow {
 public:
-    QueryResultRow(map<std::string, std::shared_ptr<Fact>> const& row_data,
+    QueryResultRow(ruleforge::map<std::string, std::shared_ptr<Fact>> const& row_data,
                    std::shared_ptr<KnowledgeBase const> kb) : row_data_(row_data), kb_(std::move(kb)) {}
 
     /// @brief Gets the fact for a given binding name.
@@ -44,7 +44,7 @@ public:
     std::optional<T> getFieldAs(std::string const& binding, std::string const& field_name) const;
 
 private:
-    map<std::string, std::shared_ptr<Fact>> const& row_data_;
+    ruleforge::map<std::string, std::shared_ptr<Fact>> const& row_data_;
     std::shared_ptr<KnowledgeBase const> kb_;
 };
 
@@ -58,7 +58,7 @@ public:
     using reference = QueryResultRow;
 
     // Constructor
-    QueryResultIterator(std::vector<map<std::string, std::shared_ptr<Fact>>>::const_iterator it,
+    QueryResultIterator(std::vector<ruleforge::map<std::string, std::shared_ptr<Fact>>>::const_iterator it,
                         std::shared_ptr<KnowledgeBase const> kb) : internal_iterator_(it), kb_(kb) {}
 
     // The magic: dereferencing creates and returns our wrapper row object
@@ -73,7 +73,7 @@ public:
     bool operator!=(QueryResultIterator const& other) const { return internal_iterator_ != other.internal_iterator_; }
 
 private:
-    std::vector<map<std::string, std::shared_ptr<Fact>>>::const_iterator internal_iterator_;
+    std::vector<ruleforge::map<std::string, std::shared_ptr<Fact>>>::const_iterator internal_iterator_;
     std::shared_ptr<KnowledgeBase const> kb_;
 };
 
@@ -89,7 +89,7 @@ private:
 class QueryResult {
 public:
     // The query result now needs a reference to the KB to perform type conversions
-    QueryResult(std::vector<map<std::string, std::shared_ptr<Fact>>> data,
+    QueryResult(std::vector<ruleforge::map<std::string, std::shared_ptr<Fact>>> data,
                 std::shared_ptr<KnowledgeBase const> kb)
         : data_(std::move(data)), kb_(std::move(kb)), success_(true) {}
 
@@ -151,7 +151,7 @@ private:
     // PROD-003: Default constructor for error() factory
     QueryResult() : success_(false) {}
 
-    std::vector<map<std::string, std::shared_ptr<Fact>>> data_;
+    std::vector<ruleforge::map<std::string, std::shared_ptr<Fact>>> data_;
     std::shared_ptr<KnowledgeBase const> kb_;
     bool success_ = true;
     std::string error_message_;

@@ -4,81 +4,6 @@
 #include <set>
 #include <sstream>
 
-namespace {
-// Helper function to strip JavaScript comments from code
-std::string strip_js_comments(const std::string &code) {
-  std::string result;
-  result.reserve(code.size());
-
-  bool in_single_line_comment = false;
-  bool in_multi_line_comment = false;
-  bool in_string = false;
-  char string_char = 0;
-
-  for (size_t i = 0; i < code.size(); ++i) {
-    char c = code[i];
-    char next = (i + 1 < code.size()) ? code[i + 1] : 0;
-
-    // Handle string literals (don't strip "comments" inside strings)
-    if (!in_single_line_comment && !in_multi_line_comment) {
-      if (!in_string && (c == '"' || c == '\'' || c == '`')) {
-        in_string = true;
-        string_char = c;
-        result += c;
-        continue;
-      } else if (in_string) {
-        result += c;
-        // Handle escape sequences
-        if (c == '\\' && i + 1 < code.size()) {
-          result += code[++i];
-          continue;
-        }
-        if (c == string_char) {
-          in_string = false;
-        }
-        continue;
-      }
-    }
-
-    // Handle single-line comments
-    if (!in_multi_line_comment && c == '/' && next == '/') {
-      in_single_line_comment = true;
-      ++i; // Skip the second /
-      continue;
-    }
-
-    // Handle multi-line comments
-    if (!in_single_line_comment && c == '/' && next == '*') {
-      in_multi_line_comment = true;
-      ++i; // Skip the *
-      continue;
-    }
-
-    // End of single-line comment
-    if (in_single_line_comment && (c == '\n' || c == '\r')) {
-      in_single_line_comment = false;
-      result += c; // Keep the newline
-      continue;
-    }
-
-    // End of multi-line comment
-    if (in_multi_line_comment && c == '*' && next == '/') {
-      in_multi_line_comment = false;
-      ++i;           // Skip the /
-      result += ' '; // Replace comment with space to preserve token boundaries
-      continue;
-    }
-
-    // Add character if not in a comment
-    if (!in_single_line_comment && !in_multi_line_comment) {
-      result += c;
-    }
-  }
-
-  return result;
-}
-} // namespace
-
 JSSemanticAnalyzer::JSSemanticAnalyzer(SymbolTable const &symbols, ParsedRule const &rule,
                                        SemanticAnalyzer &base_analyzer)
     : symbols_(symbols), rule_(rule), analyzer_(base_analyzer) {}
@@ -90,38 +15,26 @@ bool JSSemanticAnalyzer::analyze_js_rhs(ParsedRule &rule) {
 
   size_t initial_error_count = analyzer_.get_errors().size();
 
-  // Step 1: Validate JavaScript syntax
-  std::string syntax_error;
-  if (!validate_syntax(rule.rhs_code, syntax_error)) {
+  // Single-pass extraction: parse once, get everything
+  auto extraction = ast_builder_.extract_all(rule.rhs_code);
+
+  if (!extraction.is_valid) {
     analyzer_.add_error(rule.pos,
-                        "JavaScript syntax error in rule '" + rule.name + "': " + syntax_error);
+                        "JavaScript syntax error in rule '" + rule.name + "': " + extraction.error_message);
     return false;
   }
 
-  // Step 2: Parse and analyze the JavaScript code
-  auto ast = ast_builder_.parse(rule.rhs_code);
-  if (!ast.is_valid) {
-    analyzer_.add_error(rule.pos, "Failed to parse JavaScript in rule '" + rule.name +
-                                      "': " + ast.error_message);
-    return false;
-  }
-
-  // Step 3: Extract and validate function calls and variables
-  // Strip comments to avoid false positives (e.g., "// gateway.call()")
-  std::string code_without_comments = strip_js_comments(rule.rhs_code);
-  auto function_calls = analyze_function_calls(code_without_comments);
-  auto variables = analyze_variables(code_without_comments);
-  auto local_vars = ast_builder_.extract_local_declarations(code_without_comments);
-
-  if (!validate_function_calls(function_calls)) {
+  // Validate function calls
+  if (!validate_function_calls(extraction.function_calls)) {
     return false; // Errors already added by validate_function_calls
   }
 
-  if (!validate_variable_bindings(variables, local_vars)) {
+  // Validate variable bindings
+  if (!validate_variable_bindings(extraction.variables, extraction.local_declarations)) {
     return false; // Errors already added by validate_variable_bindings
   }
 
-  // Step 4: Resolve types and substitute variables
+  // Resolve types and substitute variables
   std::string processed_code = resolve_and_substitute_types(rule.rhs_code);
   processed_code = substitute_variables(processed_code);
 
@@ -130,7 +43,7 @@ bool JSSemanticAnalyzer::analyze_js_rhs(ParsedRule &rule) {
     return false;
   }
 
-  // Step 5: Update the rule with processed code
+  // Update the rule with processed code
   rule.rhs_code = processed_code;
   return true;
 }
@@ -149,7 +62,7 @@ std::vector<JSVariableRef> JSSemanticAnalyzer::analyze_variables(const std::stri
 
 std::string JSSemanticAnalyzer::resolve_and_substitute_types(const std::string &js_code) {
   // This replicates the type resolution logic from the original analyze_rhs
-  std::regex type_regex(
+  static std::regex const type_regex(
       R"(type\s*:\s*["']([^"']+)["'])"); // JavaScript object syntax: {type: "TypeName"}
   std::string original_code = js_code;
   std::string code_with_resolved_types;
@@ -186,7 +99,7 @@ std::string JSSemanticAnalyzer::substitute_variables(const std::string &js_code)
   // This replicates the variable substitution logic from rhs_substitutor
   // Convert $variable to variable (strip the $ prefix)
   // NOTE: Only match the variable name, not property access like $p.name
-  std::regex var_regex(R"(\$([a-zA-Z_][a-zA-Z0-9_]*))"); // Removed the optional property part
+  static std::regex const var_regex(R"(\$([a-zA-Z_][a-zA-Z0-9_]*))");
   std::string substituted_code;
   substituted_code.reserve(js_code.size());
 
@@ -323,7 +236,7 @@ bool JSSemanticAnalyzer::validate_variable_bindings(const std::vector<JSVariable
 bool JSSemanticAnalyzer::validate_function_calls(const std::vector<JSFunctionCall> &calls) {
   // For now, just validate that rfl function calls are known
   std::set<std::string> known_rfl_methods = {"insert", "insertLogical", "retract", "update",
-                                             "setFocus"};
+                                             "setFocus", "halt"};
 
   for (const auto &call : calls) {
     if (call.object_name == "rfl") {

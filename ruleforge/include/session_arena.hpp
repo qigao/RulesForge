@@ -1,24 +1,17 @@
 #ifndef SESSION_ARENA_HPP
 #define SESSION_ARENA_HPP
-#ifdef _WIN32
-  #define WIN32_LEAN_AND_MEAN
-  #define NOMINMAX
-  #include <windows.h>
-#else
-  #include <signal.h>
-#endif
-#include "memory.h"
+
+#include <arena_buffer.h>
 
 #include <cstddef>
 #include <functional>
+#include <new>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 
 /**
  * @brief Exception thrown when session memory limit is exceeded.
- *
- * P0-002 FIX: Provides clear error information when rules consume too much memory.
  */
 class SessionMemoryExhaustedException : public std::runtime_error {
 public:
@@ -56,61 +49,67 @@ private:
 using MemoryPressureCallback = std::function<void(size_t used, size_t max_size, int usage_percent)>;
 
 /**
- * @brief Per-session arena allocator for temporary allocations during rule firing
- *
- * P0-002 FIX: Added configurable maximum size and memory pressure callbacks.
+ * @brief Per-session arena allocator using TurboNet's turbo_arena_t
  *
  * The arena is used for temporary objects that live only during a single
- * fire_all_rules() call. For objects with longer lifetimes (Facts, TokenWME),
- * we still use shared_ptr with mimalloc for now.
+ * fire_all_rules() call.
  *
  * Features:
  * - Configurable maximum memory limit (default 64MB)
  * - Memory pressure warnings at configurable threshold (default 80%)
  * - Clear exception with context when limit exceeded
  * - Statistics tracking (used, peak, available)
- *
- * Future optimization: migrate TokenWME to full arena allocation.
  */
 class SessionArena {
 public:
-  // Default: 64MB max, warn at 80% usage
   static constexpr size_t DEFAULT_MAX_SIZE = 64 * 1024 * 1024;
   static constexpr int DEFAULT_WARNING_THRESHOLD_PERCENT = 80;
 
   explicit SessionArena(size_t max_size = DEFAULT_MAX_SIZE)
-      : arena_(max_size), max_size_(max_size),
-        warning_threshold_percent_(DEFAULT_WARNING_THRESHOLD_PERCENT), warning_fired_(false) {}
+      : max_size_(max_size),
+        warning_threshold_percent_(DEFAULT_WARNING_THRESHOLD_PERCENT),
+        warning_fired_(false),
+        peak_used_(0) {
+    turbo_arena_init(&arena_, max_size);
+  }
 
-  // Get underlying arena for direct use
-  MemoryArena &get_arena() { return arena_; }
+  ~SessionArena() {
+    turbo_arena_free(&arena_);
+  }
+
+  // Non-copyable, non-movable
+  SessionArena(SessionArena const&) = delete;
+  SessionArena& operator=(SessionArena const&) = delete;
+  SessionArena(SessionArena&&) = delete;
+  SessionArena& operator=(SessionArena&&) = delete;
 
   /**
-   * @brief Allocate temporary memory (freed on reset)
+   * @brief Allocate and construct object (freed on reset)
    *
    * @throws SessionMemoryExhaustedException if max_size exceeded
    */
-  template <typename T, typename... Args> T *allocate(Args &&...args) {
+  template <typename T, typename... Args>
+  T* allocate(Args&&... args) {
     check_memory_pressure();
 
-    try {
-      return arena_.allocate<T>(std::forward<Args>(args)...);
-    } catch (std::bad_alloc const &) {
-      throw SessionMemoryExhaustedException(sizeof(T), arena_.available(), max_size_);
+    void* ptr = turbo_arena_alloc(&arena_, sizeof(T));
+    if (!ptr) {
+      throw SessionMemoryExhaustedException(sizeof(T), memory_available(), max_size_);
     }
+    update_peak();
+    return new (ptr) T(std::forward<Args>(args)...);
   }
 
   /**
    * @brief Reset all temporary allocations (call after fire_all_rules)
    */
   void reset_temporaries() {
-    arena_.reset();
-    warning_fired_ = false; // Reset warning flag for next cycle
+    turbo_arena_reset(&arena_);
+    warning_fired_ = false;
   }
 
   // Configuration
   void set_max_size(size_t max_size) {
-    // Note: This doesn't resize the underlying pool, just sets the limit for new pools
     max_size_ = max_size;
   }
 
@@ -125,59 +124,64 @@ public:
   }
 
   // Statistics
-  size_t memory_used() const { return arena_.used(); }
-  size_t memory_available() const { return arena_.available(); }
-  size_t memory_peak() const { return arena_.peak(); }
+  size_t memory_used() const { return arena_.total_used; }
+  size_t memory_available() const {
+    return max_size_ > arena_.total_used ? max_size_ - arena_.total_used : 0;
+  }
+  size_t memory_peak() const { return peak_used_; }
 
   int usage_percent() const {
-    if (max_size_ == 0)
-      return 0;
-    return static_cast<int>((arena_.used() * 100) / max_size_);
+    if (max_size_ == 0) return 0;
+    return static_cast<int>((arena_.total_used * 100) / max_size_);
   }
 
   std::string format_stats() const {
     std::ostringstream oss;
     oss << "SessionArena: "
-        << "used=" << arena_.used() / 1024 << "KB (" << usage_percent() << "%), "
-        << "peak=" << arena_.peak() / 1024 << "KB, "
+        << "used=" << arena_.total_used / 1024 << "KB (" << usage_percent() << "%), "
+        << "peak=" << peak_used_ / 1024 << "KB, "
         << "max=" << max_size_ / 1024 << "KB";
     return oss.str();
   }
 
 private:
   void check_memory_pressure() {
-    if (!pressure_callback_ || warning_fired_)
-      return;
+    if (!pressure_callback_ || warning_fired_) return;
 
     int percent = usage_percent();
     if (percent >= warning_threshold_percent_) {
       warning_fired_ = true;
-      pressure_callback_(arena_.used(), max_size_, percent);
+      pressure_callback_(arena_.total_used, max_size_, percent);
     }
   }
 
-  MemoryArena arena_;
+  void update_peak() {
+    if (arena_.total_used > peak_used_) {
+      peak_used_ = arena_.total_used;
+    }
+  }
+
+  turbo_arena_t arena_;
   size_t max_size_;
   int warning_threshold_percent_;
   bool warning_fired_;
+  size_t peak_used_;
   MemoryPressureCallback pressure_callback_;
 };
 
 /**
  * @brief RAII scope guard for temporary allocations
+ *
+ * Note: turbo_arena_t doesn't support mark/rewind, so this scope
+ * guard is a no-op placeholder for API compatibility.
  */
 class ArenaScope {
 public:
-  explicit ArenaScope(SessionArena &arena) : arena_(arena.get_arena()), mark_(arena_.mark()) {}
+  explicit ArenaScope(SessionArena& /*arena*/) {}
+  ~ArenaScope() = default;
 
-  ~ArenaScope() { arena_.rewind(mark_); }
-
-  ArenaScope(const ArenaScope &) = delete;
-  ArenaScope &operator=(const ArenaScope &) = delete;
-
-private:
-  MemoryArena &arena_;
-  size_t mark_;
+  ArenaScope(ArenaScope const&) = delete;
+  ArenaScope& operator=(ArenaScope const&) = delete;
 };
 
 #endif // SESSION_ARENA_HPP

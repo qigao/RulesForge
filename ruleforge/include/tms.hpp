@@ -11,7 +11,7 @@
 #include <set>
 #include <vector>
 // Forward declarations are no longer needed for Fact/TokenWME as they are in the included header.
-class TokenWME;
+struct TokenWME;
 
 /**
  * @class TruthMaintenanceSystem
@@ -30,8 +30,8 @@ public:
 private:
     INetworkCallback& network_;
 
-    map<int64_t, std::set<TokenWME const*>> justifications_;
-    map<TokenWME const*, std::vector<int64_t>> token_to_justified_facts_;
+    ruleforge::map<int64_t, std::set<TokenWME const*>> justifications_;
+    ruleforge::map<TokenWME const*, std::vector<int64_t>> token_to_justified_facts_;
 };
 
 #endif   // TMS_HPP

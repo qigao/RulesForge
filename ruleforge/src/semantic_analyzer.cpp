@@ -1,18 +1,19 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <unordered_set>
 #include <variant>
 
 #include "semantic_analyzer.hpp"
 
-
-#include <tao/pegtl.hpp>
-#include <tao/pegtl/position.hpp>
-
 #include "rfl_rete_defs.hpp"
+#include "compiled_expression.hpp"
 #include "js_semantic_analyzer.hpp"
 #include "logging_control.hpp"
-namespace pegtl = tao::pegtl;
+
+using namespace ruleforge;
+
+using namespace ruleforge;
 
 namespace
 {
@@ -58,7 +59,7 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
       depth);
 
   // Get context from the pattern object directly
-  tao::pegtl::position const& pos = pattern.pos;
+  SourcePosition const& pos = pattern.pos;
   std::string const& fact_type = pattern.fact_type;
   std::string const& fact_binding = pattern.binding;
 
@@ -163,6 +164,21 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
         }
       }
     }
+
+    // Compile arithmetic expressions in constraints (e.g., "price > base * 1.2")
+    if (constraint.right_arith_expr.has_value() && !constraint.right_arith_expr->empty()) {
+      std::string const& expr = *constraint.right_arith_expr;
+      std::string compile_error;
+      constraint.compiled_expr = ruleforge::CompiledExpression::compile(expr, &compile_error);
+      if (!constraint.compiled_expr) {
+        analyzer.add_error(pos,
+                           "In rule '" + rule.name
+                               + "', failed to compile constraint expression '"
+                               + expr + "': " + compile_error);
+      } else {
+        logd("  -> Compiled constraint expression: {}", expr);
+      }
+    }
   } else {
     for (auto const& child : node->children) {
       analyze_constraint_node_recursive(child.get(),
@@ -263,18 +279,11 @@ std::optional<std::string> SemanticAnalyzer::resolve_type(
   return std::nullopt;  // It was a FQN but not found in the schema
 }
 
-void SemanticAnalyzer::analyze_rule(ParsedRule& rule)
+void SemanticAnalyzer::analyze_rule(ParsedRule& rule, std::unordered_set<std::string> const& rule_names)
 {
   logd("Analyzing rule: {}", rule.name);
   if (rule.parent_rule_name) {
-    bool found = false;
-    for (auto const& r : state_.parsed_rules) {
-      if (r.name == *rule.parent_rule_name) {
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
+    if (rule_names.find(*rule.parent_rule_name) == rule_names.end()) {
       add_error(rule.pos,
                 "Rule '" + rule.name + "' extends non-existent rule '"
                     + *rule.parent_rule_name + "'.");
@@ -367,7 +376,7 @@ void SemanticAnalyzer::analyze_pattern_list(
 void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
                                        SymbolTable& symbols,
                                        ParsedRule const& rule,
-                                       tao::pegtl::position const& pattern_pos,
+                                       SourcePosition const& pattern_pos,
                                        int depth)
 {
   logd("Analyzing pattern in rule '{}': type={}, fact_type={}, binding={}",
@@ -476,6 +485,19 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
             if (!all_bindings_valid) {
               return;
             }
+
+            // Compile the arithmetic expression using exprtk
+            std::string compile_error;
+            arg.compiled_expr = ruleforge::CompiledExpression::compile(arg.field, &compile_error);
+            if (!arg.compiled_expr) {
+              add_error(pattern_pos,
+                        "In rule '" + rule.name
+                            + "', failed to compile accumulate expression '"
+                            + arg.field + "': " + compile_error);
+              return;
+            }
+            logd("    -> Compiled accumulate expression: {}", arg.field);
+
             // Keep the arithmetic expression as the field to accumulate
             field_to_accumulate = arg.field;
             type_to_check_against = arg.source_pattern->fact_type;
@@ -658,7 +680,7 @@ void SemanticAnalyzer::analyze_rhs(ParsedRule& rule, SymbolTable const& symbols)
             rule.name);
 }
 
-void SemanticAnalyzer::add_error(tao::pegtl::position const& pos,
+void SemanticAnalyzer::add_error(SourcePosition const& pos,
                                  std::string const& message)
 {
   logd("Semantic Error Added: file={}, line={}, col={}, message='{}'",
@@ -686,9 +708,17 @@ bool SemanticAnalyzer::build_and_analyze_declarations()
 bool SemanticAnalyzer::analyze_rules_and_queries()
 {
   logd("Semantic Analysis - Phase 2: Analyzing rules and queries...");
+
+  // Build rule name set once for O(1) parent lookup
+  std::unordered_set<std::string> rule_names;
+  rule_names.reserve(state_.parsed_rules.size());
+  for (auto const& rule : state_.parsed_rules) {
+    rule_names.insert(rule.name);
+  }
+
   // Note: errors_ is NOT cleared here, to accumulate errors from both phases.
   for (auto& rule : state_.parsed_rules) {
-    analyze_rule(rule);
+    analyze_rule(rule, rule_names);
   }
   for (auto& query : state_.parsed_queries) {
     analyze_query(query);

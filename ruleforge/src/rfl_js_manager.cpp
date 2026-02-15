@@ -7,27 +7,15 @@
 #include "token_handle_manager.hpp"
 
 #include <algorithm>
-#include <iostream>
 #include <sstream>
 #include <limits>
-
 #include <vector>
-#include <glaze/glaze.hpp>
+
+using namespace ruleforge;
 #include <jsoncons/json.hpp>
 #include <jsoncons_ext/jmespath/jmespath.hpp>
 
 struct ParsedFunction;
-
-// Helper struct for native function data (needs to be accessible to static function)
-struct NativeFuncDataHelper {
-    NativeFunctionCallback callback;
-    void* user_data;
-    JSScriptingManager* manager;
-};
-
-// Global map to store native function data by unique ID
-static std::map<int, NativeFuncDataHelper*> g_native_func_by_id;
-static int g_next_func_id = 1;
 
 // Helper to create a new Fact from a JavaScript object.
 std::shared_ptr<Fact> JSScriptingManager::fact_from_js_object(JSValue fact_obj) {
@@ -102,6 +90,9 @@ JSScriptingManager::JSScriptingManager(INetworkCallback& callback_provider,
         throw std::runtime_error("Failed to create QuickJS context");
     }
 
+    // Store this pointer in context for native function callbacks
+    JS_SetContextOpaque(context_, this);
+
     // Register this manager and get a handle
     handle_id_ = JSHandleManager::instance().register_manager(this);
 
@@ -122,7 +113,7 @@ JSScriptingManager::JSScriptingManager(INetworkCallback& callback_provider,
                 output += "[undefined]";
             }
         }
-        std::cout << output << std::endl;
+        logi("[console.log] {}", output);
         return JS_UNDEFINED;
     }, "log", 1);
 
@@ -139,11 +130,6 @@ JSScriptingManager::~JSScriptingManager() {
     // Unregister the handle
     if (handle_id_ != 0) {
         JSHandleManager::instance().unregister(handle_id_);
-    }
-
-    // Clean up native function registrations from global map
-    for (auto const& [name, data] : native_func_data_) {
-        g_native_func_by_id.erase(data->func_id);
     }
 
     if (context_) {
@@ -187,37 +173,35 @@ void JSScriptingManager::load_functions(std::vector<ParsedFunction> const& funct
                 std::string error_msg = get_js_string(exception);
                 JS_FreeValue(context_, exception);
                 loge("JavaScript function load error for '{}': {}", func.name, error_msg);
-                std::cerr << "JavaScript function load error: " << error_msg << std::endl;
             }
             JS_FreeValue(context_, result);
         } catch (std::exception const& e) {
             loge("JavaScript function load error for '{}': {}", func.name, e.what());
-            std::cerr << "JavaScript function load error: " << e.what() << std::endl;
         }
     }
 }
 
-// Forward declaration
-class JSScriptingManager;
-
 // Static callback wrapper for native functions
 static JSValue native_function_wrapper(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     try {
-        // magic contains the function ID
-        auto it = g_native_func_by_id.find(magic);
-        if (it == g_native_func_by_id.end()) {
+        // Get the manager from context opaque (set in constructor)
+        auto* manager = static_cast<JSScriptingManager*>(JS_GetContextOpaque(ctx));
+        if (!manager) {
+            return JS_ThrowInternalError(ctx, "No JSScriptingManager associated with this context");
+        }
+
+        // magic contains the per-instance function ID
+        auto it = manager->func_by_id_.find(magic);
+        if (it == manager->func_by_id_.end()) {
             return JS_ThrowInternalError(ctx, "Native function ID %d not found in registry", magic);
         }
-        
-        auto* data = it->second;
-        if (!data) {
-            return JS_ThrowInternalError(ctx, "Invalid native function data pointer");
-        }
-        
+
+        auto* func_data = it->second;
+
         // Convert JS arguments to JSON strings
         std::vector<std::string> arg_storage;
         std::vector<const char*> args;
-        
+
         for (int i = 0; i < argc; i++) {
             // Convert each argument to JSON string
             JSValue json_str = JS_JSONStringify(ctx, argv[i], JS_NULL, JS_NULL);
@@ -240,12 +224,12 @@ static JSValue native_function_wrapper(JSContext* ctx, JSValueConst this_val, in
             }
             args.push_back(arg_storage.back().c_str());
         }
-        
+
         // Call the native C function
         char* result = nullptr;
-        int status = data->callback(data->user_data, argc, args.data(), &result);
-        
-        if (status != 0) {  // DRILLS_OK = 0
+        int status = func_data->callback(func_data->user_data, argc, args.data(), &result);
+
+        if (status != 0) {  // RULES_FORGE_OK = 0
             std::string error_msg = "Native function failed";
             if (result) {
                 error_msg += ": ";
@@ -254,18 +238,18 @@ static JSValue native_function_wrapper(JSContext* ctx, JSValueConst this_val, in
             }
             return JS_ThrowInternalError(ctx, "%s", error_msg.c_str());
         }
-        
+
         JSValue ret = JS_UNDEFINED;
         if (result) {
             // Parse JSON result
             ret = JS_ParseJSON(ctx, result, strlen(result), nullptr);
             free(result);
-            
+
             if (JS_IsException(ret)) {
                 return JS_ThrowInternalError(ctx, "Failed to parse native function result as JSON");
             }
         }
-        
+
         return ret;
     } catch (std::exception const& e) {
         return JS_ThrowInternalError(ctx, "C++ exception in native function: %s", e.what());
@@ -279,23 +263,23 @@ void JSScriptingManager::register_native_functions(std::map<std::string, NativeF
         logd("No native functions to register");
         return;
     }
-    
+
     JSValue global = JS_GetGlobalObject(context_);
-    
+
     for (auto const& [name, native_func] : functions) {
         logd("Registering native function '{}'", name);
-        
-        // Assign unique ID
-        int func_id = g_next_func_id++;
-        
+
+        // Assign per-instance unique ID
+        int func_id = next_func_id_++;
+
         // Store function data in manager
         native_func_data_[name] = std::make_unique<NativeFuncData>(
             NativeFuncData{native_func.callback, native_func.user_data, this, func_id}
         );
-        
-        // Register in global map for lookup by ID
-        g_native_func_by_id[func_id] = reinterpret_cast<NativeFuncDataHelper*>(native_func_data_[name].get());
-        
+
+        // Register in per-instance map for lookup by ID
+        func_by_id_[func_id] = native_func_data_[name].get();
+
         // Create JS function using JS_NewCFunction2 with magic parameter
         // Cast to JSCFunction* to match the expected signature
         JSValue js_func = JS_NewCFunction2(
@@ -306,18 +290,18 @@ void JSScriptingManager::register_native_functions(std::map<std::string, NativeF
             JS_CFUNC_generic_magic,
             func_id  // magic = function ID
         );
-        
+
         // Register the function globally
         JS_SetPropertyStr(context_, global, name.c_str(), js_func);
-        
+
         // Verify it was registered
         JSValue test_val = JS_GetPropertyStr(context_, global, name.c_str());
         bool is_func = JS_IsFunction(context_, test_val);
         JS_FreeValue(context_, test_val);
-        
+
         logi("Native function '{}' registered successfully with ID {} (is_function: {})", name, func_id, is_func);
     }
-    
+
     JS_FreeValue(context_, global);
 }
 
@@ -779,19 +763,34 @@ bool JSScriptingManager::execute_eval(std::string const& code, Token const& toke
 }
 
 void JSScriptingManager::execute_rhs(std::string const& rhs_code, std::string const& rule_name, Token& token,
-                                     map<std::string, int> const& bindings) {
+                                     ruleforge::map<std::string, int> const& bindings) {
     logd("Executing RHS for rule '{}'", rule_name);
 
-    // P0-001 FIX: Reset token handle before execution
     current_token_handle_ = TokenHandleManager::INVALID_HANDLE;
     current_rule_name_ = rule_name;
-
-    // PROD-001: Reset timeout tracking
     timeout_occurred_ = false;
     rhs_start_time_ = std::chrono::steady_clock::now();
 
-    // P1-001 FIX: Begin transaction for rollback on exception
+    // RAII: token handle cleanup on any exit path
+    auto token_cleanup = [this]() {
+        if (current_token_handle_ != TokenHandleManager::INVALID_HANDLE) {
+            TokenHandleManager::instance().unregister(current_token_handle_);
+            current_token_handle_ = TokenHandleManager::INVALID_HANDLE;
+        }
+    };
+    struct ScopeGuard {
+        std::function<void()> fn;
+        ~ScopeGuard() { fn(); }
+    } token_guard{token_cleanup};
+
+    // RAII: transaction rollback unless explicitly committed
+    bool committed = false;
     callback_provider_.begin_rhs_transaction();
+    struct TxnGuard {
+        INetworkCallback& cb;
+        bool& committed;
+        ~TxnGuard() { if (!committed) cb.end_rhs_transaction(false); }
+    } txn_guard{callback_provider_, committed};
 
     try {
         bind_variables(token, bindings);
@@ -799,18 +798,8 @@ void JSScriptingManager::execute_rhs(std::string const& rhs_code, std::string co
 
         JSValue result = JS_Eval(context_, rhs_code.c_str(), rhs_code.length(), rule_name.c_str(), JS_EVAL_TYPE_GLOBAL);
 
-        // P0-001 FIX: Unregister token handle after JS execution completes
-        // This ensures the handle becomes invalid and any stale JS references
-        // will get nullptr instead of accessing freed memory
-        if (current_token_handle_ != TokenHandleManager::INVALID_HANDLE) {
-            TokenHandleManager::instance().unregister(current_token_handle_);
-            current_token_handle_ = TokenHandleManager::INVALID_HANDLE;
-        }
-
-        // PROD-001: Check if timeout occurred (interrupt handler was triggered)
         if (timeout_occurred_) {
             JS_FreeValue(context_, result);
-            callback_provider_.end_rhs_transaction(false);
             throw JSExecutionTimeoutException(rule_name, execution_timeout_);
         }
 
@@ -819,55 +808,24 @@ void JSScriptingManager::execute_rhs(std::string const& rhs_code, std::string co
             std::string error_msg = get_js_string(exception);
             JS_FreeValue(context_, exception);
             JS_FreeValue(context_, result);
-
-            // P1-001 FIX: Rollback transaction on exception
-            callback_provider_.end_rhs_transaction(false);
-
             throw ReteExecutionException(error_msg, rule_name);
         }
         JS_FreeValue(context_, result);
 
-        // P1-001 FIX: Commit transaction on success
         callback_provider_.end_rhs_transaction(true);
+        committed = true;
 
     } catch (JSExecutionTimeoutException const&) {
-        // PROD-001: Ensure cleanup on timeout
-        if (current_token_handle_ != TokenHandleManager::INVALID_HANDLE) {
-            TokenHandleManager::instance().unregister(current_token_handle_);
-            current_token_handle_ = TokenHandleManager::INVALID_HANDLE;
-        }
         throw;
     } catch (ReteExecutionException const&) {
-        // P0-001 FIX: Ensure cleanup on exception
-        if (current_token_handle_ != TokenHandleManager::INVALID_HANDLE) {
-            TokenHandleManager::instance().unregister(current_token_handle_);
-            current_token_handle_ = TokenHandleManager::INVALID_HANDLE;
-        }
-        // P1-001 FIX: Rollback already called above for JS exceptions, but ensure for re-throws
-        callback_provider_.end_rhs_transaction(false);
         throw;
     } catch (std::exception const& e) {
-        // P0-001 FIX: Ensure cleanup on exception
-        if (current_token_handle_ != TokenHandleManager::INVALID_HANDLE) {
-            TokenHandleManager::instance().unregister(current_token_handle_);
-            current_token_handle_ = TokenHandleManager::INVALID_HANDLE;
-        }
-        // P1-001 FIX: Rollback transaction on exception
-        callback_provider_.end_rhs_transaction(false);
         std::string error_msg = "JavaScript execution error: " + std::string(e.what());
         loge("Error executing RHS for rule '{}': {}", rule_name, error_msg);
         throw ReteExecutionException(error_msg, rule_name);
     } catch (...) {
-        // P0-001 FIX: Ensure cleanup on exception
-        if (current_token_handle_ != TokenHandleManager::INVALID_HANDLE) {
-            TokenHandleManager::instance().unregister(current_token_handle_);
-            current_token_handle_ = TokenHandleManager::INVALID_HANDLE;
-        }
-        // P1-001 FIX: Rollback transaction on exception
-        callback_provider_.end_rhs_transaction(false);
-        std::string error_msg = "Unknown exception during JavaScript execution";
         loge("Unknown error executing RHS for rule '{}'", rule_name);
-        throw ReteExecutionException(error_msg, rule_name);
+        throw ReteExecutionException("Unknown exception during JavaScript execution", rule_name);
     }
 }
 
@@ -1060,7 +1018,7 @@ void JSScriptingManager::bind_jmespath_functions() {
 
     // Add extra debugging
     if (is_function) {
-        logi("JMESPath function verification: PASS");
+        logd("JMESPath function verification: PASS");
     } else {
         loge("JMESPath function verification: FAIL - not a function");
 
@@ -1074,19 +1032,22 @@ void JSScriptingManager::bind_jmespath_functions() {
         }
     }
 
-    logi("JMESPath functions bound successfully, is_function: {}", is_function);
-
     JS_FreeValue(context_, test_func);
     JS_FreeValue(context_, test_global);
 }
 
 std::string JSScriptingManager::fact_to_json(Fact const& fact) {
     try {
-        // Build JSON structure using glaze json_t
-        glz::json_t json_obj;
+        // Build JSON using jsoncons (already linked for jmespath)
+        jsoncons::json json_obj = jsoncons::json::object();
 
         // Set the type field
         json_obj["type"] = fact.type;
+
+        // Include fact ID if available
+        if (fact.id != 0) {
+            json_obj["id"] = fact.id;
+        }
 
         // Convert all fact fields to JSON
         for (auto const& [key, val] : fact.fields) {
@@ -1098,28 +1059,25 @@ std::string JSScriptingManager::fact_to_json(Fact const& fact) {
                     json_obj[key] = value;
                 } else if constexpr (std::is_same_v<T, double>) {
                     json_obj[key] = value;
-                } else if constexpr (std::is_same_v<T, bool>) {
-                    json_obj[key] = value;
-                } else {
-                    // For other types, convert to string representation
-                    json_obj[key] = std::string("unsupported_type");
+                } else if constexpr (std::is_same_v<T, NilValue>) {
+                    json_obj[key] = jsoncons::json::null();
+                } else if constexpr (std::is_same_v<T, FactList>) {
+                    // For FactList, create an array of fact objects
+                    jsoncons::json arr = jsoncons::json::array();
+                    for (auto const& nested_fact : value.facts) {
+                        if (nested_fact) {
+                            jsoncons::json nested_obj = jsoncons::json::object();
+                            nested_obj["id"] = nested_fact->id;
+                            nested_obj["type"] = nested_fact->type;
+                            arr.push_back(std::move(nested_obj));
+                        }
+                    }
+                    json_obj[key] = std::move(arr);
                 }
             }, val);
         }
 
-        // Include fact ID if available
-        if (fact.id != -1) {
-            json_obj["id"] = fact.id;
-        }
-
-        // Serialize to JSON string using glaze
-        auto json_result = glz::write_json(json_obj);
-        if (!json_result) {
-            loge("Failed to serialize Fact to JSON");
-            return "{}";
-        }
-
-        return json_result.value();
+        return json_obj.to_string();
 
     } catch (const std::exception& e) {
         loge("Exception during Fact to JSON conversion: {}", e.what());

@@ -1,47 +1,54 @@
-#include "catch2/catch_all.hpp"
+#include "tinytest.h"
 #include "rule_forge.h"
 
 #include <string>
-#include <vector>
+#include <cstdio>
 
-// Helper to check for API errors
-#define REQUIRE_DRILLS_OK(status) REQUIRE(status == DRILLS_OK)
-#define REQUIRE_DRILLS_ERROR(status) REQUIRE(status != DRILLS_OK)
-
-TEST_CASE("CAPI: Initialization and Cleanup", "[capi]") {
-    REQUIRE_DRILLS_OK(ruleforge_init());
-    REQUIRE_DRILLS_OK(ruleforge_cleanup());
-}
-
-TEST_CASE("CAPI: Version Information", "[capi]") {
-    const char* version = ruleforge_get_version();
-    REQUIRE(version != nullptr);
-    REQUIRE(std::string(version) == RULEFORGE_VERSION_STRING);
-}
-
-TEST_CASE("CAPI: Error Handling", "[capi]") {
-    ruleforge_init();
-    ruleforge_knowledge_base_t kb = nullptr;
-    ruleforge_status_t status = ruleforge_kb_create(nullptr); // Pass NULL to trigger error
-    REQUIRE_DRILLS_ERROR(status);
-    REQUIRE(std::string(ruleforge_get_last_error_message()).find("NULL") != std::string::npos);
-    ruleforge_cleanup();
-}
-
-TEST_CASE("CAPI: Knowledge Base Management", "[capi]") {
-    ruleforge_init();
-    ruleforge_knowledge_base_t kb = nullptr;
-
-    SECTION("Create and Destroy Knowledge Base") {
-        REQUIRE_DRILLS_OK(ruleforge_kb_create(&kb));
-        REQUIRE(kb != nullptr);
-        REQUIRE_DRILLS_OK(ruleforge_kb_destroy(kb));
-        kb = nullptr; // Clear handle after destruction
+suite("CAPI") {
+    group("Initialization and Cleanup") {
+        it("initializes and cleans up") {
+            check_int_eq(ruleforge_init(), RULES_FORGE_OK);
+            check_int_eq(ruleforge_cleanup(), RULES_FORGE_OK);
+        }
     }
 
-    SECTION("Load RFL (Placeholder - requires valid RFL)") {
-        REQUIRE_DRILLS_OK(ruleforge_kb_create(&kb));
-        const char* simple_drl = R"(
+    group("Version Information") {
+        it("returns version string") {
+            const char* version = ruleforge_get_version();
+            check_not_null(version);
+            check_str_eq(version, RULEFORGE_VERSION_STRING);
+        }
+    }
+
+    group("Error Handling") {
+        it("reports errors correctly") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            ruleforge_status_t status = ruleforge_kb_create(nullptr);
+            check_int_ne(status, RULES_FORGE_OK);
+            check_str_contains(ruleforge_get_last_error_message(), "NULL");
+            ruleforge_cleanup();
+        }
+    }
+
+    group("Knowledge Base Management") {
+        it("creates and destroys knowledge base") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+            check_not_null(kb);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+
+            ruleforge_cleanup();
+        }
+
+        it("loads RFL") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            const char* simple_drl = R"(
 declare Fact
     value: String
 end
@@ -53,47 +60,52 @@ rule "HelloWorld"
         // No action, just for parsing test
 end
 )";
-        // This test will pass if the RFL parser is robust enough for this simple case.
-        // Real RFL parsing requires a fully functional parser.
-        REQUIRE_DRILLS_OK(ruleforge_kb_load_drl(kb, simple_drl));
-        REQUIRE_DRILLS_OK(ruleforge_kb_destroy(kb));
-    }
+            check_int_eq(ruleforge_kb_load_drl(kb, simple_drl), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
 
-    SECTION("Load Decision Table CSV") {
-        REQUIRE_DRILLS_OK(ruleforge_kb_create(&kb));
-        const char* simple_csv = R"(
+        it("loads decision table CSV") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            const char* simple_csv = R"(
 Rule Name,CONDITION value,ACTION result
 Rule1,hello,world
 Rule2,test,passed
 )";
-        // This tests the temporary CSV parser and DecisionTableConverter.
-        REQUIRE_DRILLS_OK(ruleforge_kb_load_decision_table_csv(kb, simple_csv));
-        REQUIRE_DRILLS_OK(ruleforge_kb_destroy(kb));
+            check_int_eq(ruleforge_kb_load_decision_table_csv(kb, simple_csv), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
     }
 
-    ruleforge_cleanup();
-}
+    group("Stateful Session and Fact Management") {
+        it("adds fact from JSON") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
 
-TEST_CASE("CAPI: Stateful Session and Fact Management", "[capi]") {
-    ruleforge_init();
-    ruleforge_knowledge_base_t kb = nullptr;
-    REQUIRE_DRILLS_OK(ruleforge_kb_create(&kb));
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
 
-    SECTION("Add Fact from JSON") {
-        ruleforge_stateful_session_t session = nullptr;
-        REQUIRE_DRILLS_OK(ruleforge_session_create(kb, &session));
-        REQUIRE(session != nullptr);
+            const char* fact_type = "MyFact";
+            const char* fact_json = R"({"name": "Alice", "age": 30, "isStudent": true, "score": 95.5})";
+            check_int_eq(ruleforge_session_add_fact_json(session, fact_type, fact_json), RULES_FORGE_OK);
 
-        const char* fact_type = "MyFact";
-        const char* fact_json = R"({"name": "Alice", "age": 30, "isStudent": true, "score": 95.5})";
-        REQUIRE_DRILLS_OK(ruleforge_session_add_fact_json(session, fact_type, fact_json));
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
 
-        REQUIRE_DRILLS_OK(ruleforge_session_destroy(session));
-    }
+        it("fires all rules") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
 
-    SECTION("Fire All Rules (requires rules to be loaded)") {
-        // Load a simple rule that matches any fact
-        const char* simple_drl = R"(
+            const char* simple_drl = R"(
 declare Fact
     id: long
 end
@@ -105,25 +117,31 @@ rule "AnyFactRule"
         // No action, just for firing test
 end
 )";
-        REQUIRE_DRILLS_OK(ruleforge_kb_load_drl(kb, simple_drl));
+            check_int_eq(ruleforge_kb_load_drl(kb, simple_drl), RULES_FORGE_OK);
 
-        ruleforge_stateful_session_t session = nullptr;
-        REQUIRE_DRILLS_OK(ruleforge_session_create(kb, &session));
-        REQUIRE(session != nullptr);
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
 
-        const char* fact_type = "Fact";
-        const char* fact_json = R"({"id": 1})";
-        REQUIRE_DRILLS_OK(ruleforge_session_add_fact_json(session, fact_type, fact_json));
+            const char* fact_type = "Fact";
+            const char* fact_json = R"({"id": 1})";
+            check_int_eq(ruleforge_session_add_fact_json(session, fact_type, fact_json), RULES_FORGE_OK);
 
-        int fired_count = 0;
-        REQUIRE_DRILLS_OK(ruleforge_session_fire_all_rules(session, -1, &fired_count));
-        REQUIRE(fired_count == 1);
-        REQUIRE_DRILLS_OK(ruleforge_session_destroy(session));
-    }
+            int fired_count = 0;
+            check_int_eq(ruleforge_session_fire_all_rules(session, -1, &fired_count), RULES_FORGE_OK);
+            check_int_eq(fired_count, 1);
 
-    SECTION("Query Facts and Access Fields") {
-        // Load a rule and query
-        const char* query_drl = R"(
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
+
+        it("queries facts and accesses fields") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            const char* query_drl = R"(
 declare Person
     name: String
     age: int
@@ -140,57 +158,50 @@ query "AdultPersons"
     $p : Person(age > 18)
 end
 )";
-        REQUIRE_DRILLS_OK(ruleforge_kb_load_drl(kb, query_drl));
+            check_int_eq(ruleforge_kb_load_drl(kb, query_drl), RULES_FORGE_OK);
 
-        ruleforge_stateful_session_t session = nullptr;
-        REQUIRE_DRILLS_OK(ruleforge_session_create(kb, &session));
-        REQUIRE(session != nullptr);
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
 
-        // Add some facts
-        REQUIRE_DRILLS_OK(ruleforge_session_add_fact_json(session, "Person", R"({"name": "Bob", "age": 25})"));
-        REQUIRE_DRILLS_OK(ruleforge_session_add_fact_json(session, "Person", R"({"name": "Charlie", "age": 17})"));
-        REQUIRE_DRILLS_OK(ruleforge_session_add_fact_json(session, "Person", R"({"name": "Diana", "age": 30})"));
+            check_int_eq(ruleforge_session_add_fact_json(session, "Person", R"({"name": "Bob", "age": 25})"), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_add_fact_json(session, "Person", R"({"name": "Charlie", "age": 17})"), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_add_fact_json(session, "Person", R"({"name": "Diana", "age": 30})"), RULES_FORGE_OK);
 
-        // Test fact count
-        REQUIRE(ruleforge_session_get_fact_count(session) == 3);
+            check_size_eq(ruleforge_session_get_fact_count(session), 3);
 
-        printf("DEBUG: Added 3 facts: Bob(25), Charlie(17), Diana(30)\n");
+            check_int_eq(ruleforge_session_fire_all_rules(session, -1, nullptr), RULES_FORGE_OK);
 
-        REQUIRE_DRILLS_OK(ruleforge_session_fire_all_rules(session, -1, nullptr));
+            ruleforge_query_result_t query_result = nullptr;
+            check_int_eq(ruleforge_session_query(session, "AdultPersons", &query_result), RULES_FORGE_OK);
+            check_not_null(query_result);
 
-        ruleforge_query_result_t query_result = nullptr;
-        REQUIRE_DRILLS_OK(ruleforge_session_query(session, "AdultPersons", &query_result));
-        REQUIRE(query_result != nullptr);
+            int result_size = ruleforge_query_result_get_size(query_result);
+            check_int_eq(result_size, 2);
 
-        int result_size = ruleforge_query_result_get_size(query_result);
-        printf("DEBUG: Query result size: %d (expected: 2)\n", result_size);
-        REQUIRE(result_size == 2); // Bob and Diana
+            ruleforge_fact_t fact_bob = nullptr;
+            check_int_eq(ruleforge_query_result_get_fact_at_index(query_result, 0, "p", &fact_bob), RULES_FORGE_OK);
+            check_not_null(fact_bob);
 
-        ruleforge_fact_t fact_bob = nullptr;
-        REQUIRE_DRILLS_OK(ruleforge_query_result_get_fact_at_index(query_result, 0, "p", &fact_bob));
-        REQUIRE(fact_bob != nullptr);
+            char name_buffer[50];
+            size_t actual_length = 0;
+            check_int_eq(ruleforge_fact_get_field_as_string(fact_bob, "name", name_buffer, sizeof(name_buffer), &actual_length), RULES_FORGE_OK);
+            check_str_eq(name_buffer, "Bob");
 
-        char name_buffer[50];
-        size_t actual_length = 0;
-        REQUIRE_DRILLS_OK(ruleforge_fact_get_field_as_string(fact_bob, "name", name_buffer, sizeof(name_buffer), &actual_length));
-        REQUIRE(std::string(name_buffer) == "Bob");
+            double age_double = 0.0;
+            check_int_eq(ruleforge_fact_get_field_as_double(fact_bob, "age", &age_double), RULES_FORGE_OK);
+            check_float_eq(age_double, 25.0, 0.001);
 
-        double age_double = 0.0;
-        REQUIRE_DRILLS_OK(ruleforge_fact_get_field_as_double(fact_bob, "age", &age_double));
-        REQUIRE(age_double == 25.0);
+            int64_t age_int = 0;
+            check_int_eq(ruleforge_fact_get_field_as_int(fact_bob, "age", &age_int), RULES_FORGE_OK);
+            check_long_eq(age_int, 25);
 
-        // Test boolean and int (assuming age can be retrieved as int64_t)
-        int64_t age_int = 0;
-        REQUIRE_DRILLS_OK(ruleforge_fact_get_field_as_int(fact_bob, "age", &age_int));
-        REQUIRE(age_int == 25);
+            check_int_ne(ruleforge_fact_get_field_as_string(fact_bob, "nonExistent", name_buffer, sizeof(name_buffer), &actual_length), RULES_FORGE_OK);
 
-        // Test non-existent field
-        REQUIRE_DRILLS_ERROR(ruleforge_fact_get_field_as_string(fact_bob, "nonExistent", name_buffer, sizeof(name_buffer), &actual_length));
-
-        REQUIRE_DRILLS_OK(ruleforge_query_result_destroy(query_result));
-        REQUIRE_DRILLS_OK(ruleforge_session_destroy(session));
+            check_int_eq(ruleforge_query_result_destroy(query_result), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
     }
-
-    REQUIRE_DRILLS_OK(ruleforge_kb_destroy(kb));
-    ruleforge_cleanup();
 }

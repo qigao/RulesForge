@@ -2,8 +2,6 @@
 
 #include "rfl_rete_defs.hpp"
 
-#include <iostream>
-
 // The constructor now takes the interface
 TruthMaintenanceSystem::TruthMaintenanceSystem(INetworkCallback& network) : network_(network) {}
 

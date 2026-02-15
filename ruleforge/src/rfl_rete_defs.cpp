@@ -1,45 +1,9 @@
+
 #include "rfl_rete_defs.hpp"
+#include "compiled_expression.hpp"
 #include "logging_control.hpp"
 
-#include <iostream>
-
 #include <sstream>
-#include <tao/pegtl/contrib/parse_tree.hpp>
-#include <tao/pegtl/parse.hpp>
-#include <tao/pegtl/string_input.hpp>
-
-ArithExprValue clone_arith_expr_value(ArithExprValue const& v) {
-    return std::visit(
-        [](auto const& arg) -> ArithExprValue {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, double>) {
-                return arg;
-            } else if constexpr (std::is_same_v<T, std::string>) {
-                return arg;
-            } else if constexpr (std::is_same_v<T, std::unique_ptr<ArithExprNode>>) {
-                if (arg) {
-                    return std::make_unique<ArithExprNode>(*arg);
-                }
-                return std::unique_ptr<ArithExprNode>(nullptr);
-            }
-            return double{0};  // Should never reach here
-        },
-        v);
-}
-
-ArithExprNode::ArithExprNode(ArithExprNode const& other)
-    : op(other.op),
-      left(clone_arith_expr_value(other.left)),
-      right(clone_arith_expr_value(other.right)) {}
-
-ArithExprNode& ArithExprNode::operator=(ArithExprNode const& other) {
-    if (this != &other) {
-        op = other.op;
-        left = clone_arith_expr_value(other.left);
-        right = clone_arith_expr_value(other.right);
-    }
-    return *this;
-}
 
 ParsedConstraint::ParsedConstraint(ParsedConstraint const& other)
     : field_binding(other.field_binding),
@@ -50,11 +14,11 @@ ParsedConstraint::ParsedConstraint(ParsedConstraint const& other)
       right_bound_field(other.right_bound_field),
       right_value_list(other.right_value_list),
       temporal_constraint(other.temporal_constraint),
-      right_arith_expr(other.right_arith_expr)
+      right_arith_expr(other.right_arith_expr),
+      compiled_expr(other.compiled_expr),  // shared_ptr shallow copy
+      cached_left_field_path(other.cached_left_field_path),
+      cached_right_field_path(other.cached_right_field_path)
 {
-    if (other.right_arith_ast.has_value()) {
-        right_arith_ast = clone_arith_expr_value(*other.right_arith_ast);
-    }
 }
 
 ParsedConstraint& ParsedConstraint::operator=(ParsedConstraint const& other) {
@@ -68,13 +32,45 @@ ParsedConstraint& ParsedConstraint::operator=(ParsedConstraint const& other) {
         right_value_list = other.right_value_list;
         temporal_constraint = other.temporal_constraint;
         right_arith_expr = other.right_arith_expr;
-        if (other.right_arith_ast.has_value()) {
-            right_arith_ast = clone_arith_expr_value(*other.right_arith_ast);
-        } else {
-            right_arith_ast.reset();
-        }
+        compiled_expr = other.compiled_expr;  // shared_ptr shallow copy
+        cached_left_field_path = other.cached_left_field_path;
+        cached_right_field_path = other.cached_right_field_path;
     }
     return *this;
+}
+
+// Added equality operator
+bool ParsedConstraint::operator==(ParsedConstraint const& other) const {
+    if (op != other.op) return false;
+    if (left_field != other.left_field) return false;
+    if (field_binding != other.field_binding) return false;
+    if (left_binding != other.left_binding) return false;
+    if (right_literal != other.right_literal) return false;
+    if (right_bound_field != other.right_bound_field) return false;
+    if (right_value_list != other.right_value_list) return false;
+
+    // Check temporal constraints
+    bool this_has_temp = temporal_constraint.has_value();
+    bool other_has_temp = other.temporal_constraint.has_value();
+    if (this_has_temp != other_has_temp) return false;
+    if (this_has_temp) {
+        auto const& t1 = *temporal_constraint;
+        auto const& t2 = *other.temporal_constraint;
+        if (t1.op != t2.op) return false;
+        if (t1.lhs_field != t2.lhs_field) return false;
+        if (t1.rhs_binding_and_field != t2.rhs_binding_and_field) return false;
+        if (t1.window_ms != t2.window_ms) return false;
+    }
+
+    // Check compiled expressions - compare by expression string for sharing
+    bool this_has_expr = (compiled_expr != nullptr);
+    bool other_has_expr = (other.compiled_expr != nullptr);
+    if (this_has_expr != other_has_expr) return false;
+    if (this_has_expr && compiled_expr->expression_string() != other.compiled_expr->expression_string()) {
+        return false;
+    }
+
+    return true;
 }
 
 // --- Implementation for to_string free function ---
@@ -103,9 +99,9 @@ std::string constraint_to_string(ParsedConstraint const& c) {
     std::ostringstream oss;
     if (c.temporal_constraint) {
         auto const& tc = *c.temporal_constraint;
-        oss << "temporal " << tc.lhs_field << " " << tc.op << " "
+        oss << "temporal " << tc.lhs_field << " " << temporal_op_str(tc.op) << " "
             << tc.rhs_binding_and_field.first << "." << tc.rhs_binding_and_field.second;
-        if (tc.op == "within") { oss << " " << tc.window_ms << "ms"; }
+        if (tc.op == TemporalOp::Within) { oss << " " << tc.window_ms << "ms"; }
         return oss.str();
     }
 
@@ -114,7 +110,7 @@ std::string constraint_to_string(ParsedConstraint const& c) {
     } else {
         oss << "fact";
     }
-    oss << "." << c.left_field << " " << c.op << " ";
+    oss << "." << c.left_field << " " << compare_op_str(c.op) << " ";
 
     if (c.right_bound_field) {
         oss << c.right_bound_field->first << "." << c.right_bound_field->second;
@@ -139,18 +135,7 @@ std::size_t ConstraintValueHasher::operator()(ConstraintValue const& v) const {
 }
 
 // --- Implementation for Core Struct Methods ---
-namespace {
-    struct IndexAccess {
-        bool is_integer;
-        int64_t int_index;
-        std::string str_index;
-    };
-
-    struct PathSegment {
-        std::string name;
-        bool null_safe;  // true if this segment was preceded by !.
-        std::vector<IndexAccess> indices;  // index accesses like [0] or ["key"]
-    };
+// IndexAccess and PathSegment are now in header
 
     // Parse index access expressions from a segment (e.g., "items[0][1]" -> name="items", indices=[0,1])
     PathSegment parse_segment_with_indices(std::string const& segment, bool null_safe) {
@@ -194,14 +179,15 @@ namespace {
         return result;
     }
 
+
+// End of helpers (parse_segment_with_indices)
+
     std::vector<PathSegment> parse_field_path(std::string const& path) {
         std::vector<PathSegment> segments;
         size_t pos = 0;
         bool next_null_safe = false;
 
         while (pos < path.length()) {
-            // Find next separator (either !. or .)
-            // But skip separators inside brackets
             size_t bracket_depth = 0;
             size_t sep_pos = std::string::npos;
             bool is_null_safe_sep = false;
@@ -225,7 +211,6 @@ namespace {
             }
 
             if (sep_pos == std::string::npos) {
-                // No more separators, take the rest
                 std::string segment = path.substr(pos);
                 if (!segment.empty()) {
                     segments.push_back(parse_segment_with_indices(segment, next_null_safe));
@@ -233,22 +218,19 @@ namespace {
                 break;
             }
 
-            // Extract segment before separator
             std::string segment = path.substr(pos, sep_pos - pos);
             if (!segment.empty()) {
                 segments.push_back(parse_segment_with_indices(segment, next_null_safe));
             }
 
-            // Determine if next segment uses null-safe access
             if (is_null_safe_sep) {
                 next_null_safe = true;
-                pos = sep_pos + 2;  // Skip "!."
+                pos = sep_pos + 2;
             } else {
                 next_null_safe = false;
-                pos = sep_pos + 1;  // Skip "."
+                pos = sep_pos + 1;
             }
         }
-
         return segments;
     }
 
@@ -258,20 +240,16 @@ namespace {
             FactList const& fl = std::get<FactList>(val);
             if (idx.is_integer) {
                 int64_t index = idx.int_index;
-                // Handle negative indices (Python-style)
                 if (index < 0) {
                     index = static_cast<int64_t>(fl.facts.size()) + index;
                 }
                 if (index < 0 || static_cast<size_t>(index) >= fl.facts.size()) {
                     return null_safe ? std::optional(ConstraintValue{NilValue{}}) : std::nullopt;
                 }
-                // For FactList, return the fact at index as a FactList containing single fact
-                // (so further field access can traverse into it)
                 FactList result;
                 result.facts.push_back(fl.facts[static_cast<size_t>(index)]);
                 return result;
             } else {
-                // String key on FactList - look for fact with matching 'key' or 'name' field
                 for (auto const& fact : fl.facts) {
                     if (!fact) continue;
                     auto key_field = fact->fields.find("key");
@@ -286,7 +264,6 @@ namespace {
                 return null_safe ? std::optional(ConstraintValue{NilValue{}}) : std::nullopt;
             }
         } else if (std::holds_alternative<std::string>(val)) {
-            // String indexing - return character at position
             std::string const& str = std::get<std::string>(val);
             if (idx.is_integer) {
                 int64_t index = idx.int_index;
@@ -301,106 +278,83 @@ namespace {
         }
         return null_safe ? std::optional(ConstraintValue{NilValue{}}) : std::nullopt;
     }
-}  // namespace
+
+std::optional<ConstraintValue> Fact::get_field(std::vector<PathSegment> const& segments) const {
+    if (segments.empty()) return std::nullopt;
+
+    Fact const* current_fact = this;
+    std::optional<ConstraintValue> current_value;
+
+    for (size_t i = 0; i < segments.size(); ++i) {
+        auto const& seg = segments[i];
+
+        if (!seg.name.empty()) {
+            auto it = current_fact->fields.find(seg.name);
+            if (it == current_fact->fields.end()) {
+                if (seg.null_safe) return NilValue{};
+                return std::nullopt;
+            }
+            current_value = it->second;
+        }
+
+        for (auto const& idx : seg.indices) {
+            if (!current_value) return seg.null_safe ? std::optional(ConstraintValue{NilValue{}}) : std::nullopt;
+            auto indexed_result = apply_index(*current_value, idx, seg.null_safe);
+            if (!indexed_result) return std::nullopt;
+            current_value = *indexed_result;
+        }
+
+        if (i == segments.size() - 1) return current_value;
+
+        if (!current_value) return seg.null_safe ? std::optional(ConstraintValue{NilValue{}}) : std::nullopt;
+
+        if (std::holds_alternative<FactList>(*current_value)) {
+            FactList const& fl = std::get<FactList>(*current_value);
+            if (fl.facts.empty()) {
+                bool next_null_safe = (i + 1 < segments.size()) && segments[i + 1].null_safe;
+                if (seg.null_safe || next_null_safe) return NilValue{};
+                return std::nullopt;
+            }
+            current_fact = fl.facts[0].get();
+            if (!current_fact) {
+                 bool next_null_safe = (i + 1 < segments.size()) && segments[i + 1].null_safe;
+                 if (seg.null_safe || next_null_safe) return NilValue{};
+                 return std::nullopt;
+            }
+        } else if (std::holds_alternative<NilValue>(*current_value)) {
+            bool next_null_safe = (i + 1 < segments.size()) && segments[i + 1].null_safe;
+            if (seg.null_safe || next_null_safe) return NilValue{};
+            return std::nullopt;
+        } else {
+            return std::nullopt;
+        }
+    }
+    return std::nullopt;
+}
 
 std::optional<ConstraintValue> Fact::get_field(std::string const& name) const {
-    logd("Fact::get_field(this={}, id={}, name='{}')", (void*)this, this->id, name);
+   // logd("Fact::get_field(this={}, id={}, name='{}')", (void*)this, this->id, name);
 
     // "this" is the special keyword to refer to the fact's identity (its internal ID).
     if (name == "this") { return this->id; }
-    bool has_path_sep = name.find('.') != std::string::npos;
-    bool has_index = name.find('[') != std::string::npos;
+
+    // Fast path: simple field names (no path separators) go straight to map lookup.
+    // This avoids two O(n) string scans for the 99% common case.
+    bool has_path_sep = false;
+    bool has_index = false;
+    for (char c : name) {
+        if (c == '.') { has_path_sep = true; break; }
+        if (c == '[') { has_index = true; break; }
+    }
+    if (!has_path_sep && !has_index) {
+        auto it = fields.find(name);
+        if (it != fields.end()) return it->second;
+        return std::nullopt;
+    }
 
     if (has_path_sep || has_index) {
         auto segments = parse_field_path(name);
-
-        if (!segments.empty()) {
-            logd("  > Path traversal with {} segments", segments.size());
-
-            Fact const* current_fact = this;
-            std::optional<ConstraintValue> current_value;
-
-            for (size_t i = 0; i < segments.size(); ++i) {
-                auto const& seg = segments[i];
-                logd("  > Segment {}: '{}' (null_safe={}, indices={})", i, seg.name, seg.null_safe, seg.indices.size());
-
-                // Get the field from current fact
-                if (!seg.name.empty()) {
-                    auto it = current_fact->fields.find(seg.name);
-                    if (it == current_fact->fields.end()) {
-                        // Field not found
-                        if (seg.null_safe) {
-                            logd("  > Field '{}' not found, null-safe returning NilValue", seg.name);
-                            return NilValue{};
-                        }
-                        logd("  > Field '{}' not found, returning nullopt", seg.name);
-                        return std::nullopt;
-                    }
-                    current_value = it->second;
-                }
-
-                // Apply any index accesses
-                for (auto const& idx : seg.indices) {
-                    if (!current_value) {
-                        return seg.null_safe ? std::optional(ConstraintValue{NilValue{}}) : std::nullopt;
-                    }
-                    auto indexed_result = apply_index(*current_value, idx, seg.null_safe);
-                    if (!indexed_result) {
-                        return std::nullopt;
-                    }
-                    current_value = *indexed_result;
-                    logd("  > Applied index access, result type: {}", current_value->index());
-                }
-
-                // If this is the last segment, return the value
-                if (i == segments.size() - 1) {
-                    logd("  > Reached final segment, returning value");
-                    // If final value is a FactList with single fact and we need a scalar,
-                    // this will be handled by the comparison logic
-                    return current_value;
-                }
-
-                // Need to traverse further - check if value is a FactList
-                if (!current_value) {
-                    return seg.null_safe ? std::optional(ConstraintValue{NilValue{}}) : std::nullopt;
-                }
-
-                if (std::holds_alternative<FactList>(*current_value)) {
-                    FactList const& fl = std::get<FactList>(*current_value);
-                    if (fl.facts.empty()) {
-                        bool next_null_safe = (i + 1 < segments.size()) && segments[i + 1].null_safe;
-                        if (seg.null_safe || next_null_safe) {
-                            logd("  > FactList is empty, null-safe returning NilValue");
-                            return NilValue{};
-                        }
-                        logd("  > FactList is empty, returning nullopt");
-                        return std::nullopt;
-                    }
-                    // Use first fact for traversal
-                    current_fact = fl.facts[0].get();
-                    if (!current_fact) {
-                        bool next_null_safe = (i + 1 < segments.size()) && segments[i + 1].null_safe;
-                        if (seg.null_safe || next_null_safe) {
-                            return NilValue{};
-                        }
-                        return std::nullopt;
-                    }
-                } else if (std::holds_alternative<NilValue>(*current_value)) {
-                    // Current value is nil, check null-safety
-                    bool next_null_safe = (i + 1 < segments.size()) && segments[i + 1].null_safe;
-                    if (seg.null_safe || next_null_safe) {
-                        logd("  > Value is nil, null-safe returning NilValue");
-                        return NilValue{};
-                    }
-                    logd("  > Value is nil, returning nullopt");
-                    return std::nullopt;
-                } else {
-                    // Cannot traverse into non-object value
-                    logd("  > Cannot traverse into non-FactList value");
-                    return std::nullopt;
-                }
-            }
-        }
+        return get_field(segments);
     }
 
     // Simple field lookup (original behavior)
@@ -440,24 +394,38 @@ int Token::get_depth() const { return wme ? wme->depth : 0; }
 std::vector<std::shared_ptr<Fact>> Token::get_facts() const {
     if (!wme) return {};
     std::vector<std::shared_ptr<Fact>> all_facts;
-    all_facts.reserve(wme->depth);
-    for (TokenWME const* current_wme = wme.get(); current_wme != nullptr && current_wme->fact != nullptr;
-         current_wme = current_wme->parent.get()) {
-        all_facts.push_back(std::const_pointer_cast<Fact>(current_wme->fact));
+    // WME depth is 1-based size of chain (excluding dummy root if depth 0)
+    // Wait, dummy has depth 0. Real WMEs start at 1.
+    // So reserve depth.
+    all_facts.resize(wme->depth);
+
+    auto curr = wme;
+    int idx = wme->depth - 1;
+    while (curr && curr->depth > 0 && idx >= 0) {
+        if (curr->fact) {
+            all_facts[idx] = std::const_pointer_cast<Fact>(curr->fact);
+        }
+        curr = curr->parent;
+        idx--;
     }
-    std::reverse(all_facts.begin(), all_facts.end());
     return all_facts;
 }
 
 std::shared_ptr<Fact> Token::get_fact_at_depth(int d) const {
     if (!wme) return nullptr;
-    int current_depth = wme->depth - 1;
-    for (TokenWME const* current_wme = wme.get(); current_wme != nullptr && current_wme->fact != nullptr;
-         current_wme = current_wme->parent.get()) {
-        if (current_depth == d) { return std::const_pointer_cast<Fact>(current_wme->fact); }
-        current_depth--;
+    // Target index is d. Current WME is at index (depth - 1).
+    // Steps to walk up = (current_depth - 1) - d.
+    int current_index = wme->depth - 1;
+    if (d < 0 || d > current_index) return nullptr;
+
+    int steps = current_index - d;
+    auto curr = wme;
+    while (steps > 0 && curr) {
+        curr = curr->parent;
+        steps--;
     }
-    return nullptr;
+
+    return (curr && curr->fact) ? std::const_pointer_cast<Fact>(curr->fact) : nullptr;
 }
 
 bool TokenWME::operator==(TokenWME const& other) const {
@@ -505,7 +473,9 @@ ConstraintNode& ConstraintNode::operator=(ConstraintNode const& other) {
 ParsedAccumulate::ParsedAccumulate() {}
 
 ParsedAccumulate::ParsedAccumulate(ParsedAccumulate const& other) :
-    function(other.function), field(other.field), accumulate_field_name(other.accumulate_field_name) {
+    function(other.function), field(other.field), accumulate_field_name(other.accumulate_field_name),
+    compiled_expr(other.compiled_expr),  // shared_ptr shallow copy
+    inline_binding_to_field(other.inline_binding_to_field) {
     if (other.source_pattern) { source_pattern = std::make_unique<ParsedPattern>(*other.source_pattern); }
 }
 
@@ -514,15 +484,17 @@ ParsedAccumulate& ParsedAccumulate::operator=(ParsedAccumulate const& other) {
     function = other.function;
     field = other.field;
     accumulate_field_name = other.accumulate_field_name;
+    compiled_expr = other.compiled_expr;  // shared_ptr shallow copy
+    inline_binding_to_field = other.inline_binding_to_field;
     source_pattern = other.source_pattern ? std::make_unique<ParsedPattern>(*other.source_pattern) : nullptr;
     return *this;
 }
 
-ParsedQuery::ParsedQuery() : pos(0, 0, 0, "") {}
+ParsedQuery::ParsedQuery() = default;
 
-ParsedPattern::ParsedPattern() : pos(0, 0, 0, "") {}
+ParsedPattern::ParsedPattern() = default;
 
-ParsedRule::ParsedRule() : pos(0, 0, 0, "") {}
+ParsedRule::ParsedRule() = default;
 
 ParsedPattern::ParsedPattern(ParsedPattern const& other) :
     type(other.type), pos(other.pos), binding(other.binding), fact_type(other.fact_type),
@@ -544,5 +516,3 @@ ParsedPattern& ParsedPattern::operator=(ParsedPattern const& other) {
     source = other.source;
     return *this;
 }
-
-

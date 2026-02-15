@@ -948,7 +948,7 @@ struct js_traits<std::shared_ptr<T>>
 
   /// Mapping between derived class' JSClassID and function to obtain the
   /// std::shared_ptr from the JSValue.
-  inline static unordered_map<JSClassID, ptr_cast_fcn_t> ptrCastFcnMap;
+  inline static ruleforge::unordered_map<JSClassID, ptr_cast_fcn_t> ptrCastFcnMap;
 
   /** Register a class as a derived class.
    *

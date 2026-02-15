@@ -44,7 +44,7 @@ public:
     }
 
 private:
-    unordered_map<std::type_index, FactConverter> converters_;
+    ruleforge::unordered_map<std::type_index, FactConverter> converters_;
 };
 
 #endif   // FACT_TYPE_REGISTRY_HPP

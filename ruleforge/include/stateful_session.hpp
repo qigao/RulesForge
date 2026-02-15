@@ -11,6 +11,7 @@
 #include "metrics_exporter.hpp"
 #include "phmap.h"
 #include "query_result.hpp"
+#include "rete/network_memory.hpp"
 #include "rule_execution_tracer.hpp"
 #include "schema_validator.hpp"
 #include "session_arena.hpp"
@@ -232,7 +233,7 @@ public:
   void _internal_remove_fact(int64_t fact_id);
   std::optional<std::shared_ptr<Fact>> get_fact_by_id(int64_t id) override;
   void logical_insert(Token& token, std::shared_ptr<Fact> fact) override;
-  map<std::string, JSValue> const& get_global_values() const override;
+  ruleforge::map<std::string, JSValue> const& get_global_values() const override;
 
   inline std::shared_ptr<TokenWME const> get_or_create_wme(
       std::shared_ptr<TokenWME const> parent_wme, std::shared_ptr<Fact> fact)
@@ -253,8 +254,12 @@ public:
       return it->second;
     }
     // Allocate from pool and construct in place
+    // Allocate from pool and construct in place
     TokenWME* raw = wme_pool_.allocate();
-    new (raw) TokenWME{parent_wme, fact, parent_wme->depth + 1, hash};
+    
+    // Create new WME linked to parent, without storing redundant index vector
+    new (raw) TokenWME{parent_wme, fact, parent_wme ? parent_wme->depth + 1 : 1, hash};
+
     // Wrap with custom deleter that returns to pool
     auto new_wme = std::shared_ptr<TokenWME const>(raw, [this](TokenWME const* p) {
         wme_pool_.deallocate(const_cast<TokenWME*>(p));
@@ -276,27 +281,23 @@ public:
 
   bool execute_eval(std::string const& code,
                     Token const& token,
-                    map<std::string, int> const& bindings);
+                    ruleforge::map<std::string, int> const& bindings);
+
+  NetworkMemory& net_mem() { return net_mem_; }
+  NetworkMemory const& net_mem() const { return net_mem_; }
+  void allocate_network_memory(MemSlotCounts const& counts);
+
+  // Deferred beta evaluation: flush all pending facts through beta nodes
+  void flush_pending_nodes();
+
+  // Check if session is in deferred propagation mode (batch add_facts path)
+  bool is_deferred_mode() const { return deferred_mode_; }
 
 private:
-  void build_network();
   void prime_network_state();
   void assign_nested_fact_ids(Fact& fact);
 
-  template<typename T, typename... Args>
-  std::shared_ptr<T> create_node(Args&&... args)
-  {
-    auto node = std::make_shared<T>(std::forward<Args>(args)...);
-    node->id = next_node_id_++;
-    all_nodes_.push_back(node);
-    return node;
-  }
-
-  std::vector<std::shared_ptr<ReteNode>> build_alpha_chain(
-      ConstraintNode const* node,
-      std::vector<std::shared_ptr<ReteNode>> parent_tails);
-
-  using TokenWMECache = map<size_t, std::shared_ptr<TokenWME const>>;  // hash -> WME
+  using TokenWMECache = ruleforge::unordered_map<size_t, std::shared_ptr<TokenWME const>>;  // hash -> WME
 
   // --- Immutable Reference ---
   std::shared_ptr<KnowledgeBase const> kb_;
@@ -307,39 +308,32 @@ private:
   // declaration order, so this ensures the pool is destroyed LAST.
   TokenWMEPool wme_pool_;
 
+  // --- Per-session node memory (externalized from nodes) ---
+  NetworkMemory net_mem_;
+
   // --- Mutable State ---
   std::unique_ptr<JSScriptingManager> scripting_manager_;
   std::unique_ptr<TruthMaintenanceSystem> tms_;
   RuleExecutionTracer tracer_;
   SessionArena arena_;  // Per-session memory arena
 
-  // Rete network instance state
-  mutable int64_t next_fact_id_ = 1;
-  int next_node_id_ = 0;
-  std::vector<std::shared_ptr<ReteNode>> all_nodes_;
-  map<std::string, std::shared_ptr<ReteNode>> alpha_entry_points_;
-  // Outer key: entry point name, Inner key: fact type
-  map<std::string, map<std::string, std::shared_ptr<ReteNode>>> named_entry_points_;
-  map<std::string, std::shared_ptr<QueryTerminalNode>> query_nodes_;
-  map<std::string, std::shared_ptr<QueryInputNode>>
-      parameterized_query_inputs_;
-
   // Working memory state
+  mutable int64_t next_fact_id_ = 1;
   std::shared_ptr<TokenWME const> dummy_wme_;
   TokenWMECache wme_cache_;
-  map<int64_t, std::shared_ptr<Fact>> all_facts_;
+  ruleforge::unordered_map<int64_t, std::shared_ptr<Fact>> all_facts_;
   std::vector<std::string> agenda_group_focus_stack_;
-  map<size_t, Activation> agenda_map_;
+  ruleforge::map<size_t, Activation> agenda_map_;
   std::priority_queue<std::pair<int, size_t>> agenda_queue_;
   std::vector<std::shared_ptr<IEngineListener>> listeners_;
-  unordered_set<size_t> no_loop_blocked_;  // Blocked activations for no-loop rules
+  ruleforge::unordered_set<size_t> no_loop_blocked_;  // Blocked activations for no-loop rules
   bool halt_requested_ = false;  // P1 FIX: rfl.halt() support
 
   // P1 FIX: activation-group support - maps group name to activation hashes
-  map<std::string, unordered_set<size_t>> activation_group_map_;
+  ruleforge::map<std::string, ruleforge::unordered_set<size_t>> activation_group_map_;
 
   // P1 FIX: lock-on-active support - rules locked during current firing cycle
-  unordered_set<ParsedRule const*> lock_on_active_blocked_;
+  ruleforge::unordered_set<ParsedRule const*> lock_on_active_blocked_;
   struct DelayedActivation {
     std::chrono::steady_clock::time_point fire_time;
     Activation activation;
@@ -352,6 +346,7 @@ private:
   // P1-001 FIX: Transaction tracking for rollback on JS exception
   bool in_rhs_transaction_ = false;
   bool is_consistent_ = true;
+  bool deferred_mode_ = false;  // True during batch add_facts() — beta nodes queue instead of propagate
   std::vector<int64_t> transaction_inserted_facts_;  // Facts to retract on rollback
 
   // PROD-002: Schema validation
@@ -362,7 +357,7 @@ private:
   mutable int64_t rules_fired_total_ = 0;
   mutable int64_t facts_inserted_total_ = 0;
   mutable int64_t facts_retracted_total_ = 0;
-  map<int, std::shared_ptr<ReteNode>> get_nodes() const;
+  ruleforge::map<int, std::shared_ptr<ReteNode>> get_nodes() const;
   friend class ReteSerializer;
 };
 

@@ -59,14 +59,13 @@ private:
  * @brief PROD-002: Schema validator for fact insertion
  *
  * Validates facts against declared type schemas before insertion.
+ * Uses FieldType enum for O(1) type matching.
  */
 class SchemaValidator {
 public:
     explicit SchemaValidator(std::vector<ParsedDeclaration> const& declarations) {
-        // Build lookup map for declarations
         for (auto const& decl : declarations) {
             declarations_[decl.type_name] = &decl;
-            // Also index by fully qualified name (package.type)
             if (!decl.source_package.empty()) {
                 declarations_[decl.source_package + "." + decl.type_name] = &decl;
             }
@@ -81,28 +80,24 @@ public:
     std::vector<ValidationError> validate(Fact const& fact) const {
         std::vector<ValidationError> errors;
 
-        // Find declaration for this fact type
         ParsedDeclaration const* decl = find_declaration(fact.type);
         if (!decl) {
             errors.push_back({fact.type, "", "Unknown fact type - no declaration found"});
             return errors;
         }
 
-        // Check each declared field exists and has correct type
         for (auto const& field : decl->fields) {
             auto it = fact.fields.find(field.name);
             if (it == fact.fields.end()) {
-                // Field is missing - check if it's nullable (we allow missing fields)
-                // In Rules Forge Language, missing fields are typically allowed
-                continue;
+                continue;  // Missing fields allowed
             }
 
-            // Validate field type
             if (!validate_field_type(it->second, field.type)) {
                 errors.push_back({
                     fact.type,
                     field.name,
-                    "Type mismatch - expected '" + field.type + "', got '" + get_value_type_name(it->second) + "'"
+                    "Type mismatch - expected '" + field_type_name(field.type) +
+                    "', got '" + get_value_type_name(it->second) + "'"
                 });
             }
         }
@@ -110,9 +105,6 @@ public:
         return errors;
     }
 
-    /**
-     * @brief Check if a fact type is declared
-     */
     bool has_declaration(std::string const& type_name) const {
         return find_declaration(type_name) != nullptr;
     }
@@ -124,7 +116,6 @@ private:
             return it->second;
         }
 
-        // Try without package prefix
         size_t dot_pos = type_name.rfind('.');
         if (dot_pos != std::string::npos) {
             std::string short_name = type_name.substr(dot_pos + 1);
@@ -137,34 +128,28 @@ private:
         return nullptr;
     }
 
-    bool validate_field_type(ConstraintValue const& value, std::string const& expected_type) const {
-        return std::visit([&expected_type](auto const& v) -> bool {
+    /**
+     * @brief O(1) type validation using single bitwise AND
+     */
+    static bool validate_field_type(ConstraintValue const& value, FieldType expected) {
+        return std::visit([expected](auto const& v) -> bool {
             using T = std::decay_t<decltype(v)>;
 
             if constexpr (std::is_same_v<T, std::string>) {
-                return expected_type == "String" || expected_type == "string" ||
-                       expected_type == "Object" || expected_type == "object";
+                return (FT_STRING_COMPAT & expected) != 0;
             } else if constexpr (std::is_same_v<T, int64_t>) {
-                return expected_type == "int" || expected_type == "Integer" ||
-                       expected_type == "long" || expected_type == "Long" ||
-                       expected_type == "Number" || expected_type == "number" ||
-                       expected_type == "Object" || expected_type == "object";
+                return (FT_INT_COMPAT & expected) != 0;
             } else if constexpr (std::is_same_v<T, double>) {
-                return expected_type == "double" || expected_type == "Double" ||
-                       expected_type == "float" || expected_type == "Float" ||
-                       expected_type == "Number" || expected_type == "number" ||
-                       expected_type == "Object" || expected_type == "object";
+                return (FT_DOUBLE_COMPAT & expected) != 0;
             } else if constexpr (std::is_same_v<T, NilValue>) {
                 return true;  // Nil is valid for any type
             } else if constexpr (std::is_same_v<T, FactList>) {
-                return expected_type == "List" || expected_type == "list" ||
-                       expected_type == "Object" || expected_type == "object";
+                return (FT_LIST_COMPAT & expected) != 0;
             }
-            return false;
         }, value);
     }
 
-    std::string get_value_type_name(ConstraintValue const& value) const {
+    static std::string get_value_type_name(ConstraintValue const& value) {
         return std::visit([](auto const& v) -> std::string {
             using T = std::decay_t<decltype(v)>;
             if constexpr (std::is_same_v<T, std::string>) return "String";
@@ -172,11 +157,25 @@ private:
             else if constexpr (std::is_same_v<T, double>) return "double";
             else if constexpr (std::is_same_v<T, NilValue>) return "nil";
             else if constexpr (std::is_same_v<T, FactList>) return "List";
-            return "unknown";
         }, value);
     }
 
-    map<std::string, ParsedDeclaration const*> declarations_;
+    static std::string field_type_name(FieldType t) {
+        switch (t) {
+            case FT_String: return "String";
+            case FT_Int: return "int";
+            case FT_Long: return "long";
+            case FT_Double: return "double";
+            case FT_Float: return "float";
+            case FT_Number: return "Number";
+            case FT_Boolean: return "boolean";
+            case FT_List: return "List";
+            case FT_Object: return "Object";
+            default: return "unknown";
+        }
+    }
+
+    ruleforge::map<std::string, ParsedDeclaration const*> declarations_;
 };
 
 #endif // SCHEMA_VALIDATOR_HPP

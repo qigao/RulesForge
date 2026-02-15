@@ -1,9 +1,8 @@
-﻿#define ANKERL_NANOBENCH_IMPLEMENT
+#include "tinytest.h"
 #include "pubcxx/singleton.hpp"
 
-#include <catch2/catch_all.hpp>
+#include <atomic>
 #include <iostream>
-#include <nanobench.h>
 
 class Foo : public Singleton<Foo> {
 public:
@@ -15,25 +14,13 @@ private:
     int n_;
 };
 
-TEST_CASE("Singleton - Basic Benchmark", "[!benchmark]") {
-    Foo::Construct(17);                        // Construct outside the benchmark
-    auto* foo_instance = Foo::GetInstance();   // Get instance once
-    foo_instance->Bar();                       // Call Bar once
-
-    ankerl::nanobench::Bench().run("get instance bar", [&]() {
-        foo_instance->Bar();   // Just benchmark the Bar function call
-    });
-
-    Foo::Destruct();   // Destruct after the benchmark
-}
-
 static std::atomic_uint32_t init{0};
 
 class Counter : public Singleton<Counter> {
 public:
     Counter() { ++init; }
 
-    ~Counter() { --init; }   // Decrement init in destructor
+    ~Counter() { --init; }
 
     void Add() { ++count_; }
 
@@ -43,19 +30,32 @@ private:
     std::atomic_uint32_t count_{0};
 };
 
-TEST_CASE("Singleton - Atomic Counter", "[!benchmark]") {
-    Counter::Construct();
-    auto* counter_instance = Counter::GetInstance();
+suite("Singleton Benchmark") {
+    it("benchmarks get instance bar") {
+        Foo::Construct(17);
+        auto* foo_instance = Foo::GetInstance();
+        foo_instance->Bar();
 
-    SECTION("Increment counter") {
-        counter_instance->Add();
-        REQUIRE(counter_instance->GetCount() == 1);
+        benchmark("get instance bar", 10000) {
+            foo_instance->Bar();
+        }
+
+        Foo::Destruct();
     }
 
-    SECTION("Check init count") { REQUIRE(init == 1); }
+    it("benchmarks atomic counter") {
+        Counter::Construct();
+        auto* counter_instance = Counter::GetInstance();
 
-    ankerl::nanobench::Bench().run("increment counter", [&]() { counter_instance->Add(); });
+        counter_instance->Add();
+        check_uint_eq(counter_instance->GetCount(), 1);
+        check_uint_eq(init, 1);
 
-    Counter::Destruct();
-    REQUIRE(init == 0);   // Verify destructor was called
+        benchmark("increment counter", 10000) {
+            counter_instance->Add();
+        }
+
+        Counter::Destruct();
+        check_uint_eq(init, 0);
+    }
 }

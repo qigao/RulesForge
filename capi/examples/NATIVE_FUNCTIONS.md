@@ -42,7 +42,7 @@ ruleforge_status_t ruleforge_kb_register_native_function(
 - `callback`: C function pointer
 - `user_data`: Optional context passed to callback (can be NULL)
 
-**Returns:** `DRILLS_OK` on success
+**Returns:** `RULES_FORGE_OK` on success
 
 ## Usage Example
 
@@ -56,10 +56,10 @@ ruleforge_status_t log_function(void *ctx, int argc, const char **argv, char **o
         printf("%s ", argv[i]);
     }
     printf("\n");
-    
+
     // No return value needed
     *out_result = nullptr;
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
 }
 ```
 
@@ -93,17 +93,17 @@ end
 ruleforge_status_t republish_function(void *ctx, int argc, const char **argv, char **out_result) {
     if (argc < 2) {
         *out_result = strdup("{\"error\": \"requires topic and message\"}");
-        return DRILLS_ERROR_INVALID_ARGUMENT;
+        return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
-    
+
     const char *topic = argv[0];
     const char *message = argv[1];
-    
+
     // Your MQTT publish code here
     mqtt_publish(topic, message);
-    
+
     *out_result = strdup("{\"published\": true}");
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
 }
 ```
 
@@ -123,20 +123,20 @@ end
 ruleforge_status_t webhook_function(void *ctx, int argc, const char **argv, char **out_result) {
     if (argc < 2) {
         *out_result = strdup("{\"error\": \"requires url and payload\"}");
-        return DRILLS_ERROR_INVALID_ARGUMENT;
+        return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
-    
+
     const char *url = argv[0];
     const char *payload = argv[1];
-    
+
     // Make HTTP POST request
     int status_code = http_post(url, payload);
-    
+
     char buffer[256];
     snprintf(buffer, sizeof(buffer), "{\"status\": %d}", status_code);
     *out_result = strdup(buffer);
-    
-    return DRILLS_OK;
+
+    return RULES_FORGE_OK;
 }
 ```
 
@@ -146,7 +146,7 @@ rule "Send Webhook"
 when
     $event : Event(type == "critical")
 then
-    var response = webhook("https://api.example.com/alert", 
+    var response = webhook("https://api.example.com/alert",
                           JSON.stringify($event));
     log("Webhook response:", JSON.stringify(response));
 end
@@ -162,19 +162,19 @@ struct DatabaseContext {
 
 ruleforge_status_t save_to_db(void *ctx, int argc, const char **argv, char **out_result) {
     DatabaseContext *db_ctx = (DatabaseContext *)ctx;
-    
+
     if (argc < 1) {
         *out_result = strdup("{\"error\": \"requires data\"}");
-        return DRILLS_ERROR_INVALID_ARGUMENT;
+        return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
-    
+
     // Save to database using context
-    bool success = db_insert(db_ctx->db_connection, 
-                            db_ctx->table_name, 
+    bool success = db_insert(db_ctx->db_connection,
+                            db_ctx->table_name,
                             argv[0]);
-    
+
     *out_result = strdup(success ? "{\"saved\": true}" : "{\"saved\": false}");
-    return DRILLS_OK;
+    return RULES_FORGE_OK;
 }
 
 // Registration with context
@@ -187,7 +187,7 @@ ruleforge_kb_register_native_function(kb, "saveToDb", save_to_db, &db_ctx);
 ### Memory Management
 
 1. **Input Arguments (`argv`)**: Read-only, managed by RuleForge. Do not free.
-2. **Output Result (`out_result`)**: 
+2. **Output Result (`out_result`)**:
    - Allocate with `malloc()` or `strdup()`
    - RuleForge will call `free()` on it
    - Can be `nullptr` if no return value needed
@@ -200,7 +200,7 @@ ruleforge_kb_register_native_function(kb, "saveToDb", save_to_db, &db_ctx);
 
 ### Return Values
 
-- Return `DRILLS_OK` (0) for success
+- Return `RULES_FORGE_OK` (0) for success
 - Return error codes for failures
 - Set `*out_result` to error message JSON on failure
 
@@ -245,14 +245,14 @@ when
 then
     // Log the event
     log("Threshold exceeded:", $sensor.temperature);
-    
+
     // Republish to alert topic
     republish("sensors/alerts", JSON.stringify({
         id: $sensor.id,
         temp: $sensor.temperature,
         timestamp: Date.now()
     }));
-    
+
     // Send webhook notification
     webhook("https://monitoring.example.com/alert", JSON.stringify($sensor));
 end
@@ -263,8 +263,8 @@ end
 Always check return values and handle errors:
 
 ```c
-if (ruleforge_kb_register_native_function(kb, "myFunc", my_func, ctx) != DRILLS_OK) {
-    fprintf(stderr, "Failed to register function: %s\n", 
+if (ruleforge_kb_register_native_function(kb, "myFunc", my_func, ctx) != RULES_FORGE_OK) {
+    fprintf(stderr, "Failed to register function: %s\n",
             ruleforge_get_last_error_message());
     return 1;
 }

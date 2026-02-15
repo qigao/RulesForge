@@ -3,7 +3,7 @@
 
 #include <chrono>
 #include <cstdint>
-#include <fmt/format.h>
+#include <cstdio>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -142,9 +142,12 @@ inline std::string timestampToIso8601(uint64_t value_or_id, bool is_value_a_raw_
     // clang-format on
     auto ms_part = absolute_timestamp_ms % 1000;
 
-    // Consider using a string view format for better performance
-    static constexpr fmt::string_view format = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}.{:03d}Z";
-    return fmt::format(format, tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, ms_part);
+    // Use snprintf for ISO8601 formatting
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+                  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                  tm.tm_hour, tm.tm_min, tm.tm_sec, static_cast<int>(ms_part));
+    return std::string(buf);
 }
 
 inline u64 get_current_time_ms() {

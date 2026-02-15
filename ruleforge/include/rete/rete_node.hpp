@@ -11,6 +11,7 @@
 
 #include "rfl_accumulators.hpp"
 #include "rfl_rete_defs.hpp"
+#include "rete/network_memory.hpp"
 #include "phmap.h"
 
 // Forward declarations
@@ -18,7 +19,7 @@ class StatefulSession;
 struct Token;
 struct Fact;
 enum class PropagationType;
-class TokenWME;
+struct TokenWME;
 class QueryInputNode;
 // Forward declare all node types for friend declarations
 class AlphaNode;
@@ -33,53 +34,82 @@ class EvalNode;
 class TerminalNode;
 class QueryTerminalNode;
 
+// Node kind tag for O(1) type checks — replaces dynamic_cast in hot paths
+enum class NodeKind : uint8_t {
+  Alpha,
+  EntryPoint,
+  HashedJoin,
+  CrossProductJoin,
+  Not,
+  Exists,
+  Accumulate,
+  Unnest,
+  Eval,
+  Terminal,
+  QueryTerminal,
+  QueryInput,
+};
+
 // --- BASE CLASS ---
-/**
- * @class ReteNode
- * @brief Abstract base class representing a node in a Rete network.
- *
- * ReteNode serves as the foundational interface for all nodes in the Rete
- * algorithm's network. It provides mechanisms for activation from the left and
- * right, management of parent and child nodes, and node identification. Derived
- * classes must implement the activation and printing logic.
- *
- * @note Inherits from std::enable_shared_from_this to allow safe shared_ptr
- * usage.
- */
 class ReteNode : public std::enable_shared_from_this<ReteNode>
 {
 public:
+  NodeKind const kind;
   virtual ~ReteNode() = default;
-  /**
-   * @brief Activates the node with a token from the left input.
-   *
-   * This pure virtual function is called when a token is propagated from the
-   * left input of the node. Implementations should define how the node
-   * processes the token within the given session context.
-   *
-   * @param session Reference to the current StatefulSession, providing context
-   * for activation.
-   * @param token Reference to the Token being activated on the left input.
-   */
+
+  bool is_beta_node() const {
+    switch (kind) {
+      case NodeKind::HashedJoin:
+      case NodeKind::CrossProductJoin:
+      case NodeKind::Not:
+      case NodeKind::Exists:
+      case NodeKind::Accumulate:
+      case NodeKind::Eval:
+      case NodeKind::Unnest:
+      case NodeKind::QueryInput:
+        return true;
+      default:
+        return false;
+    }
+  }
+
   virtual void left_activate(StatefulSession& session,
                              Token const& token) = 0;
-  /**
-   * @brief Activates the right input of the node with the given fact.
-   *
-   * This method is called when a fact is asserted or modified on the right
-   * input of the node. It processes the provided fact within the context of the
-   * specified session and propagates the activation according to the given
-   * propagation type.
-   *
-   * @param session Reference to the current stateful session.
-   * @param fact Shared pointer to the fact being activated.
-   * @param p_type The type of propagation (e.g., assert, retract, modify).
-   */
   virtual void right_activate(StatefulSession& session,
                               std::shared_ptr<Fact> fact,
                               PropagationType p_type) = 0;
-  void add_child(std::shared_ptr<ReteNode> child);
-  void add_parent(std::shared_ptr<ReteNode> parent);
+
+  // Batch right-activation: propagate a vector of facts in one pass.
+  // Default falls back to per-fact right_activate(). Alpha-chain nodes
+  // override this to filter the entire vector before forwarding survivors.
+  virtual void right_activate_batch(StatefulSession& session,
+                                    std::vector<std::shared_ptr<Fact>>& facts,
+                                    PropagationType p_type) {
+    for (auto& fact : facts) {
+      right_activate(session, fact, p_type);
+    }
+  }
+
+  // Deferred evaluation: queue facts for later processing.
+  // Default is no-op. Beta nodes override to store into pending queue.
+  virtual void right_activate_deferred(StatefulSession& session,
+                                       std::shared_ptr<Fact> fact,
+                                       PropagationType p_type) {
+    right_activate(session, fact, p_type);
+  }
+
+  // Batch deferred: queue a vector of facts for later processing.
+  virtual void right_activate_batch_deferred(StatefulSession& session,
+                                             std::vector<std::shared_ptr<Fact>>& facts,
+                                             PropagationType p_type) {
+    right_activate_batch(session, facts, p_type);
+  }
+
+  // Flush pending facts queued by deferred activation.
+  // Returns true if any work was done.
+  virtual bool flush_pending(StatefulSession& session) { return false; }
+  void add_child(std::shared_ptr<ReteNode> const& child);
+  void add_parent(std::shared_ptr<ReteNode> const& parent);
   virtual void print_node(std::ostream& os) const = 0;
 
   std::vector<std::weak_ptr<ReteNode>> const& get_children() const
@@ -93,10 +123,12 @@ public:
   }
 
   int id = -1;
+  int mem_slot = -1;
 
   uintptr_t get_id() const { return reinterpret_cast<uintptr_t>(this); }
 
 protected:
+  explicit ReteNode(NodeKind k) : kind(k) {}
   std::vector<std::weak_ptr<ReteNode>> children;
   std::vector<std::weak_ptr<ReteNode>> parents;
 };
@@ -104,29 +136,32 @@ protected:
 class BetaConditionNode : public ReteNode
 {
 public:
-  BetaConditionNode() = default;
-  BetaConditionNode(std::vector<ParsedConstraint> const& joins,
-                    map<std::string, int> const& bindings);
+  BetaConditionNode(NodeKind k) : ReteNode(k) {}
+  BetaConditionNode(NodeKind k, std::vector<ParsedConstraint> const& joins,
+                    ruleforge::map<std::string, int> const& bindings);
   void left_activate(StatefulSession& session,
                      Token const& token) override;
   void right_activate(StatefulSession& session,
                       std::shared_ptr<Fact> fact,
                       PropagationType p_type) override;
+  void right_activate_batch(StatefulSession& session,
+                            std::vector<std::shared_ptr<Fact>>& facts,
+                            PropagationType p_type) override;
+  void right_activate_deferred(StatefulSession& session,
+                               std::shared_ptr<Fact> fact,
+                               PropagationType p_type) override;
+  void right_activate_batch_deferred(StatefulSession& session,
+                                     std::vector<std::shared_ptr<Fact>>& facts,
+                                     PropagationType p_type) override;
+  bool flush_pending(StatefulSession& session) override;
 
 protected:
   virtual bool condition_passes(size_t match_count) const = 0;
   virtual bool was_passing(size_t old_match_count) const = 0;
 
-  struct LeftMemoryItem
-  {
-    std::shared_ptr<TokenWME const> wme;
-    size_t match_count = 0;
-  };
-
-  unordered_map<TokenWME const*, LeftMemoryItem> left_memory;
-  unordered_map<int64_t, std::shared_ptr<Fact>> right_memory;
+  // Immutable config (set at build time)
   std::vector<ParsedConstraint> join_constraints;
-  map<std::string, int> binding_to_token_idx;
+  ruleforge::map<std::string, int> binding_to_token_idx;
 };
 
 // --- NODE SUBCLASSES ---
@@ -134,13 +169,24 @@ protected:
 class AlphaNode : public ReteNode
 {
 public:
-  AlphaNode() = default;
+  AlphaNode() : ReteNode(NodeKind::Alpha) {}
   explicit AlphaNode(ParsedConstraint const& constraint);
   void left_activate(StatefulSession&, Token const&) override;
   void right_activate(StatefulSession&,
                       std::shared_ptr<Fact>,
                       PropagationType) override;
+  void right_activate_batch(StatefulSession&,
+                            std::vector<std::shared_ptr<Fact>>&,
+                            PropagationType) override;
+  void right_activate_deferred(StatefulSession&,
+                               std::shared_ptr<Fact>,
+                               PropagationType) override;
+  void right_activate_batch_deferred(StatefulSession&,
+                                     std::vector<std::shared_ptr<Fact>>&,
+                                     PropagationType) override;
   void print_node(std::ostream& os) const override;
+  friend class BetaNetworkBuilder;
+  friend struct CompiledNetwork;
 
 private:
   ParsedConstraint constraint;
@@ -150,10 +196,20 @@ private:
 class EntryPointNode : public ReteNode
 {
 public:
+  EntryPointNode() : ReteNode(NodeKind::EntryPoint) {}
   void left_activate(StatefulSession&, Token const&) override;
   void right_activate(StatefulSession&,
                       std::shared_ptr<Fact>,
                       PropagationType) override;
+  void right_activate_batch(StatefulSession&,
+                            std::vector<std::shared_ptr<Fact>>&,
+                            PropagationType) override;
+  void right_activate_deferred(StatefulSession&,
+                               std::shared_ptr<Fact>,
+                               PropagationType) override;
+  void right_activate_batch_deferred(StatefulSession&,
+                                     std::vector<std::shared_ptr<Fact>>&,
+                                     PropagationType) override;
   void print_node(std::ostream& os) const override;
 
   friend class ReteSerializer;
@@ -166,8 +222,8 @@ public:
 class BaseJoinNode : public ReteNode
 {
 public:
-  BaseJoinNode(std::vector<ParsedConstraint> joins,
-               map<std::string, int> bindings);
+  BaseJoinNode(NodeKind k, std::vector<ParsedConstraint> joins,
+               ruleforge::map<std::string, int> bindings);
   void left_activate(StatefulSession& session,
                      Token const& token) override = 0;
   void right_activate(StatefulSession& session,
@@ -175,36 +231,41 @@ public:
                       PropagationType p_type) override = 0;
 
 protected:
+  using ChildMap = ruleforge::unordered_map<TokenWME const*,
+      std::vector<std::shared_ptr<TokenWME const>>>;
+  using RightChildMap = ruleforge::unordered_map<int64_t,
+      std::vector<std::shared_ptr<TokenWME const>>>;
+
   void propagate_assert(StatefulSession& session,
                         Token const& token,
-                        std::shared_ptr<Fact> fact);
+                        std::shared_ptr<Fact> fact,
+                        ChildMap& left_to_children,
+                        RightChildMap& right_to_children);
   void propagate_retract(StatefulSession& session,
                          std::shared_ptr<TokenWME const> wme,
-                         std::shared_ptr<Fact> fact);
+                         std::shared_ptr<Fact> fact,
+                         ChildMap& left_to_children,
+                         RightChildMap& right_to_children);
 
+  // Immutable config
   std::vector<ParsedConstraint> join_constraints_;
-  map<std::string, int> binding_to_token_idx_;
-  unordered_map<TokenWME const*,
-                     std::vector<std::shared_ptr<TokenWME const>>>
-      left_to_children_;
-  unordered_map<int64_t, std::vector<std::shared_ptr<TokenWME const>>>
-      right_to_children_;
+  ruleforge::map<std::string, int> binding_to_token_idx_;
 };
 
 class HashedJoinNode : public BaseJoinNode
 {
 public:
   using HashedTokenMemory =
-      unordered_map<ConstraintValue,
+      ruleforge::unordered_map<ConstraintValue,
                          std::vector<std::shared_ptr<TokenWME const>>,
                          ConstraintValueHasher>;
   using HashedFactMemory =
-      unordered_map<ConstraintValue,
+      ruleforge::unordered_map<ConstraintValue,
                          std::vector<std::shared_ptr<Fact>>,
                          ConstraintValueHasher>;
 
   HashedJoinNode(std::vector<ParsedConstraint> joins,
-                 map<std::string, int> bindings,
+                 ruleforge::map<std::string, int> bindings,
                  std::pair<std::string, int> left_hash_key,
                  std::string right_hash_key);
   void left_activate(StatefulSession& session,
@@ -212,6 +273,16 @@ public:
   void right_activate(StatefulSession& session,
                       std::shared_ptr<Fact> fact,
                       PropagationType p_type) override;
+  void right_activate_batch(StatefulSession& session,
+                            std::vector<std::shared_ptr<Fact>>& facts,
+                            PropagationType p_type) override;
+  void right_activate_deferred(StatefulSession& session,
+                               std::shared_ptr<Fact> fact,
+                               PropagationType p_type) override;
+  void right_activate_batch_deferred(StatefulSession& session,
+                                     std::vector<std::shared_ptr<Fact>>& facts,
+                                     PropagationType p_type) override;
+  bool flush_pending(StatefulSession& session) override;
   void print_node(std::ostream& os) const override;
 
   friend class ReteSerializer;
@@ -221,8 +292,7 @@ private:
       Token const& token) const;
   std::optional<ConstraintValue> get_key(
       std::shared_ptr<Fact> const& fact) const;
-  HashedTokenMemory left_memory_;
-  HashedFactMemory right_memory_;
+  // Immutable config
   std::pair<std::string, int> left_hash_key_;
   std::string right_hash_key_;
 };
@@ -231,30 +301,36 @@ class CrossProductJoinNode : public BaseJoinNode
 {
 public:
   using TokenMemory =
-      unordered_map<TokenWME const*, std::shared_ptr<TokenWME const>>;
-  using FactMemory = unordered_map<int64_t, std::shared_ptr<Fact>>;
+      ruleforge::unordered_map<TokenWME const*, std::shared_ptr<TokenWME const>>;
+  using FactMemory = ruleforge::unordered_map<int64_t, std::shared_ptr<Fact>>;
 
   CrossProductJoinNode(std::vector<ParsedConstraint> joins,
-                       map<std::string, int> bindings);
+                       ruleforge::map<std::string, int> bindings);
   void left_activate(StatefulSession& session,
                      Token const& token) override;
   void right_activate(StatefulSession& session,
                       std::shared_ptr<Fact> fact,
                       PropagationType p_type) override;
+  void right_activate_batch(StatefulSession& session,
+                            std::vector<std::shared_ptr<Fact>>& facts,
+                            PropagationType p_type) override;
+  void right_activate_deferred(StatefulSession& session,
+                               std::shared_ptr<Fact> fact,
+                               PropagationType p_type) override;
+  void right_activate_batch_deferred(StatefulSession& session,
+                                     std::vector<std::shared_ptr<Fact>>& facts,
+                                     PropagationType p_type) override;
+  bool flush_pending(StatefulSession& session) override;
   void print_node(std::ostream& os) const override;
   friend class ReteSerializer;
-
-private:
-  TokenMemory left_memory_;
-  FactMemory right_memory_;
 };
 
 class NotNode : public BetaConditionNode
 {
 public:
-  NotNode() = default;
+  NotNode() : BetaConditionNode(NodeKind::Not, {}, {}) {}
   NotNode(std::vector<ParsedConstraint> const& joins,
-          map<std::string, int> const& bindings);
+          ruleforge::map<std::string, int> const& bindings);
   void print_node(std::ostream& os) const override;
 
 protected:
@@ -272,9 +348,9 @@ protected:
 class ExistsNode : public BetaConditionNode
 {
 public:
-  ExistsNode() = default;
+  ExistsNode() : BetaConditionNode(NodeKind::Exists, {}, {}) {}
   ExistsNode(std::vector<ParsedConstraint> const& joins,
-             map<std::string, int> const& bindings);
+             ruleforge::map<std::string, int> const& bindings);
   void print_node(std::ostream& os) const override;
 
 protected:
@@ -292,47 +368,47 @@ protected:
 class AccumulateNode : public ReteNode
 {
 public:
-  AccumulateNode() = default;
+  AccumulateNode() : ReteNode(NodeKind::Accumulate) {}
   AccumulateNode(IAccumulator const* prototype,
                  ParsedAccumulate&&,
                  std::string res_fact_type,
-                 map<std::string, int> bindings,
+                 ruleforge::map<std::string, int> bindings,
                  std::vector<ParsedConstraint> joins);
   void left_activate(StatefulSession&, Token const&) override;
   void right_activate(StatefulSession&,
                       std::shared_ptr<Fact>,
                       PropagationType) override;
+  void right_activate_batch(StatefulSession&,
+                            std::vector<std::shared_ptr<Fact>>&,
+                            PropagationType) override;
+  void right_activate_deferred(StatefulSession&,
+                               std::shared_ptr<Fact>,
+                               PropagationType) override;
+  void right_activate_batch_deferred(StatefulSession&,
+                                     std::vector<std::shared_ptr<Fact>>&,
+                                     PropagationType) override;
+  bool flush_pending(StatefulSession&) override;
   void print_node(std::ostream& os) const override;
   friend class KnowledgeBase;
   friend class ReteSerializer;
 
 private:
-  struct LeftMemoryItem
-  {
-    std::shared_ptr<TokenWME const> wme;
-    std::shared_ptr<Fact> result_fact;
-    std::unique_ptr<IAccumulator> accumulator;
-    std::vector<std::shared_ptr<Fact>> contributing_facts_list;
-    unordered_set<std::shared_ptr<Fact>> contributing_facts_set;
-  };
-
   void update_and_propagate_result(StatefulSession& session,
-                                   LeftMemoryItem& item);
+                                   NetworkMemory::AccumulateMem::LeftMemoryItem& item);
 
+  // Immutable config
   IAccumulator const* accumulator_prototype = nullptr;
   ParsedAccumulate info;
   std::string result_fact_type;
-  map<std::string, int> binding_to_token_idx;
+  ruleforge::map<std::string, int> binding_to_token_idx;
   std::vector<ParsedConstraint> join_constraints;
-  unordered_map<TokenWME const*, LeftMemoryItem> left_memory;
-  unordered_map<int64_t, std::shared_ptr<Fact>> right_memory;
 };
 
 class UnnestNode : public ReteNode
 {
 public:
-  UnnestNode() = default;
-  UnnestNode(ParsedUnnest const&, map<std::string, int> const&);
+  UnnestNode() : ReteNode(NodeKind::Unnest) {}
+  UnnestNode(ParsedUnnest const&, ruleforge::map<std::string, int> const&);
   void left_activate(StatefulSession&, Token const&) override;
 
   void right_activate(StatefulSession&,
@@ -345,19 +421,16 @@ public:
   friend class ReteSerializer;
 
 private:
+  // Immutable config
   ParsedUnnest info;
-  map<std::string, int> binding_to_token_idx;
-  unordered_map<TokenWME const*,
-                     std::pair<std::shared_ptr<TokenWME const>,
-                               std::vector<std::shared_ptr<TokenWME const>>>>
-      parent_to_children_map;
+  ruleforge::map<std::string, int> binding_to_token_idx;
 };
 
 class EvalNode : public ReteNode
 {
 public:
-  EvalNode() = default;
-  EvalNode(std::string expression, map<std::string, int> bindings);
+  EvalNode() : ReteNode(NodeKind::Eval) {}
+  EvalNode(std::string expression, ruleforge::map<std::string, int> bindings);
   void left_activate(StatefulSession& session,
                      Token const& token) override;
 
@@ -371,16 +444,16 @@ public:
   friend class ReteSerializer;
 
 private:
+  // Immutable config
   std::string expression;
-  map<std::string, int> binding_to_token_idx;
-  unordered_map<TokenWME const*, std::shared_ptr<TokenWME const>> memory;
+  ruleforge::map<std::string, int> binding_to_token_idx;
 };
 
 class TerminalNode : public ReteNode
 {
 public:
-  TerminalNode() = default;
-  TerminalNode(ParsedRule const& rule, map<std::string, int> bindings);
+  TerminalNode() : ReteNode(NodeKind::Terminal) {}
+  TerminalNode(ParsedRule const& rule, ruleforge::map<std::string, int> bindings);
   void left_activate(StatefulSession&, Token const&) override;
 
   void right_activate(StatefulSession&,
@@ -393,16 +466,16 @@ public:
   friend class ReteSerializer;
 
 private:
+  // Immutable config
   std::string rule_name;
-  map<std::string, int> binding_to_token_idx;
-  unordered_set<TokenWME const*> memory_;
+  ruleforge::map<std::string, int> binding_to_token_idx;
 };
 
 class QueryTerminalNode : public ReteNode
 {
 public:
-  QueryTerminalNode() = default;
-  explicit QueryTerminalNode(map<std::string, int> bindings);
+  QueryTerminalNode() : ReteNode(NodeKind::QueryTerminal) {}
+  explicit QueryTerminalNode(ruleforge::map<std::string, int> bindings);
   void left_activate(StatefulSession&, Token const&) override;
 
   void right_activate(StatefulSession&,
@@ -411,15 +484,11 @@ public:
   {
   }
 
-  map<TokenWME const*, Token> const& get_results()
-  {
-    return results;
-  }
+  ruleforge::map<TokenWME const*, Token> const& get_results(StatefulSession& session);
+  void clear_results(StatefulSession& session);
+  void set_bindings(ruleforge::map<std::string, int> const& bindings);
 
-  void clear_results();
-  void set_bindings(map<std::string, int> const& bindings);
-
-  map<std::string, int> const& get_bindings() const
+  ruleforge::map<std::string, int> const& get_bindings() const
   {
     return binding_to_token_idx;
   }
@@ -428,14 +497,14 @@ public:
   friend class ReteSerializer;
 
 private:
-  map<TokenWME const*, Token> results;
-  map<std::string, int> binding_to_token_idx;
+  // Immutable config
+  ruleforge::map<std::string, int> binding_to_token_idx;
 };
 
 class QueryInputNode : public ReteNode
 {
 public:
-  QueryInputNode() = default;
+  QueryInputNode() : ReteNode(NodeKind::QueryInput) {}
   explicit QueryInputNode(std::shared_ptr<QueryTerminalNode> terminal_node);
 
   void left_activate(StatefulSession&, Token const&) override {}
@@ -457,5 +526,3 @@ private:
 };
 
 #endif  // RETE_NODE_HPP
-
-

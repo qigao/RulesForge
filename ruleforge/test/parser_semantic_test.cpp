@@ -1,146 +1,128 @@
-#include "catch2/catch_all.hpp"
+#include "tinytest.h"
 #include "rfl_parser.hpp"
 #include "knowledge_base.hpp"
 #include "stateful_session.hpp"
 
-// A dedicated test fixture for semantic analysis tests.
-struct SemanticTestFixture {
-    /**
-     * @brief A helper that builds a KnowledgeBase from RFL and asserts that it fails
-     *        with a specific semantic error.
-     *
-     * This function encapsulates the entire test pattern for semantic validation,
-     * making individual test cases clean and declarative.
-     *
-     * @param drl The RFL string containing the expected error.
-     * @param expected_message_part A substring that must appear in the error message.
-     */
-    void expect_error(std::string const& drl, std::string const& expected_message_part) {
+struct SemanticTestHelper {
+    static void expect_error(std::string const& drl, std::string const& expected_message_part) {
         ParsingResult result;
-        // Use a consistent dummy filename for predictable error messages.
         auto kb = build_knowledge_base(drl, result, "test.drl");
 
-        // The build MUST fail for a semantic error.
-        INFO("RFL being tested:\n" << drl);
-        REQUIRE(kb == nullptr);
-        REQUIRE_FALSE(result.success);
-
-        // We expect exactly one semantic error for these focused tests.
-        REQUIRE(result.errors.size() == 1);
-
-        // Provide the actual error message for easy debugging if the check fails.
-        INFO("Actual error message: " << result.errors[0].message);
-        REQUIRE(result.errors[0].message.find(expected_message_part) != std::string::npos);
+        if (kb != nullptr) { throw std::runtime_error("Expected parsing to fail, but it succeeded"); }
+        if (result.success) { throw std::runtime_error("Expected result.success to be false"); }
+        if (result.errors.size() != 1) {
+            throw std::runtime_error("Expected exactly 1 error, got " + std::to_string(result.errors.size()));
+        }
+        if (result.errors[0].message.find(expected_message_part) == std::string::npos) {
+            throw std::runtime_error("Expected error containing '" + expected_message_part + "', got: " + result.errors[0].message);
+        }
     }
 };
 
-TEST_CASE_METHOD(SemanticTestFixture, "Semantic Analysis: Binding and Scope Errors", "[semantic][binding]") {
+suite("Semantic Analysis") {
+    group("Binding and Scope Errors") {
+        it("detects unbound variable in a constraint") {
+            std::string drl = R"(
+                declare Person end
+                rule "x" when $p1: Person(this == $p2) then end
+            )";
+            SemanticTestHelper::expect_error(drl, "constraint uses undeclared binding '$p2'");
+        }
 
-    SECTION("Using an unbound variable in a constraint") {
-        std::string drl = R"(
-            declare Person end
-            rule "x" when $p1: Person(this == $p2) then end
-        )";
-        expect_error(drl, "constraint uses undeclared binding '$p2'");
+        it("detects unbound variable in the RHS") {
+            std::string drl = R"(
+                declare Person end
+                rule "x" when $p: Person() then rfl.retract($p2); end
+            )";
+            SemanticTestHelper::expect_error(drl, "RHS uses undeclared variable '$p2'");
+        }
+
+        it("detects variable from 'not' clause used in RHS") {
+            std::string drl = R"(
+                declare Person end
+                rule "x" when not($p: Person()) then rfl.retract($p); end
+            )";
+            SemanticTestHelper::expect_error(drl, "RHS uses undeclared variable '$p'");
+        }
+
+        it("detects duplicate binding name") {
+            std::string drl = R"(
+                declare Person end
+                rule "x" when $p: Person() $p: Person() then end
+            )";
+            SemanticTestHelper::expect_error(drl, "duplicate binding '$p' is declared");
+        }
+
+        it("detects duplicate inline binding name") {
+            std::string drl = R"(
+                declare Person name:String end
+                rule "x" when Person($n: name, $n: name) then end
+            )";
+            SemanticTestHelper::expect_error(drl, "duplicate inline binding '$n' is declared");
+        }
+
+        it("detects unbound variable in 'from accumulate' source") {
+            std::string drl = R"(
+                declare Purchase value: double end
+                declare Result result: double end
+                rule "x"
+                when
+                    $r: Result() from accumulate($p: Purchase(value > $max_val), sum($p.value))
+                then end
+            )";
+            SemanticTestHelper::expect_error(drl, "constraint uses undeclared binding '$max_val'");
+        }
+
+        it("detects unbound variable in 'from accumulate' function") {
+            std::string drl = R"(
+                declare Purchase value: double end
+                declare Result result: double end
+                rule "x"
+                when
+                    $r: Result() from accumulate($p: Purchase(), sum($p2.value))
+                then end
+            )";
+            SemanticTestHelper::expect_error(drl, "accumulate uses undeclared binding '$p2'");
+        }
     }
 
-    SECTION("Using an unbound variable in the RHS") {
-        std::string drl = R"(
-            declare Person end
-            rule "x" when $p: Person() then rfl.retract($p2); end
-        )";
-        expect_error(drl, "RHS uses undeclared variable '$p2'");
+    group("Type and Field Errors") {
+        it("detects undeclared fact type in a pattern") {
+            std::string drl = R"(
+                rule "x" when $p: NonExistentType() then end
+            )";
+            SemanticTestHelper::expect_error(drl, "pattern uses undeclared or unresolvable fact type 'NonExistentType'");
+        }
+
+        it("detects undeclared field in a constraint") {
+            std::string drl = R"(
+                declare Person name: String end
+                rule "x" when Person(non_existent_field == "test") then end
+            )";
+            SemanticTestHelper::expect_error(drl, "constraint field 'non_existent_field' not found on fact type 'Person'");
+        }
+
+        it("detects undeclared field in 'accumulate' function") {
+            std::string drl = R"(
+                declare Purchase value: double end
+                declare Result result: double end
+                rule "x" when
+                    $r: Result() from accumulate($p: Purchase(), sum($p.non_existent_field))
+                then end
+            )";
+            SemanticTestHelper::expect_error(drl, "accumulate field 'non_existent_field' not found on type 'Purchase'");
+        }
     }
 
-    SECTION("Using a variable from a `not` clause in the RHS") {
-        std::string drl = R"(
-            declare Person end
-            rule "x" when not($p: Person()) then rfl.retract($p); end
-        )";
-        expect_error(drl, "RHS uses undeclared variable '$p'");
-    }
-
-    SECTION("Duplicate binding name") {
-        std::string drl = R"(
-            declare Person end
-            rule "x" when $p: Person() $p: Person() then end
-        )";
-        expect_error(drl, "duplicate binding '$p' is declared");
-    }
-
-    SECTION("Duplicate inline binding name") {
-        std::string drl = R"(
-            declare Person name:String end
-            rule "x" when Person($n: name, $n: name) then end
-        )";
-        expect_error(drl, "duplicate inline binding '$n' is declared");
-    }
-
-    SECTION("Unbound variable in `from accumulate` source") {
-        std::string drl = R"(
-            declare Purchase value: double end
-            declare Result result: double end
-            rule "x"
-            when
-                $r: Result() from accumulate($p: Purchase(value > $max_val), sum($p.value))
-            then end
-        )";
-        expect_error(drl, "accumulate uses undeclared binding '$p'");
-    }
-
-    SECTION("Unbound variable in `from accumulate` function") {
-        std::string drl = R"(
-            declare Purchase value: double end
-            declare Result result: double end
-            rule "x"
-            when
-                $r: Result() from accumulate($p: Purchase(), sum($p2.value))
-            then end
-        )";
-        expect_error(drl, "accumulate uses undeclared binding '$p2'");
+    group("Rule Structure Errors") {
+        it("detects rule extending non-existent parent") {
+            std::string drl = R"(
+                rule "Child Rule" extends "NonExistentParent"
+                when
+                then
+                end
+            )";
+            SemanticTestHelper::expect_error(drl, "Rule 'Child Rule' extends non-existent rule 'NonExistentParent'");
+        }
     }
 }
-
-TEST_CASE_METHOD(SemanticTestFixture, "Semantic Analysis: Type and Field Errors", "[semantic][type]") {
-
-    SECTION("Using an undeclared fact type in a pattern") {
-        std::string drl = R"(
-            rule "x" when $p: NonExistentType() then end
-        )";
-        expect_error(drl, "pattern uses undeclared or unresolvable fact type 'NonExistentType'");
-    }
-
-    SECTION("Using an undeclared field in a constraint") {
-        std::string drl = R"(
-            declare Person name: String end
-            rule "x" when Person(non_existent_field == "test") then end
-        )";
-        expect_error(drl, "constraint field 'non_existent_field' not found on fact type 'Person'");
-    }
-
-    SECTION("Using an undeclared field in an `accumulate` function") {
-        std::string drl = R"(
-            declare Purchase value: double end
-            declare Result result: double end
-            rule "x" when
-                $r: Result() from accumulate($p: Purchase(), sum($p.non_existent_field))
-            then end
-        )";
-        expect_error(drl, "accumulate field 'non_existent_field' not found on type 'Purchase'");
-    }
-}
-
-TEST_CASE_METHOD(SemanticTestFixture, "Semantic Analysis: Rule Structure Errors", "[semantic][rule]") {
-
-    SECTION("Rule extends a non-existent parent rule") {
-        std::string drl = R"(
-            rule "Child Rule" extends "NonExistentParent"
-            when
-            then
-            end
-        )";
-        expect_error(drl, "Rule 'Child Rule' extends non-existent rule 'NonExistentParent'");
-    }
-}
-
-
