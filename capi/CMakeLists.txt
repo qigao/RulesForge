@@ -33,11 +33,11 @@ target_include_directories(
 )
 # PRIVATE: Internal implementation headers - not exposed to consumers
 target_include_directories(
-    ${CAPI_TARGET_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/ruleforge/include
-                                ${CMAKE_SOURCE_DIR}/shared/hashmap/include
+    ${CAPI_TARGET_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/rulesforge/include
 )
 
-target_link_libraries(${CAPI_TARGET_NAME} PRIVATE RuleForge)
+target_link_libraries(${CAPI_TARGET_NAME} PRIVATE RulesForge)
+set_target_properties(${CAPI_TARGET_NAME} PROPERTIES FOLDER capi/)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     # Link against pthread for WASM if threading is used Emscripten provides its
@@ -66,11 +66,10 @@ set_target_properties(
                LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
                ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
-
 # Install rules (optional, but good practice for a library)
 install(
     TARGETS ${CAPI_TARGET_NAME}
-    EXPORT RuleForgeTargets
+    EXPORT RulesForgeTargets
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
@@ -88,7 +87,7 @@ include(CMakePackageConfigHelpers)
 
 # Generate version file
 write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/RuleForgeConfigVersion.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/RulesForgeConfigVersion.cmake"
     VERSION
         ${RULEFORGE_VERSION_MAJOR}.${RULEFORGE_VERSION_MINOR}.${RULEFORGE_VERSION_PATCH}
     COMPATIBILITY SameMajorVersion
@@ -96,20 +95,20 @@ write_basic_package_version_file(
 
 # Export targets
 install(
-    EXPORT RuleForgeTargets
-    FILE RuleForgeTargets.cmake
-    NAMESPACE RuleForge::
-    DESTINATION lib/cmake/RuleForge
+    EXPORT RulesForgeTargets
+    FILE RulesForgeTargets.cmake
+    NAMESPACE RulesForge::
+    DESTINATION lib/cmake/RulesForge
 )
 
 # Configure and install the config file
 configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RuleForgeConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/RuleForgeConfig.cmake"
-    INSTALL_DESTINATION lib/cmake/RuleForge
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RulesForgeConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/RulesForgeConfig.cmake"
+    INSTALL_DESTINATION lib/cmake/RulesForge
 )
 
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/RuleForgeConfig.cmake"
-              "${CMAKE_CURRENT_BINARY_DIR}/RuleForgeConfigVersion.cmake"
-        DESTINATION lib/cmake/RuleForge
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/RulesForgeConfig.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/RulesForgeConfigVersion.cmake"
+        DESTINATION lib/cmake/RulesForge
 )

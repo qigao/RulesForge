@@ -1,664 +1,465 @@
-# Rules Forge Language-Inspired Rule Language (RFL) Grammar
+# RulesForge DSL (RFL) - Implementation-Aligned Guide
 
-## Introduction
+This document describes the DSL supported by the current parser and runtime.
+If this doc conflicts with code, code wins.
 
-This document specifies the grammar for a custom, Rules Forge Language-inspired rule language designed for a high-performance Rete-based rule engine. The language allows users to define data structures, business rules, and queries in a declarative, SQL-like syntax.
+Primary references:
+- `rulesforge/src/parser/rfl_grammar_lemon.y`
+- `rulesforge/src/parser/rhs_parser.cpp`
+- `rulesforge/src/parser/semantic_analyzer.cpp`
+- `rulesforge/src/parser/expression_evaluator.cpp`
+- parser tests under `rulesforge/test/parser/`
 
-The primary goal is to provide a powerful yet readable way to express complex conditional logic and data aggregations. This implementation is a functional subset of standard Java RuleForge, focusing on the most common and powerful features.
+## 1. File Structure
 
-The language is composed of several top-level statements:
+A file is a sequence of top-level statements:
 
-- `package` and `import`: For namespacing and type resolution.
-- `global`: To define global variables accessible within rule consequences.
-- `declare`: To define the schema for new fact types.
-- `query`: To define reusable, parameterized lookups into the engine's working memory.
-- `rule`: The core construct for defining conditional logic.
+- `package`
+- `import`
+- `global`
+- `declare`
+- `function` (parsed and stored)
+- `query`
+- `rule`
 
-The consequence of a rule (the `then` block) is written in **JavaScript** (via QuickJS), providing a flexible and powerful scripting environment. A custom `rfl` API is injected into the JavaScript context to allow the rule to interact with the engine (e.g., by inserting or retracting facts).
+Comments supported:
+- `// ...`
+- `-- ...`
+- `# ...`
+- `/* ... */`
 
-## Language Constructs
-
-### File Structure
-
-A RFL file is a sequence of zero or more top-level statements. The typical order is `package`, `import`s, `global`s, `declare`s, `query`s, and finally `rule`s.
+Example:
 
 ```rfl
 package com.example.rules
-
 import com.example.model.Customer
+global List results
 
-global java.util.List results
-
-declare Offer
-    message: String
+declare Customer
+    id: int
+    name: String
 end
 
 rule "Example"
 when
-    // ... conditions
+    $c: Customer()
 then
-    // ... actions
+    insert AuditLog { msg = "hit" }
 end
 ```
 
-### Import Statement (`import`)
+## 1.1 Globals
 
-The `import` statement allows you to include declarations, rules, and queries from other RFL files. This enables modular rule organization and code reuse.
-
-**Syntax:**
-- `import <package.path>` - Import a single file
-- `import <package.path>.*` - Import all `.rfl` files in a directory (wildcard)
-
-The import path uses dot notation, which is converted to a file path relative to the configured base directories.
-
-**Examples:**
+`global` declarations are parsed and now initialized in each session:
 
 ```rfl
-// Import a single file: resolves to "myapp/common.rfl"
-import myapp.common
-
-// Import all files in a directory: resolves to "myapp/types/*.rfl"
-import myapp.types.*
+global List results
+global Map metadata
+global Set tags
 ```
 
-**File Organization Example:**
+Runtime behavior:
+- globals are session-scoped (different sessions do not share them)
+- default values by type name:
+  - `*List` -> empty `TypedList`
+  - `*Set` -> empty `ValueSet`
+  - `*Map` -> empty `ValueMap`
+  - other types -> `nil`
+- host code can override values with `StatefulSession::set_global(name, value)`
+- RHS variable resolution checks local bindings (`$x`) first, then globals
 
-```
-src/
-├── common/
-│   └── types.rfl          // Shared type declarations
-├── validation/
-│   └── rules.rfl          // Validation rules (imports common.types)
-└── pricing/
-    └── rules.rfl          // Pricing rules (imports common.types)
-```
+RHS examples:
+- whole value: `items = $results`
+- container size (numeric expr): `count = $results.size`
+- map key access via dot: `v = $metadata.someKey`
+
+## 2. Declarations
+
+`declare` defines a fact schema:
 
 ```rfl
-// common/types.rfl
-package myapp.common
-
 declare Customer
     id: int
     name: String
-    status: String
+    score: double
 end
+```
+
+Built-in `Number` type is available for accumulate results (e.g., `count/sum/avg` output).
+
+Container declaration is supported:
+
+```rfl
+declare Basket
+    tags: List<String>
+    scores: Set<int>
+    attrs: Map<String, double>
+    owner: Customer
+end
+```
+
+## 3. Rule Definition
+
+Basic shape:
+
+```rfl
+rule "RuleName"
+    // attributes...
+when
+    // LHS patterns...
+then
+    // RHS actions...
+end
+```
+
+### 3.1 Supported Attributes
+
+- `salience <int>`
+- `extends "<ParentRuleName>"`
+- `agenda-group "<group>"`
+- `activation-group "<group>"`
+- `timer <initial_ms>`
+- `timer <initial_ms>, <repeat_ms>`
+- `no-loop`
+- `lock-on-active`
+- `enabled true|false`
+- `auto-focus true|false`
+- `duration <ms>`
+
+Notes:
+- `extends` merges parent LHS conditions into child rules.
+- `duration` and `timer` are separate attributes.
+
+## 4. LHS (`when`) Syntax
+
+The engine supports OR groups of AND patterns:
+
+```rfl
+when
+    $a: A()
+    $b: B()
+or
+    $c: C()
+```
+
+### 4.1 Pattern Types
+
+1. Standard pattern:
+
+```rfl
+$p: Person(age > 18)
+Order()
+```
+
+2. `not` pattern:
+
+```rfl
+not (Order(status == "paid"))
+not Order(status == "paid")
+```
+
+3. `exists` pattern:
+
+```rfl
+exists (Order(total > 100))
+exists Order(total > 100)
+```
+
+4. `forall` pattern:
+
+```rfl
+forall( $o: Order(), Order(status == "ok") )
+```
+
+5. `eval(...)` pattern:
+
+```rfl
+eval($a.value > 10 && $b.value < 20)
+```
+
+### 4.2 Constraints
+
+Supported constraint composition:
+- AND: `,` or `&&`
+- OR: `||`
+
+Inline field binding:
+
+```rfl
+Person($n: name, age > 18)
+```
+
+### 4.3 Field Reference
+
+Supported field forms:
+- `field`
+- `$var`
+- `$var.field`
+- nested: `a.b.c`
+- null-safe segment: `a!.b`
+- index: `items[0]`, `items[-1]`, `meta["k"]`
+
+### 4.4 Comparison Operators
+
+- `==`, `!=`, `>`, `<`, `>=`, `<=`
+- `contains`, `not contains`
+- `containsKey`, `not containsKey`
+- `matches`, `not matches`
+- `startsWith`, `endsWith`, `lengthIs`
+- `memberOf`, `not memberOf`
+- `in (...)`, `not in (...)`
+
+### 4.5 Temporal Operators
+
+Supported temporal constraints:
+
+```rfl
+timestamp after $e1.timestamp
+timestamp before $e1.timestamp
+timestamp coincides $e1.timestamp
+timestamp during $e1.timestamp
+within 60s of $e1
+```
+
+Duration units: `ms`, `s`, `m`, `h`.
+
+### 4.6 `from` Clause
+
+Supported source clauses:
+
+1. `from accumulate(...)`
+
+```rfl
+$total: Number() from accumulate(
+    $p: Purchase(),
+    sum($p.value)
+)
+```
+
+Also supports arithmetic expression in accumulate argument:
+
+```rfl
+$total: Number() from accumulate(
+    $p: LineItem(),
+    sum($p.qty * $p.price)
+)
+```
+
+2. `from collect(pattern)`
+
+```rfl
+$items: AnyType() from collect($o: Order())
+```
+
+3. `from unnest($binding.field)`
+
+```rfl
+$item: Item() from unnest($order.items)
+```
+
+4. `from jmespath(input, "expr")`
+
+```rfl
+$r: Row() from jmespath("{\"orders\":[{\"amount\":120.5}]}", "orders[*]")
+$r: Row() from jmespath(file("data/orders.json"), "orders[*]")
+```
+
+5. `from dsv/csv(input, "filter-expr")`
+
+```rfl
+$r: Row() from dsv("amount_n,sym_s\n120.5,A\n80.0,B\n", "amount > 100 and sym == \"A\"")
+$r: Row() from dsv(file("data/orders.csv"), "amount > 100 and sym == \"A\"")
+$r: Row() from csv(file("data/orders.csv"), "amount > 100")
+```
+
+6. `from entry-point "stream-name"`
+
+```rfl
+$e: Event() from entry-point "sensor-stream"
+```
+
+For accumulate source pattern, `from entry-point` is also allowed inside source pattern.
+
+Accumulate source pattern also supports the same data-source clauses:
+
+```rfl
+$sum: Number() from accumulate(
+    $p: Purchase() from jmespath(file("data/orders.json"), "orders[*]"),
+    sum($p.amount)
+)
+
+$sum2: Number() from accumulate(
+    $r: Purchase() from csv(file("data/orders.csv"), "amount > 100"),
+    sum($r.amount)
+)
+```
+
+### 4.7 Query Call Pattern (LHS)
+
+Query invocation pattern is supported using quoted query name:
+
+```rfl
+"FindAdults"($person)
+```
+
+## 5. RHS (`then`) Native Actions
+
+RHS is parsed by `RhsParser` and compiled into native actions.
+
+### 5.1 Action Types
+
+- `insert Type { ... }`
+- `insertLogical Type { ... }`
+- `update $var { ... }`
+- `retract $var`
+- `halt`
+- `setFocus("group")`
+- `invoke functionName(arg1, arg2, ...)`
+- `if / else if / else`
+- `for`
+- `while`
+- `switch / case / default`
+- `break`
+- `continue`
+
+Example:
+
+```rfl
+then
+    if $o.total > 1000 {
+        update $o { tier = "VIP" }
+    } else {
+        update $o { tier = "STD" }
+    }
+    invoke emitAudit($o.id, "tier-updated")
+end
+```
+
+### 5.2 `for` Forms
+
+1. Iterate collection field:
+
+```rfl
+for $x in $order.items { ... }
+```
+
+2. Iterate variable/container directly:
+
+```rfl
+for $x in $results { ... }
+```
+
+3. Iterate explicit variable list:
+
+```rfl
+for $x in ($a, $b, $c) { ... }
+```
+
+### 5.3 Assignment Value Types
+
+Supported assignment values:
+- string literal
+- boolean literal (`true` / `false`)
+- variable reference (`$v`, `$v.field`)
+- numeric/expression value
+- native function call value (registered from host/plugin), e.g. `metric($o.total)`
+
+Expression syntax in RHS supports:
+- arithmetic: `+ - * / % ^`
+- comparison: `== != > < >= <=`
+- logic: `&& || !` and keywords `and or not xor`
+- ternary: `cond ? a : b`
+- function call style: `fn(arg1, arg2)`
+- constants: `pi`, `e`, `inf`, `epsilon`
+
+Built-in expression functions (from `ExpressionEvaluator`):
+- basic/math: `abs ceil floor round trunc sgn frac sqrt pow root exp log log2 log10`
+- trig/hyperbolic: `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh`
+- comparison/range: `min max clamp inrange`
+- aggregate: `avg sum mul`
+- special: `erf erfc ncdf hypot mod fmod expm1 log1p logn`
+- conditional: `if(cond, a, b)`
+
+### 5.4 Native Function and DLL Function Table Support
+
+RHS function calls can be backed by host-registered native functions or plugin DLL/so function tables.
+
+Rule side usage is the same:
+
+```rfl
+then
+    invoke pluginLog($s.id, $s.temperature)
+    update $s { score = pluginMetric($s.temperature, 2) }
+end
+```
+
+Host integration paths (C API):
+- direct registration: `ruleforge_kb_register_native_function(...)`
+- DLL/so table loading: `ruleforge_kb_load_native_function_table(...)`
+
+Runtime resolution:
+1. parse RHS `invoke` / assignment call expression
+2. resolve function name from KnowledgeBase native registry
+3. evaluate arguments
+4. call native callback
+
+See full C API examples:
+- `capi/examples/CAPI_NATIVE_DLL_EN.md`
+- `capi/examples/NATIVE_FUNCTIONS.md`
+
+## 6. Queries
+
+Query declaration supports identifier or string name:
+
+```rfl
+query findPerson(NameHolder $name)
+    $p: Person(name == $name.value)
+end
+```
+
+```rfl
+query "findPerson"(NameHolder $name)
+    $p: Person(name == $name.value)
+end
+```
+
+Query params are typed and bound as variables in query body.
+
+## 7. Important Runtime Notes
+
+1. `update` triggers immediate rete propagation/re-evaluation.
+2. `while` has a safety cap (`max_iterations = 1000` in parser output).
+3. Semantic analyzer enforces:
+   - undeclared bindings are errors
+   - undeclared types/fields are errors
+   - duplicate bindings are errors
+   - `extends` target must exist
+4. `function` declarations are parsed into parser state; keep expectations aligned with actual runtime usage in your version.
+
+## 8. Minimal End-to-End Example
+
+```rfl
+package com.shop
 
 declare Order
-    customerId: int
-    total: double
-end
-```
-
-```rfl
-// validation/rules.rfl
-package myapp.validation
-
-import myapp.common.types
-
-rule "Validate Customer"
-when
-    $c : Customer(name == "")
-then
-    console.log("Invalid customer: empty name");
-end
-```
-
-**C++ Integration:**
-
-When building a KnowledgeBase, specify base directories for import resolution:
-
-```cpp
-std::vector<std::string> base_dirs = {"./src", "./lib"};
-auto kb = build_knowledge_base("validation/rules.rfl", base_dirs, result);
-```
-
-**Key Points:**
-- Imported files are parsed and merged into a single KnowledgeBase
-- Circular imports are detected and reported as errors
-- Duplicate imports of the same file are handled (loaded only once)
-- All declarations, rules, and queries from imported files are available
-
-### Type Declaration (`declare`)
-
-The `declare` statement defines a new fact type and its fields.
-
-**Syntax:** `declare <TypeName> [ <field_name> : <field_type> ]... end`
-
-| Type      | Description                               |
-|-----------|-------------------------------------------|
-| `String`  | A string of text.                        |
-| `int`     | A 64-bit signed integer.                 |
-| `double`  | A 64-bit floating-point number.          |
-| `boolean` | A true/false value.                      |
-| Other     | Can be a previously declared custom type.|
-
-**Example:**
-
-```rfl
-declare Customer
     id: int
-    name: String
-    verified: boolean
+    total: double
+    tier: String
 end
-```
 
-### Rule Definition (`rule`)
-
-The `rule` is the core of the language. It consists of a name, optional attributes, a `when` block (conditions), and a `then` block (actions).
-
-**Syntax:** `rule "<RuleName>" [attributes...] when [conditions...] then [actions...] end`
-
-#### Attributes
-
-Attributes control the rule's execution behavior.
-
-| Attribute | Description | Example |
-|-----------|-------------|---------|
-| `salience <int>` | Sets the rule's priority. Higher salience rules fire first. Default is 0. | `salience 100` |
-| `agenda-group "<name>"` | Assigns the rule to a specific agenda group. The rule will only fire when its group has focus. | `agenda-group "validation"` |
-| `activation-group "<name>"` | Only one rule in an activation-group can fire. When one fires, all other activations in the group are cancelled. | `activation-group "exclusive"` |
-| `no-loop` | Prevents the rule from re-activating itself after modifying facts that triggered it. | `no-loop` |
-| `lock-on-active` | Prevents re-activation while the rule's agenda-group is active. Stronger than `no-loop`. | `lock-on-active` |
-| `enabled <bool>` | Enables or disables the rule at parse time. Default is `true`. | `enabled false` |
-| `auto-focus <bool>` | When `true`, automatically sets focus to the rule's agenda-group when the rule is activated. | `auto-focus true` |
-| `duration <ms>` | Delays the rule's consequence execution by the specified milliseconds after activation. | `duration 1000` |
-| `extends "<ParentRule>"` | The rule inherits all conditions from the parent rule. | `extends "BaseRule"` |
-
-**Example:**
-
-```rfl
-rule "High Priority Exclusive Rule"
-    salience 100
-    activation-group "exclusive-group"
-    no-loop
-    auto-focus true
+rule "Tiering"
+salience 10
 when
-    $c: Customer(status == "VIP")
+    $o: Order(total > 0)
 then
-    // actions
-end
-```
-
-#### LHS (The `when` Block)
-
-The Left-Hand Side (LHS) contains a set of patterns that must be satisfied for the rule to activate.
-
-##### Basic Patterns
-
-- **Patterns:** A pattern matches a fact of a specific type. It can optionally bind the matched fact to a variable.
-  - `$c: Customer()` - Matches a `Customer` fact and binds it to the variable `$c`.
-  - `Person()` - Matches any `Person` fact without binding it.
-
-- **Constraints:** Constraints are placed inside parentheses `()` after the fact type to filter matches.
-  - `age > 18`
-  - `status == "Gold"`
-  - `orderId == $c.id` (Joining to another bound fact)
-
-- **Inline Bindings:** A constraint can also bind a field's value to a variable for use later.
-  - `$c: Customer( $id: id, age > 18 )` - Binds the `id` field of the matched customer to `$id`.
-
-##### Field Access
-
-- **Nested Fields:** Access nested properties using dot notation.
-  - `$p: Person(address.city == "NYC")`
-
-- **Null-Safe Dereference (`!.`):** Safely navigate through potentially null fields. Returns `nil` if any segment is null.
-  - `$p: Person(address!.city == "NYC")` - Won't error if `address` is null.
-
-- **Index Access (`[]`):** Access list elements by index or map values by key.
-  - `$o: Order(items[0].name == "Widget")` - First item in list
-  - `$o: Order(items[-1].price > 100)` - Last item (negative index)
-  - `$o: Order(metadata["priority"] == "high")` - Map access by string key
-
-##### Comparison Operators
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `==`, `!=` | Equality / Inequality | `status == "active"` |
-| `<`, `>`, `<=`, `>=` | Numeric/String comparison | `age >= 18` |
-| `in`, `not in` | Value in list | `status in ("Gold", "Platinum")` |
-| `contains` | String contains substring, or collection contains value | `name contains "John"` |
-| `not contains` | Negation of contains | `tags not contains "spam"` |
-| `matches` | Regex pattern matching | `email matches ".*@company\\.com"` |
-| `not matches` | Negation of matches | `name not matches "^Test.*"` |
-| `memberOf` | Value is member of collection variable | `code memberOf $validCodes` |
-| `not memberOf` | Negation of memberOf | `code not memberOf $invalidCodes` |
-| `startsWith` | String starts with prefix | `name startsWith "Dr."` |
-| `endsWith` | String ends with suffix | `email endsWith ".com"` |
-| `lengthIs` | String length equals | `code lengthIs 5` |
-
-##### Arithmetic Expressions
-
-Arithmetic expressions can be used on the right-hand side of comparisons for dynamic calculations. Powered by the exprtk library, expressions support a rich set of mathematical operations and functions.
-
-**Basic Operators:**
-```rfl
-// Basic arithmetic: +, -, *, /, ^ (power)
-Transaction(amount > ($basePrice * 1.2))
-Order(total >= ($subtotal + $tax))
-Loan(payment < ($principal / $months))
-Investment(value > ($initial ^ 2))
-```
-
-**Mathematical Functions:**
-```rfl
-// Trigonometric functions
-Sensor(angle > sin($theta))
-Navigation(heading == cos($bearing))
-
-// Exponential and logarithmic
-Growth(rate > exp($factor))
-Scale(level == log($value))
-
-// Power and roots
-Distance(length == sqrt($x^2 + $y^2))  // Pythagorean theorem
-Volume(size > pow($radius, 3))
-
-// Rounding functions
-Price(cents == floor($amount * 100))
-Score(rounded == ceil($raw))
-
-// Absolute value and sign
-Deviation(error < abs($expected - $actual))
-
-// Min/Max
-Limit(value == min($a, $b))
-Threshold(cap == max($x, $y))
-
-// Clamping
-Normalized(score == clamp(0, $raw, 100))
-```
-
-**Available Functions:**
-| Category | Functions |
-|----------|-----------|
-| Trigonometric | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh` |
-| Exponential | `exp`, `log`, `log10`, `log2` |
-| Power/Root | `sqrt`, `pow`, `^` (power operator) |
-| Rounding | `floor`, `ceil`, `round`, `trunc` |
-| Comparison | `min`, `max`, `clamp` |
-| Other | `abs`, `sgn`, `frac`, `mod` |
-
-**Constants:**
-| Constant | Value |
-|----------|-------|
-| `pi` | 3.14159265358979... |
-| `inf` | Infinity |
-| `epsilon` | Machine epsilon |
-
-**Complex Expressions:**
-```rfl
-// Compound interest calculation
-Account(balance > $principal * (1 + $rate)^$years)
-
-// Distance formula
-Location(distance < sqrt(($x - $targetX)^2 + ($y - $targetY)^2))
-
-// Normalized score with bounds
-Result(score == clamp(0, ($raw - $min) / ($max - $min) * 100, 100))
-
-// Time decay
-Signal(strength > $initial * exp(-$decay * $time))
-```
-
-**In Accumulate Expressions:**
-```rfl
-// Sum of computed values
-$total: Number() from accumulate(
-    $item: LineItem($qty: quantity, $price: unitPrice),
-    sum($qty * $price)
-)
-
-// Complex aggregation
-$risk: Number() from accumulate(
-    $t: Transaction($amt: amount, $factor: riskFactor),
-    sum($amt * sqrt($factor))
-)
-```
-
-##### Temporal Operators
-
-For Complex Event Processing (CEP) with timestamp fields:
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `after` | Event A occurs after event B | `timestamp after $e1.timestamp` |
-| `before` | Event A occurs before event B | `timestamp before $e1.timestamp` |
-| `within` | Events occur within a time window | `within 60s of $e1` |
-| `coincides` | Events occur at the same time | `timestamp coincides $e1.timestamp` |
-| `during` | Event A occurs during event B | `timestamp during $e1.timestamp` |
-
-**Duration literals:** `300ms`, `5s`, `10m`, `1h`
-
-##### Logical Operators
-
-- **AND:** Constraints within the same pattern (separated by `,` or `&&`) or patterns on separate lines are implicitly ANDed together.
-- **OR:** The `or` keyword separates mutually exclusive blocks of patterns. The rule will fire if *any* of the `or` blocks are satisfied.
-
-##### Conditional Elements
-
-- `not <pattern>` or `not ( <pattern> )`: Succeeds only if no fact matches the nested pattern.
-- `exists <pattern>` or `exists ( <pattern> )`: Succeeds if at least one fact matches the nested pattern.
-- `forall ( <base_pattern>, <restriction_pattern> )`: Succeeds if for all facts that match `base_pattern`, they *also* match `restriction_pattern`.
-- `eval( <javascript_expression> )`: Executes a boolean JS expression in the context of the current match.
-
-**Examples:**
-
-```rfl
-// Both syntaxes are supported for not/exists:
-not Order(customerId == $c.id)                    // Without parentheses
-not (Order(customerId == $c.id))                  // With parentheses
-
-exists PremiumMembership(customerId == $c.id)     // Without parentheses
-exists (PremiumMembership(customerId == $c.id))   // With parentheses
-```
-
-##### `from` Clause
-
-Modifies the data source for a pattern.
-
-- **`from accumulate`**: Aggregates data from facts matching the source pattern.
-  - **Functions:** `sum`, `count`, `average`, `min`, `max`, `collectList`, `collectSet`
-  - **Result Type:** Use `Number` as the result type. Access the value with `.intValue` or `.doubleValue`.
-  - **Shorthand:** Use `count(1)` to count all matching facts.
-  - **CEP Support:** The source pattern can include `from entry-point` for streaming data.
-  - **Examples:**
-    ```rfl
-    // Basic sum
-    $total: Number() from accumulate( $p: Purchase(), sum($p.value) )
-
-    // Count with shorthand
-    $count: Number(intValue > 5) from accumulate( $t: Transaction(), count(1) )
-
-    // With entry-point for CEP
-    $count: Number() from accumulate(
-        Transaction(accountId == $acct) from entry-point "stream",
-        count(1)
-    )
-    ```
-
-- **`from unnest`**: Creates a match for each item in a fact's collection field.
-  - **Example:** `$item: Item() from unnest( $order.items )`
-
-- **`from entry-point`**: Matches facts from a named entry point stream (for CEP).
-  - **Example:** `$e: Event() from entry-point "sensor-stream"`
-
-#### RHS (The `then` Block)
-
-The Right-Hand Side (RHS) contains the actions to be executed when the rule fires. The RHS is **JavaScript code** (via QuickJS).
-
-##### Bound Variables
-
-Variables bound in the `when` block (e.g., `$c`) are available in JavaScript without the `$` prefix (e.g., `c`). You can access their fields like `c.name`.
-
-##### Local JavaScript Variables
-
-You can declare local variables using standard JavaScript syntax (`var`, `let`, or `const`):
-
-```javascript
-var baseRate = 5.5;
-let monthlyIncome = app.annualIncome / 12;
-const MAX_DTI = 0.43;
-
-if (credit.category == "Excellent") {
-    baseRate = baseRate - 0.5;
-}
-```
-
-These local variables are scoped to the rule's RHS and can be used for intermediate calculations.
-
-##### `rfl` API
-
-A special `rfl` object is available to interact with the engine:
-
-| Method | Description |
-|--------|-------------|
-| `rfl.insert({type: "...", ...})` | Inserts a new fact into working memory. |
-| `rfl.insertLogical({type: "...", ...})` | Inserts a fact that is logically dependent on the activating facts. Auto-retracted when conditions become false. |
-| `rfl.update(fact, {field: value, ...})` | Updates an existing fact's fields and propagates changes through the RETE network. |
-| `rfl.retract(fact)` | Retracts a fact from working memory. |
-| `rfl.halt()` | Immediately stops rule execution. No more rules will fire in the current `fireAllRules()` cycle. |
-| `rfl.setFocus("group")` | Sets the agenda focus to the specified agenda-group. |
-| `rfl.getRule()` | Returns an object with information about the current rule (e.g., `{name: "RuleName"}`). |
-
-##### `modify` Block Syntax
-
-A structured way to update facts using RuleForge-style setter calls:
-
-```rfl
-modify($person) {
-    setAge(30),
-    setStatus("updated")
-}
-```
-
-This is automatically transformed to:
-```javascript
-rfl.update(person, {age: 30, status: "updated"})
-```
-
-##### Examples
-
-```javascript
-// Insert a new fact
-rfl.insert({type: "Offer", message: "Welcome, " + c.name});
-
-// Logical insertion - auto-retracted when conditions no longer match
-rfl.insertLogical({type: "Alert", reason: "High value customer"});
-
-// Update an existing fact
-rfl.update(c, {status: "Gold", points: c.points + 100});
-
-// Retract an existing fact
-rfl.retract(c);
-
-// Stop rule execution
-if (criticalError) {
-    rfl.halt();
-}
-
-// Change agenda focus
-rfl.setFocus("cleanup");
-
-// Get current rule info
-let ruleName = rfl.getRule().name;
-```
-
-### Queries
-
-Queries are named, reusable sets of patterns that can be called from C++. They can be parameterized.
-
-**Syntax:** `query "<QueryName>" [ ( <param_type> <$param_name> ) ] [patterns...] end`
-
-**Example:**
-
-```rfl
-// A query with one parameter
-query findCustomer(NameHolder $name)
-    $c: Customer(name == $name.value)
+    if $o.total >= 1000 {
+        update $o { tier = "VIP" }
+    } else {
+        update $o { tier = "STD" }
+    }
 end
 
-// A query with no parameters
-query findVips
-    $v: VipCustomer()
+query "VipOrders"
+    $o: Order(tier == "VIP")
 end
 ```
-
----
-
-## Formal ABNF-like Grammar
-
-This section provides a formal definition of the language syntax using a simplified Backus-Naur Form.
-
-```abnf
-; ---------------------------------------------
-; 1. Core Primitives
-; ---------------------------------------------
-rulelist      = *statement
-statement     = package-stmt / import-stmt / global-stmt / declaration-stmt / query-stmt / rule-stmt
-OWS           = *(WSP / comment) ; Optional Whitespace & Comments
-S             = 1*(WSP / comment) ; Required Whitespace & Comments
-WSP           = " " / HTAB / EOL
-comment       = ("//" / "#" / "--") *any-char EOL / "/*" *any-char "*/"
-
-; ---------------------------------------------
-; 2. Identifiers and Literals
-; ---------------------------------------------
-identifier    = ALPHA *(ALPHA / DIGIT / "_")
-qualified-name = identifier *("." identifier)
-binding       = "$" identifier
-integer       = [ "-"] 1*DIGIT
-double        = [ "-"] 1*DIGIT "." 1*DIGIT
-string-literal = DQUOTE *any-char-but-quote DQUOTE
-duration      = 1*DIGIT ("ms" / "s" / "m" / "h")
-
-; ---------------------------------------------
-; 3. Top-Level Statements
-; ---------------------------------------------
-package-stmt  = "package" S qualified-name [";"]
-import-stmt   = "import" S qualified-name ["." "*"] [";"]
-global-stmt   = "global" S qualified-name S identifier [";"]
-
-declaration-stmt = "declare" S identifier OWS *(field-def OWS) "end"
-field-def        = identifier OWS ":" OWS qualified-name
-
-query-stmt = "query" S (string-literal / identifier) [query-params] OWS lhs "end"
-query-params = "(" OWS [query-param * (OWS "," OWS query-param)] OWS ")"
-query-param  = qualified-name S binding
-
-rule-stmt = [annotation-list] "rule" S string-literal OWS [attributes] OWS "when" OWS lhs OWS "then" OWS rhs OWS "end"
-
-; ---------------------------------------------
-; 4. Rule Structure
-; ---------------------------------------------
-attributes = 1*(attribute OWS)
-attribute  = salience-attr / agenda-group-attr / activation-group-attr / extends-attr
-           / no-loop-attr / lock-on-active-attr / enabled-attr / auto-focus-attr / duration-attr
-
-salience-attr         = "salience" S integer
-agenda-group-attr     = "agenda-group" S string-literal
-activation-group-attr = "activation-group" S string-literal
-extends-attr          = "extends" S string-literal
-no-loop-attr          = "no-loop"
-lock-on-active-attr   = "lock-on-active"
-enabled-attr          = "enabled" S ("true" / "false")
-auto-focus-attr       = "auto-focus" S ("true" / "false")
-duration-attr         = "duration" S integer
-
-; --- LHS (when block) ---
-lhs = pattern-group *(OWS "or" OWS pattern-group)
-pattern-group = 1*(pattern OWS)
-
-pattern = [binding OWS ":" OWS] (std-pattern / not-pattern / exists-pattern / forall-pattern / eval-pattern)
-
-std-pattern = qualified-name [ "(" OWS [expression] OWS ")" ] [from-clause]
-not-pattern = "not" OWS ( "(" OWS pattern OWS ")" / std-pattern )
-exists-pattern = "exists" OWS ( "(" OWS pattern OWS ")" / std-pattern )
-forall-pattern = "forall" OWS "(" OWS pattern *(OWS "," OWS pattern) OWS ")"
-eval-pattern = "eval" OWS "(" *any-char ")" ; content is opaque JavaScript
-
-; --- LHS Constraints ---
-expression = or-expr
-or-expr    = and-expr *(OWS "||" OWS and-expr)
-and-expr   = constraint *(OWS ("," / "&&") OWS constraint)
-constraint = [binding ":"] field-access [ comp-clause / in-clause / temporal-clause ]
-
-field-access = field-part *(field-sep field-part)
-field-part   = identifier *index-access
-field-sep    = "." / "!."  ; regular or null-safe
-index-access = "[" (integer / string-literal) "]"
-
-comp-clause = comp-op OWS value
-in-clause   = ["not" S] "in" OWS value-list
-temporal-clause = temporal-op OWS value
-
-value      = literal / field-access / binding
-literal    = integer / double / string-literal / "true" / "false" / "nil"
-value-list = "(" OWS value *(OWS "," OWS value) OWS ")"
-
-comp-op    = "==" / "!=" / ">" / "<" / ">=" / "<="
-           / "contains" / "not contains"
-           / "matches" / "not matches"
-           / "memberOf" / "not memberOf"
-           / "startsWith" / "endsWith" / "lengthIs"
-
-temporal-op = "after" / "before" / "coincides" / "during" / ("within" S duration S "of")
-
-; --- LHS `from` clause ---
-from-clause = "from" S (accumulate-clause / unnest-clause / entry-point-clause)
-accumulate-clause = "accumulate" OWS "(" OWS pattern "," OWS accum-func OWS ")"
-unnest-clause = "unnest" OWS "(" OWS field-access OWS ")"
-entry-point-clause = "entry-point" S string-literal
-accum-func = identifier "(" OWS [field-access] OWS ")"
-
-; --- RHS (then block) ---
-rhs = *(modify-stmt / code-chunk)
-modify-stmt = "modify" OWS "(" OWS binding OWS ")" OWS "{" OWS *setter OWS "}"
-setter = identifier "(" *any-char ")" [OWS ("," / ";")]
-code-chunk = *any-char ; JavaScript code until 'end' or 'modify'
-```
-
----
-
-## C++ API Integration
-
-### Inserting Facts into Entry Points
-
-For CEP scenarios, facts can be inserted into named entry points:
-
-```cpp
-auto fact = std::make_shared<Fact>();
-fact->type = "SensorEvent";
-fact->fields["value"] = 42.0;
-fact->fields["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
-
-session->insert_into("sensor-stream", fact);
-```
-
-### Custom Accumulate Functions
-
-Register custom aggregation functions:
-
-```cpp
-class MedianAccumulator : public IAccumulator {
-    std::vector<double> values_;
-public:
-    void accumulate(ConstraintValue const& value) override {
-        if (auto* d = std::get_if<double>(&value)) {
-            values_.push_back(*d);
-        }
-    }
-    ConstraintValue get_result() const override {
-        if (values_.empty()) return 0.0;
-        auto sorted = values_;
-        std::sort(sorted.begin(), sorted.end());
-        return sorted[sorted.size() / 2];
-    }
-    std::unique_ptr<IAccumulator> clone() const override {
-        return std::make_unique<MedianAccumulator>();
-    }
-};
-
-kb->register_accumulator("median", std::make_unique<MedianAccumulator>());
-```
-
-Then use in RFL:
-```rfl
-$m: Median() from accumulate( $s: Sample(), median($s.value) )
-```
-
----
-
-## Version History
-
-- **v1.0**: Initial release with basic patterns, constraints, and accumulate
-- **v1.1**: Added `no-loop`, `activation-group`, `lock-on-active` attributes
-- **v1.2**: Added `contains`, `matches`, `memberOf` operators
-- **v1.3**: Added null-safe dereference (`!.`), index access (`[]`)
-- **v1.4**: Added entry points, custom accumulators, `rfl.halt()`, `rfl.setFocus()`, `rfl.getRule()`
-- **v1.5**: Added `enabled`, `auto-focus`, `duration` attributes; `coincides`, `during` temporal operators; `modify` block syntax
-- **v1.6**: Added support for `not Pattern(...)` and `exists Pattern(...)` without parentheses; full JavaScript local variable support (`var`, `let`, `const`) in RHS
-- **v1.7**: Added support for `from entry-point` inside accumulate patterns for CEP use cases
-- **v1.8**: Added built-in `Number` type for accumulate results; `count(1)` shorthand syntax; arithmetic expressions in constraints (`$ts - 60000`); improved JS comment handling in RHS
-- **v1.9**: Added multi-file import support with `import package.path` and wildcard `import package.*`; circular dependency detection; base directory configuration for import resolution
-- **v2.0**: Enhanced arithmetic expressions with exprtk library - full math function support (sin, cos, sqrt, exp, log, pow, abs, min, max, floor, ceil, clamp, etc.), constants (pi, inf), and complex expressions; expressions compiled once at load time for optimal runtime performance

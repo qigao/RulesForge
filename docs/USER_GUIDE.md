@@ -6,11 +6,10 @@
 
 1. [**Core Concepts**](#1-core-concepts)
 2. [**RFL Language Reference**](#2-rfl-language-reference)
-3. [**JavaScript Integration**](#3-javascript-integration)
+3. [**RHS Syntax**](#3-rhs-syntax)
 4. [**Advanced Patterns**](#4-advanced-patterns)
 5. [**Performance Guidelines**](#5-performance-guidelines)
 6. [**Troubleshooting**](#6-troubleshooting)
-7. [**Deployment Guide**](#7-deployment-guide)
 
 ---
 
@@ -33,11 +32,7 @@ when
 then
     // Only fires when BOTH conditions are met
     // Automatically retracts alert if price goes above 100
-    rfl.insert({
-        type: "PriceAlert",
-        userId: user.id,
-        productId: product.id
-    });
+    insertLogical PriceAlert { userId = $user.id, productId = $product.id }
 end
 ```
 
@@ -60,27 +55,27 @@ session2->add_fact(customer2); // Independent data
 
 Understanding how data moves through the Drills engine is crucial. It's a continuous cycle of **Facts** (your input data) interacting with **Rules** (your defined logic) within the engine's **Working Memory**.
 
-1.  **Rules Ingested into Knowledge Base:**
-    *   Your rules, whether defined in RFL files, decision tables (like CSVs), or other formats, are first parsed and compiled into an optimized internal representation, primarily a Rete network.
-    *   This compiled rule set is stored in a `KnowledgeBase`. The `KnowledgeBase` is immutable and thread-safe, acting as the blueprint for your business logic.
+1. **Rules Ingested into Knowledge Base:**
+    - Your rules, whether defined in RFL files, decision tables (like CSVs), or other formats, are first parsed and compiled into an optimized internal representation, primarily a Rete network.
+    - This compiled rule set is stored in a `KnowledgeBase`. The `KnowledgeBase` is immutable and thread-safe, acting as the blueprint for your business logic.
 
-2.  **Facts Inserted into Working Memory:**
-    *   Your application's data, referred to as "Facts," are objects (e.g., `Fact` instances in C++) that represent the current state of your system.
-    *   These facts are inserted into a `StatefulSession` (the engine's working memory). Each session is mutable and typically tied to a single thread or transaction.
+2. **Facts Inserted into Working Memory:**
+    - Your application's data, referred to as "Facts," are objects (e.g., `Fact` instances in C++) that represent the current state of your system.
+    - These facts are inserted into a `StatefulSession` (the engine's working memory). Each session is mutable and typically tied to a single thread or transaction.
 
-3.  **Engine Execution and Pattern Matching:**
-    *   Once facts are in the `StatefulSession`, the Rete algorithm continuously evaluates them against the rules loaded from the `KnowledgeBase`.
-    *   When a fact (or a combination of facts) matches the conditions (LHS - Left-Hand Side) of a rule, that rule is activated.
+3. **Engine Execution and Pattern Matching:**
+    - Once facts are in the `StatefulSession`, the Rete algorithm continuously evaluates them against the rules loaded from the `KnowledgeBase`.
+    - When a fact (or a combination of facts) matches the conditions (LHS - Left-Hand Side) of a rule, that rule is activated.
 
-4.  **Rule Actions and Data Modification:**
-    *   Activated rules execute their actions (RHS - Right-Hand Side), which are typically JavaScript code. These actions can:
-        *   **Modify existing facts:** Change the properties of facts already in working memory.
-        *   **Insert new facts:** Add new facts into the working memory, potentially triggering other rules.
-        *   **Retract facts:** Remove facts from working memory.
-        *   **Trigger external effects:** Interact with your application (e.g., logging, sending notifications, updating databases) via callbacks or external APIs.
+4. **Rule Actions and Data Modification:**
+    - Activated rules execute their actions (RHS - Right-Hand Side), which are typically JavaScript code. These actions can:
+        - **Modify existing facts:** Change the properties of facts already in working memory.
+        - **Insert new facts:** Add new facts into the working memory, potentially triggering other rules.
+        - **Retract facts:** Remove facts from working memory.
+        - **Trigger external effects:** Interact with your application (e.g., logging, sending notifications, updating databases) via callbacks or external APIs.
 
-5.  **Querying Results:**
-    *   After rules have fired and the working memory has reached a stable state, you can query the `StatefulSession` to retrieve specific facts or the results of rule execution.
+5. **Querying Results:**
+    - After rules have fired and the working memory has reached a stable state, you can query the `StatefulSession` to retrieve specific facts or the results of rule execution.
 
 **In essence:** Rules are compiled once into a `KnowledgeBase`. Facts are dynamically inserted into a `StatefulSession`. The engine then continuously matches facts against rules, executing actions that can modify the facts themselves or trigger external effects, and finally, you query the session for the outcome.
 
@@ -105,10 +100,6 @@ declare CustomEvent
     userId: int
     action: String
 end
-
-function calculateScore(balance, age) {
-    return balance / age * 10;
-}
 
 query "active_customers"
     $c: Customer(status == "Active")
@@ -149,6 +140,7 @@ end
 ```
 
 **Supported Types:**
+
 - `int` (64-bit signed integer)
 - `double` (64-bit floating point)
 - `String` (UTF-8 string)
@@ -177,15 +169,11 @@ rule "Rule Name"
         exists Order(customerId == $customer.id)
 
     then
-        // Right-Hand Side (RHS) - JavaScript Actions
-        console.log(`Processing customer: ${customer.name}`);
-
-        rfl.insert({
-            type: "VipStatus",
-            customerId: customer.id,
-            level: "Gold",
-            expires: Date.now() + 365 * 24 * 60 * 60 * 1000
-        });
+        // Right-Hand Side (RHS) - Actions
+        insert VipStatus {
+            customerId = $customer.id,
+            level = "Gold"
+        }
 end
 ```
 
@@ -211,7 +199,7 @@ rule "Priority Rule"
     when
         $order: Order(status == "new")
     then
-        rfl.update(order, {status: "validated"});
+        update $order { status = "validated" }
 end
 
 rule "Exclusive Handler"
@@ -220,7 +208,7 @@ rule "Exclusive Handler"
     when
         $event: Event(type == "click")
     then
-        console.log("Handling click event");
+        insert ClickHandled { eventId = $event.id }
 end
 
 rule "Delayed Processing"
@@ -228,7 +216,7 @@ rule "Delayed Processing"
     when
         $alert: Alert(priority == "low")
     then
-        console.log("Processing low priority alert after delay");
+        update $alert { processed = true }
 end
 ```
 
@@ -254,11 +242,13 @@ end
 ### 2.6 Pattern Matching
 
 #### Basic Pattern
+
 ```rfl
 $customer: Customer(balance > 1000)
 ```
 
 #### Multiple Constraints
+
 ```rfl
 $order: Order(
     amount > 100,
@@ -268,12 +258,15 @@ $order: Order(
 ```
 
 #### Nested Field Access
+
 ```rfl
 $user: User(profile.preferences.newsletter == true)
 ```
 
 #### Null-Safe Field Access (`!.`)
+
 Safely navigate through potentially null fields. Returns `nil` if any segment is null:
+
 ```rfl
 // Won't error if address is null - just won't match
 $user: User(address!.city == "NYC")
@@ -283,7 +276,9 @@ $order: Order(customer!.preferences!.priority == "high")
 ```
 
 #### Index Access (`[]`)
+
 Access list elements by index or map values by key:
+
 ```rfl
 // Access first item in list
 $order: Order(items[0].name == "Widget")
@@ -296,6 +291,7 @@ $config: Config(settings["theme"] == "dark")
 ```
 
 #### Variable Binding
+
 ```rfl
 $customer: Customer($customerId: id, balance > 1000)
 $orders: Order(customerId == $customerId)
@@ -304,21 +300,22 @@ $orders: Order(customerId == $customerId)
 ### 2.7 Advanced Patterns
 
 #### Accumulate - Data Aggregation
+
 ```rfl
 rule "High Volume Customer"
 when
     $customer: Customer()
-    $totalSpent: Number() from accumulate(
+    $totalSpent: Number(doubleValue > 10000) from accumulate(
         Order(customerId == $customer.id, $amount: amount),
         sum($amount)
     )
-    eval($totalSpent > 10000)
 then
-    console.log(`${customer.name} spent $${totalSpent}`);
+    insert HighValueCustomer { customerId = $customer.id, totalSpent = $totalSpent.doubleValue }
 end
 ```
 
 **Accumulate Functions:**
+
 - `count()` - Count matching items
 - `sum($field)` - Sum numeric field
 - `min($field)` - Minimum value
@@ -326,6 +323,7 @@ end
 - `average($field)` - Average value
 
 #### Collect - Gather Facts
+
 ```rfl
 rule "Bundle Orders"
 when
@@ -335,12 +333,12 @@ when
     )
     eval($orders.size() >= 3)
 then
-    console.log(`Customer ${customer.name} has ${orders.length} pending orders`);
-    // Bundle them for discount
+    insert BundleDiscount { customerId = $customer.id }
 end
 ```
 
 #### Forall - Universal Quantification
+
 ```rfl
 rule "All Orders Completed"
 when
@@ -350,7 +348,7 @@ when
         Order(this == $order, status == "Completed")
     )
 then
-    console.log(`All orders for ${customer.name} are completed`);
+    insert AllOrdersComplete { customerId = $customer.id }
 end
 ```
 
@@ -374,6 +372,7 @@ end
 ```
 
 **Usage in C++:**
+
 ```cpp
 // Simple query
 auto activeCustomers = session->execute_query("customers_by_status", {"Active"});
@@ -391,222 +390,368 @@ for (auto& row : activeCustomers) {
 
 ---
 
-## 3. JavaScript Integration
+## 3. RHS Syntax
 
-The RHS (then-block) of rules uses **QuickJS** - a fast, lightweight JavaScript engine.
+The Right-Hand Side (RHS) of rules uses a simple, declarative syntax for common operations.
 
-### 3.1 Critical: Variable Scoping
+### 3.1 Basic Actions
 
-> ⚠️ **IMPORTANT**: All rules share the same JavaScript context. Use `var` instead of `let` for variable declarations.
-
-```javascript
-// ✅ CORRECT - use var
-var subtotal = order.quantity * order.unitPrice;
-var discount = subtotal * 0.1;
-
-// ❌ WRONG - let causes "redeclaration" errors across rules
-let subtotal = order.quantity * order.unitPrice;  // SyntaxError on second rule!
-```
-
-**Why?** When multiple rules fire, they execute in the same QuickJS global context. `let` doesn't allow redeclaration, causing `SyntaxError: redeclaration of 'variableName'`.
-
-### 3.2 Available JavaScript APIs
-
-#### rfl Object
-```javascript
-// Insert a new fact (type must be fully qualified from package declaration)
-rfl.insert({type: "com.example.Customer", name: "John", balance: 1000});
-
-// Update an existing fact
-rfl.update(order, {finalPrice: 99.99, status: "processed"});
-
-// Retract (delete) a fact
-rfl.retract(oldFact);
-
-// Logical insertion (auto-retracted when rule conditions no longer match)
-rfl.insertLogical({type: "com.example.Alert", message: "Low stock"});
-
-// Stop rule execution immediately
-rfl.halt();
-
-// Set agenda focus to a specific group
-rfl.setFocus("cleanup");
-
-// Get information about the current rule
-var ruleName = rfl.getRule().name;
-console.log("Executing rule: " + ruleName);
-```
-
-#### Modify Block Syntax
-A RuleForge-style structured way to update facts:
-```rfl
-// Instead of rfl.update(), you can use modify block:
-modify($person) {
-    setAge(30),
-    setStatus("updated"),
-    setScore(person.score + 100)
-}
-// This transforms to: rfl.update(person, {age: 30, status: "updated", score: person.score + 100})
-```
-
-#### Console Logging
-```javascript
-console.log("Info message");
-console.warn("Warning message");
-console.error("Error message");
-```
-
-#### JavaScript Built-in Objects
-
-The following JavaScript globals are available in RHS:
-
-| Category | Available Objects/Functions |
-|----------|----------------------------|
-| **Math** | `Math.floor()`, `Math.ceil()`, `Math.round()`, `Math.max()`, `Math.min()`, `Math.abs()`, `Math.pow()`, `Math.sqrt()`, `Math.random()` |
-| **Date** | `Date.now()`, `new Date()`, date methods |
-| **JSON** | `JSON.parse()`, `JSON.stringify()` |
-| **Type Conversion** | `parseInt()`, `parseFloat()`, `isNaN()`, `isFinite()` |
-| **String** | `String()`, string methods, template literals |
-| **Array** | `Array()`, `Array.isArray()`, array methods |
-| **Object** | `Object.keys()`, `Object.values()`, `Object.assign()` |
-| **Other** | `Boolean()`, `Number()`, `RegExp()`, `Error()`, `Map`, `Set` |
-
-```javascript
-// Examples
-var rounded = Math.floor(order.finalPrice);
-var now = Date.now();
-var config = JSON.parse(customer.preferences);
-var total = parseInt(order.total);
-var message = `Customer ${customer.name} has ${orders.length} orders`;
-```
-
-### 3.3 Variable Binding Rules
-
-RFL bindings (with `$` prefix) become JavaScript variables (without `$`):
+#### Insert a New Fact
 
 ```rfl
-rule "Example"
+rule "Create VIP Status"
 when
-    $customer: Customer($name: name, $balance: balance)
-    $order: Order(customerId == $customer.id, $amount: amount)
+    $customer: Customer(balance > 10000)
 then
-    // RFL $customer becomes JS customer ($ stripped)
-    console.log("Customer: " + customer.name);
+    insert VipStatus { customerId = $customer.id, level = "Gold" }
+end
+```
 
-    // Field bindings also lose the $ prefix
-    console.log("Name: " + name + ", Balance: " + balance);
-    console.log("Order amount: " + amount);
+#### Update an Existing Fact
 
-    // Access nested fields directly
-    if (customer.profile && customer.profile.email) {
-        console.log("Email: " + customer.profile.email);
+```rfl
+rule "Apply Discount"
+when
+    $order: Order(status == "new", total > 100)
+then
+    update $order { status = "processed", total = $order.total * 0.9 }
+end
+```
+
+> ⚠️ **重要：`update` 会立即触发 RETE 重新评估。** 这意味着 `update` 执行后，引擎会立即检查所有规则是否需要重新触发。这是规则引擎的标准行为（和 Drools 一致），不是 bug。
+>
+> 如果你的规则在 `update` 后仍然匹配 LHS 条件，规则会被重复触发，可能导致无限循环。解决方法是在 LHS 中添加约束来防止重复触发：
+>
+> ```rfl
+> // ❌ 危险：update 后规则仍然匹配，无限循环
+> rule "Bad Example"
+> when
+>     $c: Counter(count < 10)
+> then
+>     update $c { count = $c.count + 1 }
+> end
+>
+> // ✅ 安全：update 后 status 不再是 "pending"，规则不再匹配
+> rule "Good Example"
+> when
+>     $c: Counter(status == "pending")
+> then
+>     update $c { status = "done", count = $c.count + 1 }
+> end
+> ```
+>
+> 这个行为对所有包含 `update` 的控制结构都适用，包括 `if`、`for`、`while`、`switch`。
+
+#### Retract a Fact
+
+```rfl
+rule "Remove Completed Task"
+when
+    $task: Task(status == "done")
+then
+    retract $task
+end
+```
+
+#### Logical Insert (Auto-Retracted)
+
+```rfl
+rule "Flag High Risk"
+when
+    $tx: Transaction(amount > 50000)
+then
+    insertLogical HighRiskFlag { transactionId = $tx.id }
+end
+```
+
+### 3.2 Control Flow
+
+#### Conditional Logic (if / else if / else)
+
+```rfl
+rule "Classify Customer"
+when
+    $customer: Customer()
+then
+    if $customer.balance > 10000 {
+        insert PremiumCustomer { id = $customer.id }
+    } else if $customer.balance > 5000 {
+        insert GoldCustomer { id = $customer.id }
+    } else {
+        insert StandardCustomer { id = $customer.id }
     }
 end
 ```
 
-**Binding Reference:**
-| RFL (LHS) | JavaScript (RHS) |
-|-----------|------------------|
-| `$customer` | `customer` |
-| `$order` | `order` |
-| `$name: name` | `name` |
-| `$totalAmount` | `totalAmount` |
+#### While Loop
 
-### 3.4 Type Names in rfl.insert()
-
-When inserting facts, the `type` field must use the **fully qualified name** from the package declaration:
+循环执行直到条件为 false，内置安全限制（默认最多 1000 次迭代）：
 
 ```rfl
-package com.example.pricing
-
-declare Order
-    quantity: int
-    unitPrice: double
-end
-
-rule "Create Order"
+rule "Compound Interest"
 when
-    // ...
+    $account: Account(status == "pending")
 then
-    // ✅ CORRECT - fully qualified type name
-    rfl.insert({
-        type: "com.example.pricing.Order",
-        quantity: 5,
-        unitPrice: 19.99
-    });
-
-    // ❌ WRONG - unqualified name won't match alpha network
-    rfl.insert({
-        type: "Order",  // This fact won't trigger rules!
-        quantity: 5,
-        unitPrice: 19.99
-    });
+    while $account.years > 0 {
+        update $account {
+            balance = $account.balance * (1 + $account.rate),
+            years = $account.years - 1
+        }
+    }
+    update $account { status = "done" }
 end
 ```
 
-### 3.5 Preventing Infinite Loops
+> ⚠️ 注意：`while` 循环内的 `update` 会触发 RETE 重新评估。确保 LHS 约束在 `update` 后不再匹配，防止规则被重复触发。
 
-When a rule updates a fact that matches its own conditions, it can trigger infinitely. Use `no-loop` to prevent this:
+#### Switch / Case
+
+根据表达式的值选择分支：
 
 ```rfl
-rule "Round Down Price"
-    no-loop  // Prevents re-triggering on self-modified facts
-    when
-        $order: Order(finalPrice > 0)
-    then
-        var rounded = Math.floor(order.finalPrice);
-        rfl.update(order, {finalPrice: rounded});
-        // Without no-loop: would fire again because finalPrice > 0 still true!
+rule "Apply Tier Discount"
+when
+    $order: Order(status == "new")
+then
+    switch $order.tier {
+        case 1 {
+            update $order { discount = 0.05 }
+        }
+        case 2 {
+            update $order { discount = 0.10 }
+        }
+        case 3 {
+            update $order { discount = 0.15 }
+        }
+        default {
+            update $order { discount = 0 }
+        }
+    }
+    update $order { status = "processed" }
 end
 ```
 
-**Alternative:** Design conditions that become false after the action:
+#### Break / Continue
+
+在 `for` 和 `while` 循环中使用：
 
 ```rfl
-rule "Apply Discount Once"
-    when
-        $order: Order(discountApplied == false)  // Condition becomes false after update
-    then
-        var discounted = order.total * 0.9;
-        rfl.update(order, {total: discounted, discountApplied: true});
+rule "Retry With Break/Continue"
+when
+    $job: Job(status == "pending")
+then
+    while $job.retry < 3 {
+        if $job.skipCurrentAttempt == true {
+            update $job { skipCurrentAttempt = false, retry = $job.retry + 1 }
+            continue
+        }
+        if $job.lastErrorCode == 0 {
+            break
+        }
+        update $job { retry = $job.retry + 1 }
+    }
 end
 ```
 
-### 3.6 Complete Example
+#### Iterate with JMESPath (for loop)
+
+Process JSON data using an LHS source pattern:
 
 ```rfl
-package com.example.pricing
+rule "Process Order Items"
+when
+    $item: OrderItem() from jmespath(file("data/order_items.json"), "items[*]")
+then
+    insert ProcessedItem {
+        name = $item.name,
+        price = $item.price,
+        orderId = $item.orderId
+    }
+end
+```
+
+JMESPath supports powerful queries:
+- Array projection: `items[*].price`
+- Filtering: `items[?price > 100]`
+- Nested access: `customer.address.city`
+
+### 3.3 Execution Control
+
+#### Halt Rule Execution
+
+```rfl
+rule "Stop on Critical Error"
+when
+    $error: CriticalError()
+then
+    halt
+end
+```
+
+#### Set Agenda Focus
+
+```rfl
+rule "Switch to Cleanup Phase"
+when
+    $done: ProcessingComplete()
+then
+    setFocus("cleanup")
+end
+```
+
+### 3.4 Field Assignment Types
+
+| Type | Example | Description |
+|------|---------|-------------|
+| String | `name = "John"` | String literal |
+| Boolean | `active = true` | Boolean value |
+| Variable | `total = $order.amount` | Reference to bound variable field |
+| Expression | `tax = $order.total * 0.1` | Arithmetic expression |
+| Function | `distance = sqrt($x * $x + $y * $y)` | Math function call |
+| Conditional | `discount = if($total > 100, 10, 0)` | Inline conditional |
+
+### 3.5 Expression Support
+
+RHS expressions are handled by the built-in expression engine.
+
+**Operators:**
+
+| Category | Operators |
+|----------|-----------|
+| Mathematical | `+`, `-`, `*`, `/`, `%`, `^` (power) |
+| Comparison | `==`, `!=`, `<`, `<=`, `>`, `>=` |
+| Logical | `and`, `or`, `not`, `xor` |
+
+**Functions:**
+
+| Category | Functions |
+|----------|-----------|
+| Basic Math | `abs`, `ceil`, `floor`, `round`, `trunc`, `sgn` |
+| Power/Root | `sqrt`, `pow`, `root`, `exp`, `log`, `log2`, `log10` |
+| Trigonometric | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2` |
+| Hyperbolic | `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` |
+| Comparison | `min`, `max`, `clamp`, `inrange` |
+| Aggregation | `avg`, `sum` |
+| Special | `erf`, `erfc`, `ncdf`, `hypot` |
+
+**Constants:** `pi`, `e`, `inf`, `epsilon`
+
+**Examples:**
+
+```rfl
+rule "Calculate Hypotenuse"
+when
+    $triangle: Triangle()
+then
+    update $triangle { hypotenuse = sqrt($triangle.a * $triangle.a + $triangle.b * $triangle.b) }
+end
+
+rule "Round to Cents"
+when
+    $order: Order()
+then
+    update $order { total = floor($order.total * 100) / 100 }
+end
+
+rule "Conditional Discount"
+when
+    $order: Order()
+then
+    update $order { discount = if($order.total > 1000, $order.total * 0.1, 0) }
+end
+
+rule "Normalize Score"
+when
+    $result: Result()
+then
+    update $result { normalized = clamp(0, ($result.raw - $result.min) / ($result.max - $result.min) * 100, 100) }
+end
+
+rule "Compound Interest"
+when
+    $account: Account()
+then
+    update $account { balance = $account.principal * pow(1 + $account.rate, $account.years) }
+end
+```
+
+### 3.6 Native Functions and DLL Function Table
+
+RHS calls can be backed by host-registered native functions or plugin DLL/so function tables.
+
+Rule-side syntax is the same:
+
+```rfl
+rule "Call Native"
+when
+    $s: Sensor(temperature > 30)
+then
+    invoke pluginLog($s.id, $s.temperature)
+    update $s { score = pluginMetric($s.temperature, 2) }
+end
+```
+
+C API integration paths:
+- direct registration: `ruleforge_kb_register_native_function(...)`
+- DLL/so table loading: `ruleforge_kb_load_native_function_table(...)`
+
+Runtime flow:
+1. Parse RHS `invoke` or assignment-call expression.
+2. Resolve function name in KnowledgeBase native registry.
+3. Evaluate arguments.
+4. Call native callback.
+
+See:
+- `capi/examples/CAPI_NATIVE_DLL_EN.md`
+- `capi/examples/NATIVE_FUNCTIONS.md`
+
+### 3.7 Complete Example
+
+```rfl
+package com.example.orders
 
 declare Order
-    quantity: int
-    unitPrice: double
-    finalPrice: double
+    id: int
+    total: double
+    status: String
+    items: String  // JSON array
 end
 
-// Apply 10% discount for bulk orders
-rule "Bulk Discount"
-    when
-        $order: Order(quantity >= 10, finalPrice < 0.01)
-    then
-        console.log("Applying bulk discount for qty=" + order.quantity);
-        var subtotal = order.quantity * order.unitPrice;
-        var discounted = subtotal * 0.90;
-        rfl.update(order, {finalPrice: discounted});
+declare ProcessedItem
+    orderId: int
+    name: String
+    price: double
 end
 
-// Round down final price
-rule "Round Down"
-    salience -10  // Run after discount rules
-    no-loop       // Prevent infinite loop
-    when
-        $order: Order(finalPrice > 0.01)
-    then
-        var rounded = Math.floor(order.finalPrice);
-        rfl.update(order, {finalPrice: rounded});
+declare HighValueOrder
+    orderId: int
 end
 
-query "ProcessedOrders"
-    $order: Order(finalPrice > 0)
+rule "Process High Value Orders"
+    salience 100
+when
+    $order: Order(total > 1000, status == "new")
+    $item: ProcessedItem(orderId == $order.id)
+        from jmespath(file("data/order_items.json"), "items[*]")
+then
+    update $order { status = "processed" }
+    insert HighValueOrder { orderId = $order.id }
+    insert ProcessedItem {
+        orderId = $item.orderId,
+        name = $item.name,
+        price = $item.price
+    }
+end
+
+rule "Apply Bulk Discount"
+when
+    $order: Order(status == "processed")
+    $itemCount: Number(intValue >= 5) from accumulate(
+        ProcessedItem(orderId == $order.id),
+        count(1)
+    )
+then
+    update $order { total = $order.total * 0.85 }
 end
 ```
 
@@ -622,7 +767,21 @@ Model complex workflows:
 declare ProcessState
     processId: String
     currentState: String
-    data: Object
+end
+
+declare ProcessRequest
+    id: String
+    status: String
+end
+
+declare ValidationResult
+    processId: String
+    valid: boolean
+end
+
+declare ApprovalResult
+    processId: String
+    approved: boolean
 end
 
 rule "Start Process"
@@ -630,14 +789,8 @@ when
     $request: ProcessRequest(status == "NEW")
     not ProcessState(processId == $request.id)
 then
-    rfl.insert({
-        type: "ProcessState",
-        processId: request.id,
-        currentState: "VALIDATION",
-        data: {startTime: Date.now()}
-    });
-
-    rfl.update(request, {status: "PROCESSING"});
+    insert ProcessState { processId = $request.id, currentState = "VALIDATION" }
+    update $request { status = "PROCESSING" }
 end
 
 rule "Validation Complete"
@@ -645,10 +798,7 @@ when
     $state: ProcessState(currentState == "VALIDATION")
     $validation: ValidationResult(processId == $state.processId, valid == true)
 then
-    rfl.update(state, {
-        currentState: "APPROVAL",
-        data: {...state.data, validatedAt: Date.now()}
-    });
+    update $state { currentState = "APPROVAL" }
 end
 
 rule "Process Approved"
@@ -656,10 +806,7 @@ when
     $state: ProcessState(currentState == "APPROVAL")
     $approval: ApprovalResult(processId == $state.processId, approved == true)
 then
-    rfl.update(state, {
-        currentState: "COMPLETE",
-        data: {...state.data, completedAt: Date.now()}
-    });
+    update $state { currentState = "COMPLETE" }
 end
 ```
 
@@ -668,6 +815,7 @@ end
 Track patterns across time using temporal operators and entry points.
 
 #### Temporal Operators
+
 | Operator | Description | Example |
 |----------|-------------|---------|
 | `after` | Event occurs after another | `timestamp after $e1.timestamp` |
@@ -679,6 +827,7 @@ Track patterns across time using temporal operators and entry points.
 **Duration literals:** `300ms`, `5s`, `10m`, `1h`
 
 #### Entry Points for Event Streams
+
 Insert events into named entry points for stream-based processing:
 
 ```cpp
@@ -694,10 +843,9 @@ session->insert_into("sensor-stream", event);
 ```rfl
 rule "Process Sensor Events"
 when
-    // Only matches facts from the "sensor-stream" entry point
-    $reading: SensorReading(value > threshold) from entry-point "sensor-stream"
+    $reading: SensorReading(value > 100) from entry-point "sensor-stream"
 then
-    console.log("Sensor alert: " + reading.value);
+    insert SensorAlert { sensorId = $reading.id, value = $reading.value }
 end
 ```
 
@@ -708,6 +856,7 @@ declare LoginEvent
     userId: int
     timestamp: long
     ipAddress: String
+    success: boolean
 end
 
 declare SuspiciousActivity
@@ -718,24 +867,13 @@ end
 rule "Multiple Failed Logins"
 when
     $user: User()
-    $failedLogins: Number() from accumulate(
-        LoginEvent(
-            userId == $user.id,
-            success == false,
-            timestamp > (Date.now() - 300000) // Last 5 minutes
-        ),
-        count()
+    $failedLogins: Number(intValue >= 5) from accumulate(
+        LoginEvent(userId == $user.id, success == false),
+        count(1)
     )
-    eval($failedLogins >= 5)
     not SuspiciousActivity(userId == $user.id)
 then
-    rfl.insert({
-        type: "SuspiciousActivity",
-        userId: user.id,
-        reason: `${failedLogins} failed logins in 5 minutes`
-    });
-
-    console.warn(`SECURITY ALERT: User ${user.id} has ${failedLogins} failed logins`);
+    insert SuspiciousActivity { userId = $user.id, reason = "Multiple failed logins" }
 end
 
 rule "Geographic Anomaly"
@@ -746,20 +884,10 @@ when
         userId == $user.id,
         ipAddress != $ip1,
         timestamp > $login1.timestamp,
-        timestamp < ($login1.timestamp + 3600000) // Within 1 hour
+        timestamp < $login1.timestamp + 3600000
     )
 then
-    // Check if IPs are from different countries
-    var country1 = geoLookup(login1.ipAddress);
-    var country2 = geoLookup(login2.ipAddress);
-
-    if (country1 !== country2) {
-        rfl.insert({
-            type: "SuspiciousActivity",
-            userId: user.id,
-            reason: `Logins from ${country1} and ${country2} within 1 hour`
-        });
-    }
+    insert SuspiciousActivity { userId = $user.id, reason = "Login from different locations" }
 end
 ```
 
@@ -776,50 +904,41 @@ end
 
 rule "Validate Customer Email"
 when
-    $customer: Customer($email: email)
-    eval($email === null || $email === "" || !$email.includes("@"))
+    $customer: Customer(email == "")
 then
-    rfl.insert({
-        type: "ValidationError",
-        entityType: "Customer",
-        entityId: customer.id,
-        field: "email",
-        message: "Email address is required and must be valid",
-        severity: "ERROR"
-    });
+    insert ValidationError {
+        entityType = "Customer",
+        entityId = $customer.id,
+        field = "email",
+        message = "Email address is required",
+        severity = "ERROR"
+    }
 end
 
 rule "Validate Customer Age"
 when
     $customer: Customer(age < 18)
 then
-    rfl.insert({
-        type: "ValidationError",
-        entityType: "Customer",
-        entityId: customer.id,
-        field: "age",
-        message: "Customer must be 18 or older",
-        severity: "ERROR"
-    });
+    insert ValidationError {
+        entityType = "Customer",
+        entityId = $customer.id,
+        field = "age",
+        message = "Customer must be 18 or older",
+        severity = "ERROR"
+    }
 end
 
-rule "Validate Balance Consistency"
+rule "Validate Balance Positive"
 when
-    $customer: Customer($customerId: id, $balance: balance)
-    $totalOrders: Number() from accumulate(
-        Order(customerId == $customerId, status == "Completed", $amount: amount),
-        sum($amount)
-    )
-    eval(Math.abs($balance - $totalOrders) > 0.01) // Account for rounding
+    $customer: Customer(balance < 0)
 then
-    rfl.insert({
-        type: "ValidationError",
-        entityType: "Customer",
-        entityId: customer.id,
-        field: "balance",
-        message: `Balance mismatch: ${balance} vs calculated ${totalOrders}`,
-        severity: "WARNING"
-    });
+    insert ValidationError {
+        entityType = "Customer",
+        entityId = $customer.id,
+        field = "balance",
+        message = "Balance cannot be negative",
+        severity = "WARNING"
+    }
 end
 ```
 
@@ -830,6 +949,7 @@ end
 ### 5.1 Rule Design Best Practices
 
 #### ✅ Put Selective Constraints First
+
 ```rfl
 // Good - most selective constraint first
 when
@@ -841,6 +961,7 @@ when
 ```
 
 #### ✅ Use Appropriate Salience
+
 ```rfl
 rule "Data Validation"
 salience 1000  // Run first
@@ -860,6 +981,7 @@ end
 ```
 
 #### ✅ Minimize eval() Usage
+
 ```rfl
 // Good - native constraints
 when
@@ -874,6 +996,7 @@ when
 ### 5.2 Memory Optimization
 
 #### Use Typed Builders for Better Performance
+
 ```cpp
 // Optimized approach - uses object pools and string interning
 auto customer = FAST_CUSTOMER()
@@ -891,6 +1014,7 @@ customer->fields["balance"] = 5000.0;
 ```
 
 #### Batch Operations for High Throughput
+
 ```cpp
 // Good - batch processing
 std::vector<std::shared_ptr<Fact>> customers;
@@ -931,15 +1055,15 @@ The `StatefulSession` is the engine\'s working memory, designed for efficient pa
 
 **Why it\'s a bad idea:**
 
-*   **Memory Bloat:** Every fact inserted consumes memory. Large facts or a high number of facts can quickly exhaust available memory.
-*   **Performance Degradation:** The Rete network is incremental. Every insertion, modification, or retraction of a fact can trigger significant re-evaluation across the network. More data means exponentially higher processing overhead, leading to slow `fire_all_rules()` calls.
-*   **Unnecessary Complexity:** Treating the session as a database introduces complexity in managing data lifecycle and filtering irrelevant data within rules.
+- **Memory Bloat:** Every fact inserted consumes memory. Large facts or a high number of facts can quickly exhaust available memory.
+- **Performance Degradation:** The Rete network is incremental. Every insertion, modification, or retraction of a fact can trigger significant re-evaluation across the network. More data means exponentially higher processing overhead, leading to slow `fire_all_rules()` calls.
+- **Unnecessary Complexity:** Treating the session as a database introduces complexity in managing data lifecycle and filtering irrelevant data within rules.
 
 **Best Practice:**
 
-*   **Only insert "active" facts:** The `StatefulSession` should only contain facts that are directly involved in the pattern matching of your rules\' `when` conditions.
-*   **Store large/complex data externally:** For data that is large, complex, or not directly participating in rule conditions, store it in external systems (e.g., databases, caches).
-*   **Load relevant subsets on demand:** When rules need access to this external data, retrieve only the necessary, minimal subset into the session (e.g., via rule actions, global variables, or external service calls) just before it\'s needed for processing.
+- **Only insert "active" facts:** The `StatefulSession` should only contain facts that are directly involved in the pattern matching of your rules\' `when` conditions.
+- **Store large/complex data externally:** For data that is large, complex, or not directly participating in rule conditions, store it in external systems (e.g., databases, caches).
+- **Load relevant subsets on demand:** When rules need access to this external data, retrieve only the necessary, minimal subset into the session (e.g., via rule actions, global variables, or external service calls) just before it\'s needed for processing.
 
 **In essence:** The rules engine processes logic, it does not store your application\'s entire dataset. Respect the engine\'s design to ensure optimal performance and maintainability.
 
@@ -968,6 +1092,7 @@ std::thread t2([&kb]() {
 ```
 
 The knowledge base contains:
+
 - Compiled RETE network structure (read-only)
 - Parsed rule definitions (read-only)
 - Type declarations (read-only)
@@ -1000,6 +1125,7 @@ std::thread t2([&]() {
 ```
 
 The session contains mutable state:
+
 - Working memory (facts)
 - Agenda (pending activations)
 - Token/WME caches
@@ -1093,40 +1219,26 @@ std::string get_prometheus_metrics() {
 ### 6.1 Common Issues
 
 #### Rule Not Firing
+
 ```rfl
 rule "Debug Rule"
 when
     $customer: Customer(balance > 1000)
     $order: Order(customerId == $customer.id)
 then
-    console.log("Rule fired for customer: " + customer.name);
+    insert DebugMarker { customerId = $customer.id, orderId = $order.id }
 end
 ```
 
 **Debugging steps:**
-1. Check that both facts exist: `session->get_facts_of_type("Customer")`
+
+1. Check that both facts exist: `session->get_fact_count()`
 2. Verify constraints match: `customer.balance > 1000`
 3. Check foreign key relationship: `order.customerId == customer.id`
 4. Use `session->enable_tracing(true)` for detailed execution log
 
-#### JavaScript Runtime Errors
-```javascript
-// Add error handling in RHS
-then
-    try {
-        var result = complexCalculation(customer.data);
-        rfl.insert({type: "Result", value: result});
-    } catch (error) {
-        console.error("Calculation failed: " + error.message);
-        rfl.insert({
-            type: "ProcessingError",
-            entityId: customer.id,
-            error: error.message
-        });
-    }
-```
-
 #### Memory Issues
+
 ```cpp
 // Monitor memory usage
 auto stats = PoolStatsCollector::collect();
@@ -1142,6 +1254,7 @@ auto pooled_fact = GlobalPools::make_pooled_fact();
 ### 6.2 Performance Debugging
 
 #### Identify Slow Rules
+
 ```cpp
 session->enable_tracing(true);
 auto start = std::chrono::high_resolution_clock::now();
@@ -1163,6 +1276,7 @@ for (auto& [rule, stats] : summary) {
 ```
 
 #### Optimize Network Propagation
+
 ```cpp
 // Use fact type batching for better Rete network efficiency
 std::vector<std::shared_ptr<Fact>> customers = load_customers();

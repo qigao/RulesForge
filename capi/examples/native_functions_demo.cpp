@@ -1,11 +1,10 @@
-// Example demonstrating native C function registration in RuleForge
+// Example demonstrating native C function registration in RulesForge
 // This shows how to register custom C functions that can be called from rules
 
 #include "rule_forge.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 
 // Example 1: Simple logging function
 ruleforge_status_t log_function(void *ctx, int argc, const char **argv, char **out_result) {
@@ -80,11 +79,11 @@ int main() {
 #ifdef _WIN32
   system("chcp 65001 >nul"); // UTF-8
 #endif
-  printf("=== RuleForge Native Functions Demo ===\n\n");
+  printf("=== RulesForge Native Functions Demo ===\n\n");
 
-  // Initialize RuleForge
+  // Initialize RulesForge
   if (ruleforge_init() != RULES_FORGE_OK) {
-    fprintf(stderr, "Failed to initialize RuleForge\n");
+    fprintf(stderr, "Failed to initialize RulesForge\n");
     return 1;
   }
 
@@ -133,26 +132,27 @@ int main() {
   // Load rules that use native functions
   const char *rules = R"(
 declare Sensor
-    id : string
+    id : String
     temperature : double
-    location : string
+    location : String
+end
+
+declare Alert
+    sensorId : String
+    temperature : double
+    calculatedValue : double
 end
 
 rule "Test Native Functions"
 when
     $sensor : Sensor(temperature > 25)
+    not Alert(sensorId == $sensor.id)
 then
-    log("High temperature detected:", $sensor.temperature);
-
-    var response = webhook("https://api.example.com/alert",
-                           JSON.stringify({temp: $sensor.temperature}));
-    log("Webhook response:", JSON.stringify(response));
-
-    republish("sensors/alerts",
-             JSON.stringify({id: $sensor.id, temp: $sensor.temperature}));
-
-    var result = calculate($sensor.temperature);
-    log("Calculated value:", JSON.stringify(result));
+    insert Alert {
+        sensorId = $sensor.id,
+        temperature = $sensor.temperature,
+        calculatedValue = $sensor.temperature * 2.5
+    }
 end
     )";
 

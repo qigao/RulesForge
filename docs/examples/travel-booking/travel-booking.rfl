@@ -113,132 +113,162 @@ end
 // PHASE 1: FLIGHT PRICING (salience 100)
 // ============================================================================
 
-rule "Flight Quote - Match Request to Flight"
+rule "Flight Quote - Platinum Member"
     salience 100
     when
-        $req: TravelRequest($reqId: requestId, $origin: origin, $dest: destination, $class: cabinClass, $travelers: travelers, $tier: loyaltyTier)
+        $req: TravelRequest($reqId: requestId, $origin: origin, $dest: destination, $class: cabinClass, $travelers: travelers, loyaltyTier == "platinum")
         $flight: FlightOption(origin == $origin, destination == $dest, cabinClass == $class, seatsAvailable >= $travelers)
-        not (FlightQuote(requestId == $reqId, flightId == $flight.flightId))
+        not FlightQuote(requestId == $reqId, flightId == $flight.flightId)
     then
-        var basePrice = flight.basePrice;
-
-        // Seasonal adjustment (simplified - would check actual dates)
-        var seasonalAdj = 0.0;
-
-        // Loyalty discount
-        var loyaltyDiscount = 0.0;
-        var pointsMultiplier = 1;
-
-        if (req.loyaltyTier == "platinum") {
-            loyaltyDiscount = basePrice * 0.15;
-            pointsMultiplier = 3;
-        } else if (req.loyaltyTier == "gold") {
-            loyaltyDiscount = basePrice * 0.10;
-            pointsMultiplier = 2;
-        } else if (req.loyaltyTier == "silver") {
-            loyaltyDiscount = basePrice * 0.05;
-            pointsMultiplier = 1.5;
+        insert FlightQuote {
+            requestId: $req.requestId,
+            flightId: $flight.flightId,
+            basePrice: $flight.basePrice,
+            seasonalAdjustment: 0.0,
+            loyaltyDiscount: $flight.basePrice * 0.15,
+            totalPerPerson: $flight.basePrice * 0.85,
+            totalAllTravelers: $flight.basePrice * 0.85 * $req.travelers,
+            pointsEarned: floor($flight.basePrice * 0.85 * $req.travelers * 3)
         }
+end
 
-        var totalPerPerson = basePrice + seasonalAdj - loyaltyDiscount;
-        var totalAllTravelers = totalPerPerson * req.travelers;
-        var pointsEarned = Math.floor(totalAllTravelers * pointsMultiplier);
+rule "Flight Quote - Gold Member"
+    salience 99
+    when
+        $req: TravelRequest($reqId: requestId, $origin: origin, $dest: destination, $class: cabinClass, $travelers: travelers, loyaltyTier == "gold")
+        $flight: FlightOption(origin == $origin, destination == $dest, cabinClass == $class, seatsAvailable >= $travelers)
+        not FlightQuote(requestId == $reqId, flightId == $flight.flightId)
+    then
+        insert FlightQuote {
+            requestId: $req.requestId,
+            flightId: $flight.flightId,
+            basePrice: $flight.basePrice,
+            seasonalAdjustment: 0.0,
+            loyaltyDiscount: $flight.basePrice * 0.10,
+            totalPerPerson: $flight.basePrice * 0.90,
+            totalAllTravelers: $flight.basePrice * 0.90 * $req.travelers,
+            pointsEarned: floor($flight.basePrice * 0.90 * $req.travelers * 2)
+        }
+end
 
-        console.log("FLIGHT QUOTE: " + flight.airline + " " + flight.flightId);
-        console.log("  Base: $" + basePrice + " × " + req.travelers + " travelers");
-        console.log("  Loyalty (" + req.loyaltyTier + "): -$" + loyaltyDiscount.toFixed(2));
-        console.log("  Total: $" + totalAllTravelers.toFixed(2) + " (+" + pointsEarned + " points)");
+rule "Flight Quote - Silver Member"
+    salience 98
+    when
+        $req: TravelRequest($reqId: requestId, $origin: origin, $dest: destination, $class: cabinClass, $travelers: travelers, loyaltyTier == "silver")
+        $flight: FlightOption(origin == $origin, destination == $dest, cabinClass == $class, seatsAvailable >= $travelers)
+        not FlightQuote(requestId == $reqId, flightId == $flight.flightId)
+    then
+        insert FlightQuote {
+            requestId: $req.requestId,
+            flightId: $flight.flightId,
+            basePrice: $flight.basePrice,
+            seasonalAdjustment: 0.0,
+            loyaltyDiscount: $flight.basePrice * 0.05,
+            totalPerPerson: $flight.basePrice * 0.95,
+            totalAllTravelers: $flight.basePrice * 0.95 * $req.travelers,
+            pointsEarned: floor($flight.basePrice * 0.95 * $req.travelers * 1.5)
+        }
+end
 
-        rfl.insert({
-            type: "com.travel.FlightQuote",
-            requestId: req.requestId,
-            flightId: flight.flightId,
-            basePrice: basePrice,
-            seasonalAdjustment: seasonalAdj,
-            loyaltyDiscount: loyaltyDiscount,
-            totalPerPerson: totalPerPerson,
-            totalAllTravelers: totalAllTravelers,
-            pointsEarned: pointsEarned
-        });
+rule "Flight Quote - Standard Member"
+    salience 97
+    when
+        $req: TravelRequest($reqId: requestId, $origin: origin, $dest: destination, $class: cabinClass, $travelers: travelers)
+        $flight: FlightOption(origin == $origin, destination == $dest, cabinClass == $class, seatsAvailable >= $travelers)
+        not FlightQuote(requestId == $reqId, flightId == $flight.flightId)
+    then
+        insert FlightQuote {
+            requestId: $req.requestId,
+            flightId: $flight.flightId,
+            basePrice: $flight.basePrice,
+            seasonalAdjustment: 0.0,
+            loyaltyDiscount: 0.0,
+            totalPerPerson: $flight.basePrice,
+            totalAllTravelers: $flight.basePrice * $req.travelers,
+            pointsEarned: floor($flight.basePrice * $req.travelers)
+        }
 end
 
 rule "Flight Issue - No Seats Available"
     salience 100
     when
         $req: TravelRequest($reqId: requestId, $origin: origin, $dest: destination, $class: cabinClass, $travelers: travelers)
-        not (FlightOption(origin == $origin, destination == $dest, cabinClass == $class, seatsAvailable >= $travelers))
-        not (BookingIssue(requestId == $reqId, issueType == "NO_FLIGHTS"))
+        not FlightOption(origin == $origin, destination == $dest, cabinClass == $class, seatsAvailable >= $travelers)
+        not BookingIssue(requestId == $reqId, issueType == "NO_FLIGHTS")
     then
-        console.log("ISSUE: No flights available for " + req.origin + " → " + req.destination);
-
-        rfl.insert({
-            type: "com.travel.BookingIssue",
-            requestId: req.requestId,
+        insert BookingIssue {
+            requestId: $req.requestId,
             issueType: "NO_FLIGHTS",
-            message: "No " + req.cabinClass + " class flights available with " + req.travelers + " seats",
+            message: "No flights available with sufficient seats",
             blocking: true
-        });
+        }
 end
 
 // ============================================================================
 // PHASE 2: HOTEL PRICING (salience 90)
 // ============================================================================
 
-rule "Hotel Quote - Match Request to Hotel"
+rule "Hotel Quote - Platinum Member"
     salience 90
     when
-        $req: TravelRequest($reqId: requestId, $dest: destination, $stars: hotelStars, $tier: loyaltyTier, $depDate: departureDate, $retDate: returnDate)
+        $req: TravelRequest($reqId: requestId, $dest: destination, $stars: hotelStars, loyaltyTier == "platinum", $depDate: departureDate, $retDate: returnDate)
         $hotel: HotelOption(destinationCity == $dest, stars >= $stars, availableRooms > 0)
-        FlightQuote(requestId == $reqId) // Only quote hotel if we have a flight
-        not (HotelQuote(requestId == $reqId, hotelId == $hotel.hotelId))
+        FlightQuote(requestId == $reqId)
+        not HotelQuote(requestId == $reqId, hotelId == $hotel.hotelId)
     then
-        // Calculate nights (simplified - would use actual date math)
-        var nights = 5; // Default
-        if (req.returnDate > 0 && req.departureDate > 0) {
-            nights = Math.ceil((req.returnDate - req.departureDate) / 86400000);
+        insert HotelQuote {
+            requestId: $req.requestId,
+            hotelId: $hotel.hotelId,
+            nights: 5,
+            pricePerNight: $hotel.pricePerNight,
+            subtotal: $hotel.pricePerNight * 5,
+            loyaltyDiscount: $hotel.pricePerNight * 5 * 0.15,
+            packageDiscount: $hotel.pricePerNight * 5 * 0.10,
+            totalPrice: $hotel.pricePerNight * 5 * 0.75,
+            pointsEarned: floor($hotel.pricePerNight * 5 * 0.75 * 3)
         }
+end
 
-        var pricePerNight = hotel.pricePerNight;
-        var subtotal = pricePerNight * nights;
-
-        // Loyalty discount
-        var loyaltyDiscount = 0.0;
-        var pointsMultiplier = 1;
-
-        if (req.loyaltyTier == "platinum") {
-            loyaltyDiscount = subtotal * 0.15;
-            pointsMultiplier = 3;
-        } else if (req.loyaltyTier == "gold") {
-            loyaltyDiscount = subtotal * 0.10;
-            pointsMultiplier = 2;
-        } else if (req.loyaltyTier == "silver") {
-            loyaltyDiscount = subtotal * 0.05;
-            pointsMultiplier = 1.5;
+rule "Hotel Quote - Gold Member"
+    salience 89
+    when
+        $req: TravelRequest($reqId: requestId, $dest: destination, $stars: hotelStars, loyaltyTier == "gold", $depDate: departureDate, $retDate: returnDate)
+        $hotel: HotelOption(destinationCity == $dest, stars >= $stars, availableRooms > 0)
+        FlightQuote(requestId == $reqId)
+        not HotelQuote(requestId == $reqId, hotelId == $hotel.hotelId)
+    then
+        insert HotelQuote {
+            requestId: $req.requestId,
+            hotelId: $hotel.hotelId,
+            nights: 5,
+            pricePerNight: $hotel.pricePerNight,
+            subtotal: $hotel.pricePerNight * 5,
+            loyaltyDiscount: $hotel.pricePerNight * 5 * 0.10,
+            packageDiscount: $hotel.pricePerNight * 5 * 0.10,
+            totalPrice: $hotel.pricePerNight * 5 * 0.80,
+            pointsEarned: floor($hotel.pricePerNight * 5 * 0.80 * 2)
         }
+end
 
-        // Package discount (booking flight + hotel together)
-        var packageDiscount = subtotal * 0.10;
-
-        var totalPrice = subtotal - loyaltyDiscount - packageDiscount;
-        var pointsEarned = Math.floor(totalPrice * pointsMultiplier);
-
-        console.log("HOTEL QUOTE: " + hotel.name + " (" + hotel.stars + " stars)");
-        console.log("  $" + pricePerNight + "/night × " + nights + " nights = $" + subtotal.toFixed(2));
-        console.log("  Loyalty: -$" + loyaltyDiscount.toFixed(2) + ", Package: -$" + packageDiscount.toFixed(2));
-        console.log("  Total: $" + totalPrice.toFixed(2) + " (+" + pointsEarned + " points)");
-
-        rfl.insert({
-            type: "com.travel.HotelQuote",
-            requestId: req.requestId,
-            hotelId: hotel.hotelId,
-            nights: nights,
-            pricePerNight: pricePerNight,
-            subtotal: subtotal,
-            loyaltyDiscount: loyaltyDiscount,
-            packageDiscount: packageDiscount,
-            totalPrice: totalPrice,
-            pointsEarned: pointsEarned
-        });
+rule "Hotel Quote - Standard Member"
+    salience 85
+    when
+        $req: TravelRequest($reqId: requestId, $dest: destination, $stars: hotelStars, $depDate: departureDate, $retDate: returnDate)
+        $hotel: HotelOption(destinationCity == $dest, stars >= $stars, availableRooms > 0)
+        FlightQuote(requestId == $reqId)
+        not HotelQuote(requestId == $reqId, hotelId == $hotel.hotelId)
+    then
+        insert HotelQuote {
+            requestId: $req.requestId,
+            hotelId: $hotel.hotelId,
+            nights: 5,
+            pricePerNight: $hotel.pricePerNight,
+            subtotal: $hotel.pricePerNight * 5,
+            loyaltyDiscount: 0.0,
+            packageDiscount: $hotel.pricePerNight * 5 * 0.10,
+            totalPrice: $hotel.pricePerNight * 5 * 0.90,
+            pointsEarned: floor($hotel.pricePerNight * 5 * 0.90)
+        }
 end
 
 // ============================================================================
@@ -250,20 +280,16 @@ rule "Visa Check - Required"
     when
         $req: TravelRequest($reqId: requestId, $nat: nationality, $dest: destination)
         $visa: VisaRequirement(nationality == $nat, destinationCountry == $dest, required == true)
-        not (VisaAlert(requestId == $reqId))
+        not VisaAlert(requestId == $reqId)
     then
-        console.log("VISA REQUIRED: " + visa.visaType + " for " + req.nationality + " → " + req.destination);
-        console.log("  Processing: " + visa.processingDays + " days, Cost: $" + visa.cost);
-
-        rfl.insert({
-            type: "com.travel.VisaAlert",
-            requestId: req.requestId,
+        insert VisaAlert {
+            requestId: $req.requestId,
             required: true,
-            visaType: visa.visaType,
-            processingDays: visa.processingDays,
-            cost: visa.cost,
-            message: visa.visaType + " visa required - " + visa.processingDays + " days processing"
-        });
+            visaType: $visa.visaType,
+            processingDays: $visa.processingDays,
+            cost: $visa.cost,
+            message: $visa.visaType + " visa required - " + $visa.processingDays + " days processing"
+        }
 end
 
 rule "Visa Check - Not Required"
@@ -271,19 +297,33 @@ rule "Visa Check - Not Required"
     when
         $req: TravelRequest($reqId: requestId, $nat: nationality, $dest: destination)
         $visa: VisaRequirement(nationality == $nat, destinationCountry == $dest, required == false)
-        not (VisaAlert(requestId == $reqId))
+        not VisaAlert(requestId == $reqId)
     then
-        console.log("VISA NOT REQUIRED: " + req.nationality + " → " + req.destination);
-
-        rfl.insert({
-            type: "com.travel.VisaAlert",
-            requestId: req.requestId,
+        insert VisaAlert {
+            requestId: $req.requestId,
             required: false,
             visaType: "none",
             processingDays: 0,
             cost: 0,
             message: "No visa required for this destination"
-        });
+        }
+end
+
+rule "Visa Check - No Data"
+    salience 80
+    when
+        $req: TravelRequest($reqId: requestId, $nat: nationality, $dest: destination)
+        not VisaRequirement(nationality == $nat, destinationCountry == $dest)
+        not VisaAlert(requestId == $reqId)
+    then
+        insert VisaAlert {
+            requestId: $req.requestId,
+            required: false,
+            visaType: "unknown",
+            processingDays: 0,
+            cost: 0,
+            message: "Visa requirements unknown - please verify"
+        }
 end
 
 // ============================================================================
@@ -295,23 +335,14 @@ rule "Insurance Quote - Standard"
     when
         $req: TravelRequest($reqId: requestId, $travelers: travelers, includeInsurance == true)
         FlightQuote(requestId == $reqId)
-        not (InsuranceQuote(requestId == $reqId))
+        not InsuranceQuote(requestId == $reqId)
     then
-        var pricePerPerson = 39.0;
-
-        // Adjust for trip length (simplified)
-        // International trips get higher coverage
-        var totalPrice = pricePerPerson * req.travelers;
-
-        console.log("INSURANCE QUOTE: $" + pricePerPerson + " × " + req.travelers + " = $" + totalPrice.toFixed(2));
-
-        rfl.insert({
-            type: "com.travel.InsuranceQuote",
-            requestId: req.requestId,
-            pricePerPerson: pricePerPerson,
-            totalPrice: totalPrice,
+        insert InsuranceQuote {
+            requestId: $req.requestId,
+            pricePerPerson: 39.0,
+            totalPrice: 39.0 * $req.travelers,
             coverageLevel: "Standard"
-        });
+        }
 end
 
 rule "Insurance Quote - Declined"
@@ -319,68 +350,62 @@ rule "Insurance Quote - Declined"
     when
         $req: TravelRequest($reqId: requestId, includeInsurance == false)
         FlightQuote(requestId == $reqId)
-        not (InsuranceQuote(requestId == $reqId))
+        not InsuranceQuote(requestId == $reqId)
     then
-        console.log("INSURANCE: Customer declined coverage");
-
-        rfl.insert({
-            type: "com.travel.InsuranceQuote",
-            requestId: req.requestId,
+        insert InsuranceQuote {
+            requestId: $req.requestId,
             pricePerPerson: 0,
             totalPrice: 0,
             coverageLevel: "None"
-        });
+        }
 end
 
 // ============================================================================
 // PHASE 5: PACKAGE QUOTE (salience 70)
 // ============================================================================
 
-rule "Create Package Quote"
+rule "Create Package Quote - With Points Redemption"
     salience 70
     when
-        $req: TravelRequest($reqId: requestId, $points: loyaltyPoints)
+        $req: TravelRequest($reqId: requestId, loyaltyPoints >= 10000)
         $flight: FlightQuote(requestId == $reqId, $flightTotal: totalAllTravelers, $flightPoints: pointsEarned)
         $hotel: HotelQuote(requestId == $reqId, $hotelTotal: totalPrice, $hotelPoints: pointsEarned)
         $insurance: InsuranceQuote(requestId == $reqId, $insuranceTotal: totalPrice)
         $visa: VisaAlert(requestId == $reqId, $visaCost: cost)
-        not (PackageQuote(requestId == $reqId))
+        not PackageQuote(requestId == $reqId)
     then
-        // Points redemption (10,000 points = $100)
-        var pointsRedemption = 0.0;
-        if (req.loyaltyPoints >= 10000) {
-            var redeemablePoints = Math.floor(req.loyaltyPoints / 10000) * 10000;
-            pointsRedemption = Math.min(redeemablePoints / 100, 500); // Max $500 redemption
-            console.log("POINTS REDEMPTION: " + (pointsRedemption * 100) + " points = $" + pointsRedemption + " credit");
+        insert PackageQuote {
+            requestId: $req.requestId,
+            flightTotal: $flight.totalAllTravelers,
+            hotelTotal: $hotel.totalPrice,
+            insuranceTotal: $insurance.totalPrice,
+            visaCost: $visa.cost,
+            pointsRedemption: min(floor($req.loyaltyPoints / 10000) * 100, 500),
+            grandTotal: $flight.totalAllTravelers + $hotel.totalPrice + $insurance.totalPrice + $visa.cost - min(floor($req.loyaltyPoints / 10000) * 100, 500),
+            totalPointsEarned: $flight.pointsEarned + $hotel.pointsEarned
         }
+end
 
-        var grandTotal = flight.totalAllTravelers + hotel.totalPrice + insurance.totalPrice + visa.cost - pointsRedemption;
-        var totalPointsEarned = flight.pointsEarned + hotel.pointsEarned;
-
-        console.log("========================================");
-        console.log("PACKAGE QUOTE SUMMARY");
-        console.log("========================================");
-        console.log("Flight:     $" + flight.totalAllTravelers.toFixed(2));
-        console.log("Hotel:      $" + hotel.totalPrice.toFixed(2));
-        console.log("Insurance:  $" + insurance.totalPrice.toFixed(2));
-        console.log("Visa:       $" + visa.cost.toFixed(2));
-        console.log("Points:    -$" + pointsRedemption.toFixed(2));
-        console.log("----------------------------------------");
-        console.log("GRAND TOTAL: $" + grandTotal.toFixed(2));
-        console.log("Points Earned: " + totalPointsEarned);
-        console.log("========================================");
-
-        rfl.insert({
-            type: "com.travel.PackageQuote",
-            requestId: req.requestId,
-            flightTotal: flight.totalAllTravelers,
-            hotelTotal: hotel.totalPrice,
-            insuranceTotal: insurance.totalPrice,
-            visaCost: visa.cost,
-            pointsRedemption: pointsRedemption,
-            grandTotal: grandTotal,
-            totalPointsEarned: totalPointsEarned
-        });
+rule "Create Package Quote - No Points Redemption"
+    salience 69
+    when
+        $req: TravelRequest($reqId: requestId, loyaltyPoints < 10000)
+        $flight: FlightQuote(requestId == $reqId, $flightTotal: totalAllTravelers, $flightPoints: pointsEarned)
+        $hotel: HotelQuote(requestId == $reqId, $hotelTotal: totalPrice, $hotelPoints: pointsEarned)
+        $insurance: InsuranceQuote(requestId == $reqId, $insuranceTotal: totalPrice)
+        $visa: VisaAlert(requestId == $reqId, $visaCost: cost)
+        not PackageQuote(requestId == $reqId)
+    then
+        insert PackageQuote {
+            requestId: $req.requestId,
+            flightTotal: $flight.totalAllTravelers,
+            hotelTotal: $hotel.totalPrice,
+            insuranceTotal: $insurance.totalPrice,
+            visaCost: $visa.cost,
+            pointsRedemption: 0,
+            grandTotal: $flight.totalAllTravelers + $hotel.totalPrice + $insurance.totalPrice + $visa.cost,
+            totalPointsEarned: $flight.pointsEarned + $hotel.pointsEarned
+        }
 end
 
 // ============================================================================
@@ -392,35 +417,28 @@ rule "Issue - Visa Processing Time Warning"
     when
         $req: TravelRequest($reqId: requestId, $depDate: departureDate)
         $visa: VisaAlert(requestId == $reqId, required == true, processingDays > 5)
-        not (BookingIssue(requestId == $reqId, issueType == "VISA_TIME"))
+        not BookingIssue(requestId == $reqId, issueType == "VISA_TIME")
     then
-        console.log("WARNING: Visa requires " + visa.processingDays + " days processing");
-
-        rfl.insert({
-            type: "com.travel.BookingIssue",
-            requestId: req.requestId,
+        insert BookingIssue {
+            requestId: $req.requestId,
             issueType: "VISA_TIME",
-            message: "Visa processing takes " + visa.processingDays + " days - plan accordingly",
+            message: "Visa processing takes " + $visa.processingDays + " days - plan accordingly",
             blocking: false
-        });
+        }
 end
 
 rule "Issue - Insufficient Points for Redemption"
     salience 60
     when
         $req: TravelRequest($reqId: requestId, loyaltyPoints < 10000, loyaltyPoints > 0)
-        not (BookingIssue(requestId == $reqId, issueType == "LOW_POINTS"))
+        not BookingIssue(requestId == $reqId, issueType == "LOW_POINTS")
     then
-        var needed = 10000 - req.loyaltyPoints;
-        console.log("INFO: " + needed + " more points needed for redemption");
-
-        rfl.insert({
-            type: "com.travel.BookingIssue",
-            requestId: req.requestId,
+        insert BookingIssue {
+            requestId: $req.requestId,
             issueType: "LOW_POINTS",
-            message: "Earn " + needed + " more points to redeem for $100 credit",
+            message: "Earn more points to redeem for $100 credit",
             blocking: false
-        });
+        }
 end
 
 // ============================================================================

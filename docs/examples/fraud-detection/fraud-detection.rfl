@@ -61,27 +61,6 @@ declare HighRiskCountry
 end
 
 // ============================================================================
-// REFERENCE DATA INITIALIZATION
-// ============================================================================
-
-rule "Initialize High Risk Countries"
-    salience 1000
-    when
-        not HighRiskCountry()
-    then
-        console.log("Initializing high-risk country list...");
-
-        var highRiskCountries = ["NG", "RO", "RU", "UA", "BY", "KP", "IR", "VE"];
-        for (var i = 0; i < highRiskCountries.length; i++) {
-            rfl.insert({
-                type: "com.bank.fraud.HighRiskCountry",
-                countryCode: highRiskCountries[i],
-                riskLevel: "High"
-            });
-        }
-end
-
-// ============================================================================
 // PHASE 1: AMOUNT ANOMALY DETECTION (salience 100)
 // ============================================================================
 
@@ -93,18 +72,14 @@ rule "Signal - Large Transaction Amount"
         eval($amt > $profile.avgTransactionAmount * 3)
         not FraudSignal(transactionId == $id, signalType == "LARGE_AMOUNT")
     then
-        var ratio = (txn.amount / profile.avgTransactionAmount).toFixed(1);
-        console.log("SIGNAL: Large amount - $" + txn.amount + " is " + ratio + "x average");
-
-        rfl.insert({
-            type: "com.bank.fraud.FraudSignal",
-            transactionId: txn.transactionId,
+        insert FraudSignal {
+            transactionId: $txn.transactionId,
             signalType: "LARGE_AMOUNT",
             severity: "Medium",
             score: 20,
-            description: "Transaction " + ratio + "x larger than average",
-            timestamp: txn.timestamp
-        });
+            description: "Transaction significantly larger than average",
+            timestamp: $txn.timestamp
+        }
 end
 
 rule "Signal - Very Large Transaction"
@@ -113,37 +88,31 @@ rule "Signal - Very Large Transaction"
         $txn: Transaction($id: transactionId, amount > 5000) from entry-point "transaction-stream"
         not FraudSignal(transactionId == $id, signalType == "VERY_LARGE_AMOUNT")
     then
-        console.log("SIGNAL: Very large transaction - $" + txn.amount);
-
-        rfl.insert({
-            type: "com.bank.fraud.FraudSignal",
-            transactionId: txn.transactionId,
+        insert FraudSignal {
+            transactionId: $txn.transactionId,
             signalType: "VERY_LARGE_AMOUNT",
             severity: "High",
             score: 35,
             description: "Transaction exceeds $5,000 threshold",
-            timestamp: txn.timestamp
-        });
+            timestamp: $txn.timestamp
+        }
 end
 
 rule "Signal - Round Amount Suspicious"
     salience 100
     when
         $txn: Transaction($id: transactionId, $amt: amount) from entry-point "transaction-stream"
-        eval($amt >= 100 && $amt == Math.floor($amt) && $amt % 100 == 0)
+        eval($amt >= 100 && $amt == floor($amt) && fmod($amt, 100) == 0)
         not FraudSignal(transactionId == $id, signalType == "ROUND_AMOUNT")
     then
-        console.log("SIGNAL: Suspicious round amount - $" + txn.amount);
-
-        rfl.insert({
-            type: "com.bank.fraud.FraudSignal",
-            transactionId: txn.transactionId,
+        insert FraudSignal {
+            transactionId: $txn.transactionId,
             signalType: "ROUND_AMOUNT",
             severity: "Low",
             score: 15,
             description: "Large round amount often indicates card testing",
-            timestamp: txn.timestamp
-        });
+            timestamp: $txn.timestamp
+        }
 end
 
 rule "Signal - Just Under Reporting Threshold"
@@ -152,17 +121,14 @@ rule "Signal - Just Under Reporting Threshold"
         $txn: Transaction($id: transactionId, amount >= 9000, amount < 10000) from entry-point "transaction-stream"
         not FraudSignal(transactionId == $id, signalType == "STRUCTURING")
     then
-        console.log("SIGNAL: Structuring detected - $" + txn.amount + " (just under $10k limit)");
-
-        rfl.insert({
-            type: "com.bank.fraud.FraudSignal",
-            transactionId: txn.transactionId,
+        insert FraudSignal {
+            transactionId: $txn.transactionId,
             signalType: "STRUCTURING",
             severity: "High",
             score: 30,
             description: "Amount just below reporting threshold - possible structuring",
-            timestamp: txn.timestamp
-        });
+            timestamp: $txn.timestamp
+        }
 end
 
 // ============================================================================
@@ -176,17 +142,14 @@ rule "Signal - High Risk Country"
         HighRiskCountry(countryCode == $country)
         not FraudSignal(transactionId == $id, signalType == "HIGH_RISK_COUNTRY")
     then
-        console.log("SIGNAL: High risk country - " + txn.merchantCountry);
-
-        rfl.insert({
-            type: "com.bank.fraud.FraudSignal",
-            transactionId: txn.transactionId,
+        insert FraudSignal {
+            transactionId: $txn.transactionId,
             signalType: "HIGH_RISK_COUNTRY",
             severity: "High",
             score: 45,
-            description: "Transaction from high-risk country: " + txn.merchantCountry,
-            timestamp: txn.timestamp
-        });
+            description: "Transaction from high-risk country",
+            timestamp: $txn.timestamp
+        }
 end
 
 rule "Signal - New Country"
@@ -196,54 +159,13 @@ rule "Signal - New Country"
         $profile: AccountProfile(accountId == $acct, primaryCountry != $country)
         not FraudSignal(transactionId == $id, signalType == "NEW_COUNTRY")
     then
-        console.log("SIGNAL: New country detected - " + txn.merchantCountry + " (primary: " + profile.primaryCountry + ")");
-
-        rfl.insert({
-            type: "com.bank.fraud.FraudSignal",
-            transactionId: txn.transactionId,
+        insert FraudSignal {
+            transactionId: $txn.transactionId,
             signalType: "NEW_COUNTRY",
             severity: "Medium",
             score: 25,
-            description: "First transaction in " + txn.merchantCountry + " (normally " + profile.primaryCountry + ")",
-            timestamp: txn.timestamp
-        });
-end
-
-rule "Signal - Impossible Travel"
-    salience 95
-    when
-        $txn: Transaction($id: transactionId, $acct: accountId, $ts: timestamp, $lat: latitude, $lng: longitude) from entry-point "transaction-stream"
-        $profile: AccountProfile(accountId == $acct, lastKnownLatitude != 0, lastTransactionTime > 0)
-        eval($ts - $profile.lastTransactionTime < 3600000) // Within 1 hour
-        not FraudSignal(transactionId == $id, signalType == "IMPOSSIBLE_TRAVEL")
-    then
-        // Calculate distance using Haversine formula
-        var R = 3959; // Earth radius in miles
-        var lat1 = profile.lastKnownLatitude * Math.PI / 180;
-        var lat2 = txn.latitude * Math.PI / 180;
-        var dLat = (txn.latitude - profile.lastKnownLatitude) * Math.PI / 180;
-        var dLon = (txn.longitude - profile.lastKnownLongitude) * Math.PI / 180;
-        var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon/2) * Math.sin(dLon/2);
-        var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        var distance = R * c;
-
-        var timeHours = (txn.timestamp - profile.lastTransactionTime) / 3600000;
-        var speedNeeded = distance / timeHours;
-
-        // If speed needed > 500 mph, it's suspicious
-        if (speedNeeded > 500) {
-            console.log("SIGNAL: Impossible travel - " + distance.toFixed(0) + " miles in " + (timeHours * 60).toFixed(0) + " minutes");
-
-            rfl.insert({
-                type: "com.bank.fraud.FraudSignal",
-                transactionId: txn.transactionId,
-                signalType: "IMPOSSIBLE_TRAVEL",
-                severity: "Critical",
-                score: 50,
-                description: distance.toFixed(0) + " miles traveled in " + (timeHours * 60).toFixed(0) + " minutes (requires " + speedNeeded.toFixed(0) + " mph)",
-                timestamp: txn.timestamp
-            });
+            description: "First transaction in new country",
+            timestamp: $txn.timestamp
         }
 end
 
@@ -260,24 +182,21 @@ rule "Signal - Rapid Fire Transactions"
             Transaction(
                 accountId == $acct,
                 transactionId != $id,
-                timestamp > ($ts - 60000),  // Last 1 minute
+                timestamp > ($ts - 60000),
                 timestamp < $ts
             ) from entry-point "transaction-stream",
             count(1)
         )
         not FraudSignal(transactionId == $id, signalType == "RAPID_FIRE")
     then
-        console.log("SIGNAL: Rapid fire - " + count + " transactions in 1 minute");
-
-        rfl.insert({
-            type: "com.bank.fraud.FraudSignal",
-            transactionId: txn.transactionId,
+        insert FraudSignal {
+            transactionId: $txn.transactionId,
             signalType: "RAPID_FIRE",
             severity: "High",
             score: 40,
-            description: count + " transactions in the last minute",
-            timestamp: txn.timestamp
-        });
+            description: "Multiple transactions in the last minute",
+            timestamp: $txn.timestamp
+        }
 end
 
 rule "Signal - High Frequency"
@@ -288,24 +207,21 @@ rule "Signal - High Frequency"
             Transaction(
                 accountId == $acct,
                 transactionId != $id,
-                timestamp > ($ts - 600000),  // Last 10 minutes
+                timestamp > ($ts - 600000),
                 timestamp < $ts
             ) from entry-point "transaction-stream",
             count(1)
         )
         not FraudSignal(transactionId == $id, signalType == "HIGH_FREQUENCY")
     then
-        console.log("SIGNAL: High frequency - " + count + " transactions in 10 minutes");
-
-        rfl.insert({
-            type: "com.bank.fraud.FraudSignal",
-            transactionId: txn.transactionId,
+        insert FraudSignal {
+            transactionId: $txn.transactionId,
             signalType: "HIGH_FREQUENCY",
             severity: "Medium",
             score: 30,
-            description: count + " transactions in the last 10 minutes",
-            timestamp: txn.timestamp
-        });
+            description: "Many transactions in the last 10 minutes",
+            timestamp: $txn.timestamp
+        }
 end
 
 rule "Signal - ATM Hammering"
@@ -317,111 +233,130 @@ rule "Signal - ATM Hammering"
                 accountId == $acct,
                 transactionId != $id,
                 channel == "atm",
-                timestamp > ($ts - 1800000),  // Last 30 minutes
+                timestamp > ($ts - 1800000),
                 timestamp < $ts
             ) from entry-point "transaction-stream",
             count(1)
         )
         not FraudSignal(transactionId == $id, signalType == "ATM_HAMMERING")
     then
-        console.log("SIGNAL: ATM hammering - " + count + " ATM transactions in 30 minutes");
-
-        rfl.insert({
-            type: "com.bank.fraud.FraudSignal",
-            transactionId: txn.transactionId,
+        insert FraudSignal {
+            transactionId: $txn.transactionId,
             signalType: "ATM_HAMMERING",
             severity: "High",
             score: 35,
-            description: count + " ATM withdrawals in the last 30 minutes",
-            timestamp: txn.timestamp
-        });
+            description: "Multiple ATM withdrawals in the last 30 minutes",
+            timestamp: $txn.timestamp
+        }
 end
 
 // ============================================================================
 // PHASE 4: AGGREGATE RISK SCORING (salience 80)
 // ============================================================================
 
-rule "Calculate Total Risk Score"
+rule "Create Alert - Critical Risk"
     salience 80
     when
         $txn: Transaction($id: transactionId, $acct: accountId, $ts: timestamp) from entry-point "transaction-stream"
-        $totalScore: Number() from accumulate(
+        $totalScore: Number(intValue > 100) from accumulate(
             FraudSignal(transactionId == $id, $score: score),
             sum($score)
         )
-        eval($totalScore.intValue() > 0)
         not FraudAlert(transactionId == $id)
     then
-        var score = totalScore.intValue();
-        var riskLevel = "Low";
-        var action = "allow";
-
-        if (score > 100) {
-            riskLevel = "Critical";
-            action = "block_and_freeze";
-        } else if (score > 75) {
-            riskLevel = "Very High";
-            action = "block";
-        } else if (score > 50) {
-            riskLevel = "High";
-            action = "review";
-        } else if (score > 25) {
-            riskLevel = "Medium";
-            action = "allow_and_log";
+        insert FraudAlert {
+            alertId: "ALERT-" + $txn.transactionId,
+            transactionId: $txn.transactionId,
+            accountId: $txn.accountId,
+            totalScore: $totalScore.intValue(),
+            riskLevel: "Critical",
+            action: "block_and_freeze",
+            timestamp: $txn.timestamp
         }
-
-        var alertId = "ALERT-" + txn.transactionId;
-
-        console.log("=================================================");
-        console.log("FRAUD ALERT: " + riskLevel + " (Score: " + score + ")");
-        console.log("Action: " + action.toUpperCase());
-        console.log("Transaction: " + txn.transactionId + " - $" + txn.amount);
-        console.log("=================================================");
-
-        rfl.insert({
-            type: "com.bank.fraud.FraudAlert",
-            alertId: alertId,
-            transactionId: txn.transactionId,
-            accountId: txn.accountId,
-            totalScore: score,
-            riskLevel: riskLevel,
-            action: action,
-            timestamp: txn.timestamp
-        });
 end
 
-// ============================================================================
-// PHASE 5: AUTOMATED RESPONSE ACTIONS (salience 70)
-// ============================================================================
-
-rule "Action - Block Transaction"
-    salience 70
+rule "Create Alert - Very High Risk"
+    salience 79
     when
-        $alert: FraudAlert(action == "block" || action == "block_and_freeze")
+        $txn: Transaction($id: transactionId, $acct: accountId, $ts: timestamp) from entry-point "transaction-stream"
+        $totalScore: Number(intValue > 75, intValue <= 100) from accumulate(
+            FraudSignal(transactionId == $id, $score: score),
+            sum($score)
+        )
+        not FraudAlert(transactionId == $id)
     then
-        console.log("ACTION: Transaction " + alert.transactionId + " BLOCKED");
-        // In production: Call transaction gateway to decline
-        // gateway.declineTransaction(alert.transactionId);
+        insert FraudAlert {
+            alertId: "ALERT-" + $txn.transactionId,
+            transactionId: $txn.transactionId,
+            accountId: $txn.accountId,
+            totalScore: $totalScore.intValue(),
+            riskLevel: "Very High",
+            action: "block",
+            timestamp: $txn.timestamp
+        }
 end
 
-rule "Action - Freeze Account"
-    salience 70
+rule "Create Alert - High Risk"
+    salience 78
     when
-        $alert: FraudAlert(action == "block_and_freeze")
+        $txn: Transaction($id: transactionId, $acct: accountId, $ts: timestamp) from entry-point "transaction-stream"
+        $totalScore: Number(intValue > 50, intValue <= 75) from accumulate(
+            FraudSignal(transactionId == $id, $score: score),
+            sum($score)
+        )
+        not FraudAlert(transactionId == $id)
     then
-        console.log("ACTION: Account " + alert.accountId + " FROZEN - Immediate investigation required");
-        // In production: Call account service to freeze
-        // accountService.freezeAccount(alert.accountId);
+        insert FraudAlert {
+            alertId: "ALERT-" + $txn.transactionId,
+            transactionId: $txn.transactionId,
+            accountId: $txn.accountId,
+            totalScore: $totalScore.intValue(),
+            riskLevel: "High",
+            action: "review",
+            timestamp: $txn.timestamp
+        }
 end
 
-rule "Action - Send Review Alert"
-    salience 70
+rule "Create Alert - Medium Risk"
+    salience 77
     when
-        $alert: FraudAlert(action == "review")
+        $txn: Transaction($id: transactionId, $acct: accountId, $ts: timestamp) from entry-point "transaction-stream"
+        $totalScore: Number(intValue > 25, intValue <= 50) from accumulate(
+            FraudSignal(transactionId == $id, $score: score),
+            sum($score)
+        )
+        not FraudAlert(transactionId == $id)
     then
-        console.log("ACTION: Manual review required for transaction " + alert.transactionId);
-        // In production: Queue for fraud analyst review
-        // fraudQueue.addForReview(alert);
+        insert FraudAlert {
+            alertId: "ALERT-" + $txn.transactionId,
+            transactionId: $txn.transactionId,
+            accountId: $txn.accountId,
+            totalScore: $totalScore.intValue(),
+            riskLevel: "Medium",
+            action: "allow_and_log",
+            timestamp: $txn.timestamp
+        }
+end
+
+rule "Create Alert - Low Risk"
+    salience 76
+    when
+        $txn: Transaction($id: transactionId, $acct: accountId, $ts: timestamp) from entry-point "transaction-stream"
+        $totalScore: Number(intValue > 0, intValue <= 25) from accumulate(
+            FraudSignal(transactionId == $id, $score: score),
+            sum($score)
+        )
+        not FraudAlert(transactionId == $id)
+    then
+        insert FraudAlert {
+            alertId: "ALERT-" + $txn.transactionId,
+            transactionId: $txn.transactionId,
+            accountId: $txn.accountId,
+            totalScore: $totalScore.intValue(),
+            riskLevel: "Low",
+            action: "allow",
+            timestamp: $txn.timestamp
+        }
 end
 
 // ============================================================================

@@ -1,0 +1,27 @@
+package com.example
+
+declare Person
+    name: String
+    age: int
+    city: String
+end
+
+declare Pet
+    owner: String
+    type: String
+end
+
+rule "Find young people in London"
+when
+    $p: Person( age < 30, city == "London" )
+then
+    // Found young person
+end
+
+rule "Find cat owners"
+when
+    $person : Person()
+    $pet : Pet( type == "Cat", owner == $person.name )
+then
+    // Person owns a cat
+end

@@ -17,7 +17,7 @@ when
     $o : Order()
     $c : Customer(id == $o.customerId)
 then
-    console.log("Processing order " + o.id + " for customer " + c.name);
+    // Processing order
 end
 
 rule "Processing Complete"
@@ -26,5 +26,5 @@ when
     $o : Order()
     $p : PricingResult(orderId == $o.id)
 then
-    console.log("Order processing complete for order " + o.id);
+    // Order processing complete
 end

@@ -1,0 +1,20 @@
+package test.multi
+
+declare FactB
+    value: int
+end
+
+rule "Rule B"
+when
+    $b : FactB()
+then
+    // Rule B fired
+end
+
+rule "Cross Reference"
+when
+    $a : FactA()
+    $b : FactB()
+then
+    // Both FactA and FactB present
+end

@@ -1,6 +1,6 @@
-# RuleForge Examples
+# RulesForge Examples
 
-Real-world business rule examples demonstrating the full capabilities of the RuleForge rules engine.
+Real-world business rule examples demonstrating the full capabilities of the RulesForge rules engine.
 
 ## Example Categories
 
@@ -12,10 +12,12 @@ Real-world business rule examples demonstrating the full capabilities of the Rul
 | [Order Fulfillment](./order-fulfillment/) | E-commerce | Inventory management, discount stacking, shipping optimization |
 | [Travel Booking](./travel-booking/) | Travel Industry | Multi-service orchestration, eligibility checks, package pricing |
 | [Modular Rules](./modular-rules/) | Architecture | Multi-file imports, shared types, modular rule organization |
+| [Source Extraction](./JMESPATH_EXAMPLES.md) | Data Integration | `from jmespath`, `from dsv/csv`, source + accumulate |
 
 ## Quick Start
 
 Each example includes:
+
 - **README.md** - Business scenario, data model, and rules documentation
 - **\*.rfl** - Complete rule definitions in RFL format
 - **\*-sample.json / \*-test-data.json** - Test data for running the example
@@ -125,19 +127,23 @@ int main() {
 | Temporal Operators | - | - | ✓ | - | - | - |
 | Queries | ✓ | ✓ | ✓ | ✓ | ✓ | - |
 | Multi-phase Execution | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Source Clauses (`jmespath/dsv/csv`) | - | - | - | - | - | - |
 
 ## Example Details
 
 ### 1. Loan Eligibility
+
 **Domain**: Banking / Financial Services
 
 Demonstrates automated loan application processing with:
+
 - Credit score categorization (Excellent → Poor)
 - Risk factor assessment (debt-to-income, employment history)
 - Auto-rejection rules for disqualifying conditions
 - Tiered loan decisions based on risk levels
 
 **Key Patterns**:
+
 ```rfl
 // Risk factor accumulation
 $riskCount: Number() from accumulate(
@@ -150,15 +156,18 @@ not LoanDecision(applicantId == $appId)
 ```
 
 ### 2. Insurance Pricing
+
 **Domain**: Auto Insurance Underwriting
 
 Demonstrates risk-based pricing with:
+
 - Driver risk profiling (age, violations, claims)
 - Vehicle risk assessment (age, type, value)
 - Premium calculation with multiplicative factors
 - Automatic decline rules for high-risk profiles
 
 **Key Patterns**:
+
 ```rfl
 // Multi-factor risk accumulation
 $riskFactors: Number() from accumulate(
@@ -168,15 +177,18 @@ $riskFactors: Number() from accumulate(
 ```
 
 ### 3. Fraud Detection
+
 **Domain**: Transaction Monitoring / Security
 
 Demonstrates Complex Event Processing (CEP) with:
+
 - Real-time transaction analysis via entry points
 - Temporal reasoning for velocity checks
 - Geographic anomaly detection
 - Alert escalation based on signal accumulation
 
 **Key Patterns**:
+
 ```rfl
 // Temporal velocity check
 $txn: Transaction() from entry-point "transaction-stream"
@@ -193,15 +205,18 @@ $signalCount: Number(intValue >= 3) from accumulate(
 ```
 
 ### 4. Order Fulfillment
+
 **Domain**: E-commerce / Logistics
 
 Demonstrates order processing workflow with:
+
 - Multi-warehouse inventory validation
 - Cascading discount calculations (loyalty, bulk, promo)
 - Shipping method selection with activation groups
 - Fulfillment routing to optimal warehouse
 
 **Key Patterns**:
+
 ```rfl
 // Activation group for exclusive shipping rules
 activation-group "shipping-cost"
@@ -214,15 +229,18 @@ forall(
 ```
 
 ### 5. Travel Booking
+
 **Domain**: Travel Industry
 
 Demonstrates multi-service orchestration with:
+
 - Flight pricing with loyalty discounts
 - Hotel matching and package bundling
 - Visa requirement validation
 - Points redemption calculations
 
 **Key Patterns**:
+
 ```rfl
 // Multi-entity join across services
 $req: TravelRequest($reqId: requestId, $dest: destination)
@@ -231,15 +249,18 @@ $hotel: HotelOption(destinationCity == $dest, stars >= $stars)
 ```
 
 ### 6. Modular Rules
+
 **Domain**: Architecture / Best Practices
 
 Demonstrates multi-file rule organization with:
+
 - Shared type declarations in separate files
 - Import statements for code reuse
 - Validation rules separated from business rules
 - Main entry point that imports all modules
 
 **Key Patterns**:
+
 ```rfl
 // Import shared types from another file
 import ecommerce.common.types
@@ -253,6 +274,7 @@ $o : Order(customerId == $c.id)
 ```
 
 **File Structure**:
+
 ```
 modular-rules/
 ├── common/types.rfl      # Shared declarations
@@ -260,6 +282,30 @@ modular-rules/
 ├── pricing-rules.rfl     # Pricing logic
 └── main.rfl              # Entry point
 ```
+
+### 7. Source Extraction (JSON/CSV)
+
+**Domain**: Data Integration / External Row Sources
+
+Demonstrates source-driven pattern matching with:
+
+- `from jmespath(...)` using JSON string/file input
+- `from dsv(...)` and `from csv(...)` with filter expressions
+- `accumulate(...)` where the source pattern itself uses `from jmespath/csv`
+
+**Key Patterns**:
+
+```rfl
+$p: Purchase() from jmespath(file("data/orders.json"), "orders[*]")
+$r: Purchase() from csv(file("data/orders.csv"), "amount > 100")
+
+$sum: Number(doubleValue > 1000.0) from accumulate(
+    $x: Purchase() from jmespath(file("data/orders.json"), "orders[*]"),
+    sum($x.amount)
+)
+```
+
+See full examples in [DataSource_EXAMPLES.md](./DataSource_EXAMPLES.md).
 
 ## Additional Resources
 
@@ -269,7 +315,7 @@ modular-rules/
 |------|-------------|
 | `ecommerce-sample-data.json` | Generic e-commerce entities |
 | `iot-sensor-sample-data.json` | IoT sensor readings for event processing |
-| `JMESPATH_EXAMPLES.md` | JMESPath query examples for JSON data |
+| `DataSource_EXAMPLES.md` | JMESPath query examples for JSON data |
 
 ### Related Documentation
 
@@ -289,6 +335,7 @@ docs/examples/your-example/
 ```
 
 Each example should:
+
 1. Represent a realistic business domain
 2. Demonstrate specific engine features
 3. Include comprehensive test scenarios

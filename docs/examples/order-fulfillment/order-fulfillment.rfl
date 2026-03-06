@@ -123,18 +123,14 @@ rule "Validate - Check Item Inventory"
             Inventory(productId == $prodId, $avail: quantityAvailable, $reserved: quantityReserved),
             sum($avail - $reserved)
         )
-        eval(totalAvailable.intValue() < $item.quantity)
-        not (OrderValidation(orderId == $orderId, issue contains $prodId))
+        eval($totalAvailable.intValue() < $qty)
+        not OrderValidation(orderId == $orderId, isValid == false)
     then
-        console.log("VALIDATION FAILED: Insufficient stock for " + item.productName +
-                    " (need " + item.quantity + ", have " + totalAvailable + ")");
-
-        rfl.insert({
-            type: "com.ecommerce.OrderValidation",
-            orderId: item.orderId,
+        insert OrderValidation {
+            orderId: $item.orderId,
             isValid: false,
-            issue: "Insufficient stock for product " + item.productId
-        });
+            issue: "Insufficient stock for product " + $item.productId
+        }
 end
 
 rule "Validate - Order Passes"
@@ -142,17 +138,14 @@ rule "Validate - Order Passes"
     when
         OrderItem($orderId: orderId)
         $order: Order(orderId == $orderId)
-        not (OrderValidation(orderId == $orderId, isValid == false))
-        not (OrderValidation(orderId == $orderId, isValid == true))
+        not OrderValidation(orderId == $orderId, isValid == false)
+        not OrderValidation(orderId == $orderId, isValid == true)
     then
-        console.log("VALIDATION PASSED: Order " + order.orderId);
-
-        rfl.insert({
-            type: "com.ecommerce.OrderValidation",
-            orderId: order.orderId,
+        insert OrderValidation {
+            orderId: $order.orderId,
             isValid: true,
             issue: ""
-        });
+        }
 end
 
 // ============================================================================
@@ -164,19 +157,15 @@ rule "Discount - Bulk Order Item"
     when
         $item: OrderItem($itemId: itemId, $orderId: orderId, quantity >= 10, $price: unitPrice, $qty: quantity)
         OrderValidation(orderId == $orderId, isValid == true)
-        not (ItemDiscount(itemId == $itemId, discountType == "BULK"))
+        not ItemDiscount(itemId == $itemId, discountType == "BULK")
     then
-        var discountAmount = item.unitPrice * item.quantity * 0.10;
-        console.log("DISCOUNT: Bulk order discount on " + item.productName + " - $" + discountAmount.toFixed(2));
-
-        rfl.insert({
-            type: "com.ecommerce.ItemDiscount",
-            itemId: item.itemId,
-            orderId: item.orderId,
+        insert ItemDiscount {
+            itemId: $item.itemId,
+            orderId: $item.orderId,
             discountType: "BULK",
-            discountAmount: discountAmount,
+            discountAmount: $item.unitPrice * $item.quantity * 0.10,
             reason: "10% bulk order discount (10+ items)"
-        });
+        }
 end
 
 rule "Discount - Category Promotion"
@@ -185,19 +174,15 @@ rule "Discount - Category Promotion"
         $item: OrderItem($itemId: itemId, $orderId: orderId, $cat: category, $price: unitPrice, $qty: quantity)
         $promo: Promotion(validCategory == $cat, active == true, discountType == "percent")
         OrderValidation(orderId == $orderId, isValid == true)
-        not (ItemDiscount(itemId == $itemId, discountType == "PROMO"))
+        not ItemDiscount(itemId == $itemId, discountType == "PROMO")
     then
-        var discountAmount = item.unitPrice * item.quantity * (promo.discountValue / 100);
-        console.log("DISCOUNT: " + promo.promoCode + " applied to " + item.productName + " - $" + discountAmount.toFixed(2));
-
-        rfl.insert({
-            type: "com.ecommerce.ItemDiscount",
-            itemId: item.itemId,
-            orderId: item.orderId,
+        insert ItemDiscount {
+            itemId: $item.itemId,
+            orderId: $item.orderId,
             discountType: "PROMO",
-            discountAmount: discountAmount,
-            reason: promo.promoCode + " - " + promo.discountValue + "% off " + item.category
-        });
+            discountAmount: $item.unitPrice * $item.quantity * ($promo.discountValue / 100),
+            reason: $promo.promoCode + " - " + $promo.discountValue + "% off"
+        }
 end
 
 // ============================================================================
@@ -213,18 +198,14 @@ rule "Discount - Platinum Customer"
             OrderItem(orderId == $orderId, $price: unitPrice, $qty: quantity),
             sum($price * $qty)
         )
-        not (OrderDiscount(orderId == $orderId, discountType == "LOYALTY"))
+        not OrderDiscount(orderId == $orderId, discountType == "LOYALTY")
     then
-        var discountAmount = subtotal * 0.15;
-        console.log("DISCOUNT: Platinum loyalty - $" + discountAmount.toFixed(2) + " (15%)");
-
-        rfl.insert({
-            type: "com.ecommerce.OrderDiscount",
-            orderId: order.orderId,
+        insert OrderDiscount {
+            orderId: $order.orderId,
             discountType: "LOYALTY",
-            discountAmount: discountAmount,
+            discountAmount: $subtotal.doubleValue() * 0.15,
             reason: "Platinum member 15% discount"
-        });
+        }
 end
 
 rule "Discount - Gold Customer"
@@ -236,18 +217,14 @@ rule "Discount - Gold Customer"
             OrderItem(orderId == $orderId, $price: unitPrice, $qty: quantity),
             sum($price * $qty)
         )
-        not (OrderDiscount(orderId == $orderId, discountType == "LOYALTY"))
+        not OrderDiscount(orderId == $orderId, discountType == "LOYALTY")
     then
-        var discountAmount = subtotal * 0.10;
-        console.log("DISCOUNT: Gold loyalty - $" + discountAmount.toFixed(2) + " (10%)");
-
-        rfl.insert({
-            type: "com.ecommerce.OrderDiscount",
-            orderId: order.orderId,
+        insert OrderDiscount {
+            orderId: $order.orderId,
             discountType: "LOYALTY",
-            discountAmount: discountAmount,
+            discountAmount: $subtotal.doubleValue() * 0.10,
             reason: "Gold member 10% discount"
-        });
+        }
 end
 
 rule "Discount - Silver Customer"
@@ -259,18 +236,14 @@ rule "Discount - Silver Customer"
             OrderItem(orderId == $orderId, $price: unitPrice, $qty: quantity),
             sum($price * $qty)
         )
-        not (OrderDiscount(orderId == $orderId, discountType == "LOYALTY"))
+        not OrderDiscount(orderId == $orderId, discountType == "LOYALTY")
     then
-        var discountAmount = subtotal * 0.05;
-        console.log("DISCOUNT: Silver loyalty - $" + discountAmount.toFixed(2) + " (5%)");
-
-        rfl.insert({
-            type: "com.ecommerce.OrderDiscount",
-            orderId: order.orderId,
+        insert OrderDiscount {
+            orderId: $order.orderId,
             discountType: "LOYALTY",
-            discountAmount: discountAmount,
+            discountAmount: $subtotal.doubleValue() * 0.05,
             reason: "Silver member 5% discount"
-        });
+        }
 end
 
 // ============================================================================
@@ -287,17 +260,14 @@ rule "Shipping - Free Ground Over $75"
             OrderItem(orderId == $orderId, $price: unitPrice, $qty: quantity),
             sum($price * $qty)
         )
-        not (OrderDiscount(orderId == $orderId, discountType == "FREE_SHIPPING"))
+        not OrderDiscount(orderId == $orderId, discountType == "FREE_SHIPPING")
     then
-        console.log("SHIPPING: Free ground shipping (order over $75)");
-
-        rfl.insert({
-            type: "com.ecommerce.OrderDiscount",
-            orderId: order.orderId,
+        insert OrderDiscount {
+            orderId: $order.orderId,
             discountType: "FREE_SHIPPING",
             discountAmount: 0,
             reason: "Free ground shipping on orders over $75"
-        });
+        }
 end
 
 rule "Shipping - Express Domestic"
@@ -310,20 +280,14 @@ rule "Shipping - Express Domestic"
             OrderItem(orderId == $orderId, $w: weight, $qty: quantity),
             sum($w * $qty)
         )
-        not (OrderDiscount(orderId == $orderId, discountType == "SHIPPING_CALC"))
+        not OrderDiscount(orderId == $orderId, discountType == "SHIPPING_CALC")
     then
-        var baseCost = 12.99;
-        var weightCost = totalWeight * 0.50;
-        var shippingCost = baseCost + weightCost;
-        console.log("SHIPPING: Express domestic - $" + shippingCost.toFixed(2));
-
-        rfl.insert({
-            type: "com.ecommerce.OrderDiscount",
-            orderId: order.orderId,
+        insert OrderDiscount {
+            orderId: $order.orderId,
             discountType: "SHIPPING_CALC",
-            discountAmount: -shippingCost,
-            reason: "Express shipping: $" + shippingCost.toFixed(2)
-        });
+            discountAmount: -(12.99 + $totalWeight.doubleValue() * 0.50),
+            reason: "Express shipping"
+        }
 end
 
 rule "Shipping - Standard Domestic"
@@ -336,21 +300,15 @@ rule "Shipping - Standard Domestic"
             OrderItem(orderId == $orderId, $w: weight, $qty: quantity),
             sum($w * $qty)
         )
-        not (OrderDiscount(orderId == $orderId, discountType == "FREE_SHIPPING"))
-        not (OrderDiscount(orderId == $orderId, discountType == "SHIPPING_CALC"))
+        not OrderDiscount(orderId == $orderId, discountType == "FREE_SHIPPING")
+        not OrderDiscount(orderId == $orderId, discountType == "SHIPPING_CALC")
     then
-        var baseCost = 5.99;
-        var weightCost = totalWeight * 0.25;
-        var shippingCost = baseCost + weightCost;
-        console.log("SHIPPING: Standard domestic - $" + shippingCost.toFixed(2));
-
-        rfl.insert({
-            type: "com.ecommerce.OrderDiscount",
-            orderId: order.orderId,
+        insert OrderDiscount {
+            orderId: $order.orderId,
             discountType: "SHIPPING_CALC",
-            discountAmount: -shippingCost,
-            reason: "Standard shipping: $" + shippingCost.toFixed(2)
-        });
+            discountAmount: -(5.99 + $totalWeight.doubleValue() * 0.25),
+            reason: "Standard shipping"
+        }
 end
 
 rule "Shipping - International"
@@ -363,20 +321,14 @@ rule "Shipping - International"
             OrderItem(orderId == $orderId, $w: weight, $qty: quantity),
             sum($w * $qty)
         )
-        not (OrderDiscount(orderId == $orderId, discountType == "SHIPPING_CALC"))
+        not OrderDiscount(orderId == $orderId, discountType == "SHIPPING_CALC")
     then
-        var baseCost = 24.99;
-        var weightCost = totalWeight * 1.50;
-        var shippingCost = baseCost + weightCost;
-        console.log("SHIPPING: International - $" + shippingCost.toFixed(2));
-
-        rfl.insert({
-            type: "com.ecommerce.OrderDiscount",
-            orderId: order.orderId,
+        insert OrderDiscount {
+            orderId: $order.orderId,
             discountType: "SHIPPING_CALC",
-            discountAmount: -shippingCost,
-            reason: "International shipping: $" + shippingCost.toFixed(2)
-        });
+            discountAmount: -(24.99 + $totalWeight.doubleValue() * 1.50),
+            reason: "International shipping"
+        }
 end
 
 // ============================================================================
@@ -404,36 +356,17 @@ rule "Calculate Final Pricing"
             OrderDiscount(orderId == $orderId, discountType == "SHIPPING_CALC", $amt: discountAmount),
             sum($amt)
         )
-        not (PricingResult(orderId == $orderId))
+        not PricingResult(orderId == $orderId)
     then
-        var sub = subtotal.doubleValue();
-        var itemDisc = itemDiscounts.doubleValue();
-        var orderDisc = orderDiscounts.doubleValue();
-        var shipping = Math.abs(shippingCost.doubleValue());
-
-        var taxableAmount = sub - itemDisc - orderDisc;
-        var tax = taxableAmount * 0.0875; // 8.75% tax
-        var total = taxableAmount + shipping + tax;
-
-        console.log("=== PRICING SUMMARY ===");
-        console.log("Subtotal:        $" + sub.toFixed(2));
-        console.log("Item Discounts:  -$" + itemDisc.toFixed(2));
-        console.log("Order Discounts: -$" + orderDisc.toFixed(2));
-        console.log("Shipping:        $" + shipping.toFixed(2));
-        console.log("Tax (8.75%):     $" + tax.toFixed(2));
-        console.log("TOTAL:           $" + total.toFixed(2));
-        console.log("=======================");
-
-        rfl.insert({
-            type: "com.ecommerce.PricingResult",
-            orderId: order.orderId,
-            subtotal: sub,
-            itemDiscounts: itemDisc,
-            orderDiscounts: orderDisc,
-            shippingCost: shipping,
-            taxAmount: tax,
-            totalAmount: total
-        });
+        insert PricingResult {
+            orderId: $order.orderId,
+            subtotal: $subtotal.doubleValue(),
+            itemDiscounts: $itemDiscounts.doubleValue(),
+            orderDiscounts: $orderDiscounts.doubleValue(),
+            shippingCost: abs($shippingCost.doubleValue()),
+            taxAmount: ($subtotal.doubleValue() - $itemDiscounts.doubleValue() - $orderDiscounts.doubleValue()) * 0.0875,
+            totalAmount: ($subtotal.doubleValue() - $itemDiscounts.doubleValue() - $orderDiscounts.doubleValue()) * 1.0875 + abs($shippingCost.doubleValue())
+        }
 end
 
 // ============================================================================
@@ -448,19 +381,16 @@ rule "Fulfillment - Same State Warehouse"
         OrderValidation(orderId == $orderId, isValid == true)
         $warehouse: Warehouse($whId: warehouseId, state == $state)
         $inv: Inventory(warehouseId == $whId, productId == $prodId, quantityAvailable >= $qty)
-        not (FulfillmentPlan(orderId == $orderId, itemId == $itemId))
+        not FulfillmentPlan(orderId == $orderId, itemId == $itemId)
     then
-        console.log("FULFILLMENT: " + item.productName + " from " + warehouse.name + " (same state)");
-
-        rfl.insert({
-            type: "com.ecommerce.FulfillmentPlan",
-            orderId: order.orderId,
-            itemId: item.itemId,
-            warehouseId: warehouse.warehouseId,
+        insert FulfillmentPlan {
+            orderId: $order.orderId,
+            itemId: $item.itemId,
+            warehouseId: $warehouse.warehouseId,
             carrier: "UPS",
             shippingMethod: "Ground",
             shippingCost: 5.99
-        });
+        }
 end
 
 rule "Fulfillment - Any Available Warehouse"
@@ -471,19 +401,16 @@ rule "Fulfillment - Any Available Warehouse"
         OrderValidation(orderId == $orderId, isValid == true)
         $warehouse: Warehouse($whId: warehouseId)
         $inv: Inventory(warehouseId == $whId, productId == $prodId, quantityAvailable >= $qty)
-        not (FulfillmentPlan(orderId == $orderId, itemId == $itemId))
+        not FulfillmentPlan(orderId == $orderId, itemId == $itemId)
     then
-        console.log("FULFILLMENT: " + item.productName + " from " + warehouse.name);
-
-        rfl.insert({
-            type: "com.ecommerce.FulfillmentPlan",
-            orderId: order.orderId,
-            itemId: item.itemId,
-            warehouseId: warehouse.warehouseId,
+        insert FulfillmentPlan {
+            orderId: $order.orderId,
+            itemId: $item.itemId,
+            warehouseId: $warehouse.warehouseId,
             carrier: "FedEx",
             shippingMethod: "Ground",
             shippingCost: 7.99
-        });
+        }
 end
 
 // ============================================================================
@@ -494,38 +421,31 @@ rule "Alert - Low Stock"
     salience 30
     when
         $inv: Inventory($whId: warehouseId, $prodId: productId, $avail: quantityAvailable, $reorder: reorderPoint)
-        eval(inv.quantityAvailable <= inv.reorderPoint && inv.quantityAvailable > 0)
-        not (InventoryAlert(warehouseId == $whId, productId == $prodId, alertType == "LOW_STOCK"))
+        eval($avail <= $reorder && $avail > 0)
+        not InventoryAlert(warehouseId == $whId, productId == $prodId, alertType == "LOW_STOCK")
     then
-        console.log("ALERT: Low stock - " + inv.productId + " at " + inv.warehouseId +
-                    " (" + inv.quantityAvailable + " remaining)");
-
-        rfl.insert({
-            type: "com.ecommerce.InventoryAlert",
-            warehouseId: inv.warehouseId,
-            productId: inv.productId,
+        insert InventoryAlert {
+            warehouseId: $inv.warehouseId,
+            productId: $inv.productId,
             alertType: "LOW_STOCK",
-            currentQuantity: inv.quantityAvailable,
-            threshold: inv.reorderPoint
-        });
+            currentQuantity: $inv.quantityAvailable,
+            threshold: $inv.reorderPoint
+        }
 end
 
 rule "Alert - Out of Stock"
     salience 30
     when
         $inv: Inventory($whId: warehouseId, $prodId: productId, quantityAvailable == 0)
-        not (InventoryAlert(warehouseId == $whId, productId == $prodId, alertType == "OUT_OF_STOCK"))
+        not InventoryAlert(warehouseId == $whId, productId == $prodId, alertType == "OUT_OF_STOCK")
     then
-        console.log("ALERT: OUT OF STOCK - " + inv.productId + " at " + inv.warehouseId);
-
-        rfl.insert({
-            type: "com.ecommerce.InventoryAlert",
-            warehouseId: inv.warehouseId,
-            productId: inv.productId,
+        insert InventoryAlert {
+            warehouseId: $inv.warehouseId,
+            productId: $inv.productId,
             alertType: "OUT_OF_STOCK",
             currentQuantity: 0,
             threshold: 0
-        });
+        }
 end
 
 // ============================================================================
@@ -542,16 +462,13 @@ rule "Status - Order Confirmed"
             $item: OrderItem(orderId == $orderId)
             FulfillmentPlan(orderId == $orderId, itemId == $item.itemId)
         )
-        not (OrderStatus(orderId == $orderId))
+        not OrderStatus(orderId == $orderId)
     then
-        console.log("STATUS: Order " + order.orderId + " CONFIRMED");
-
-        rfl.insert({
-            type: "com.ecommerce.OrderStatus",
-            orderId: order.orderId,
+        insert OrderStatus {
+            orderId: $order.orderId,
             status: "CONFIRMED",
             message: "Order confirmed and ready for fulfillment"
-        });
+        }
 end
 
 rule "Status - Order Failed Validation"
@@ -559,16 +476,13 @@ rule "Status - Order Failed Validation"
     when
         $order: Order($orderId: orderId)
         $validation: OrderValidation(orderId == $orderId, isValid == false)
-        not (OrderStatus(orderId == $orderId))
+        not OrderStatus(orderId == $orderId)
     then
-        console.log("STATUS: Order " + order.orderId + " FAILED - " + validation.issue);
-
-        rfl.insert({
-            type: "com.ecommerce.OrderStatus",
-            orderId: order.orderId,
+        insert OrderStatus {
+            orderId: $order.orderId,
             status: "FAILED",
-            message: "Order failed: " + validation.issue
-        });
+            message: "Order failed: " + $validation.issue
+        }
 end
 
 // ============================================================================

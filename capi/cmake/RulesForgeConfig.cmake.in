@@ -1,0 +1,10 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/RulesForgeTargets.cmake")
+
+check_required_components(RulesForge)
+
+# Provide convenient alias
+if(NOT TARGET RulesForge::RulesForge)
+    add_library(RulesForge::RulesForge ALIAS RulesForge::rule_forge)
+endif()

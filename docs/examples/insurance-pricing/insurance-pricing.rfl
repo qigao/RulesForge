@@ -73,169 +73,263 @@ end
 // PHASE 1: DRIVER RISK PROFILING (salience 100)
 // ============================================================================
 
-rule "Driver Profile - Young Driver High Risk"
+rule "Driver Profile - Young Driver Clean Record"
     salience 100
     when
-        $app: InsuranceApplication(age < 25, $id: applicationId)
+        $app: InsuranceApplication(age < 25, $id: applicationId, dui == false, accidentCount == 0, violationCount < 2, licenseYears >= 3)
         not DriverRiskProfile(applicationId == $id)
     then
-        var expLevel = app.licenseYears >= 3 ? "Moderate" : "New";
-        var record = "Clean";
-        var riskScore = 60;
-
-        if (app.dui) {
-            record = "Uninsurable";
-            riskScore = 100;
-        } else if (app.accidentCount >= 2 || app.violationCount >= 4) {
-            record = "Major Issues";
-            riskScore = 85;
-        } else if (app.accidentCount >= 1 || app.violationCount >= 2) {
-            record = "Minor Issues";
-            riskScore = 70;
-        }
-
-        console.log("Driver Profile: " + app.applicantName + " - Young (" + app.age + "), " + record);
-
-        rfl.insert({
-            type: "com.insurance.auto.DriverRiskProfile",
-            applicationId: app.applicationId,
+        insert DriverRiskProfile {
+            applicationId: $app.applicationId,
             ageCategory: "Young",
-            experienceLevel: expLevel,
-            drivingRecord: record,
-            riskScore: riskScore
-        });
+            experienceLevel: "Moderate",
+            drivingRecord: "Clean",
+            riskScore: 60
+        }
 end
 
-rule "Driver Profile - Adult Standard Risk"
+rule "Driver Profile - Young Driver Minor Issues"
     salience 100
     when
-        $app: InsuranceApplication(age >= 25, age <= 65, $id: applicationId)
+        $app: InsuranceApplication(age < 25, $id: applicationId, dui == false, accidentCount < 2, violationCount >= 2, violationCount < 4)
         not DriverRiskProfile(applicationId == $id)
     then
-        var expLevel = "Experienced";
-        if (app.licenseYears < 2) {
-            expLevel = "New";
-        } else if (app.licenseYears < 5) {
-            expLevel = "Moderate";
+        insert DriverRiskProfile {
+            applicationId: $app.applicationId,
+            ageCategory: "Young",
+            experienceLevel: "New",
+            drivingRecord: "Minor Issues",
+            riskScore: 70
         }
+end
 
-        var record = "Clean";
-        var riskScore = 30;
-
-        if (app.dui) {
-            record = "Uninsurable";
-            riskScore = 100;
-        } else if (app.accidentCount >= 2 || app.violationCount >= 4) {
-            record = "Major Issues";
-            riskScore = 70;
-        } else if (app.accidentCount >= 1 || app.violationCount >= 1) {
-            record = "Minor Issues";
-            riskScore = 45;
+rule "Driver Profile - Young Driver Major Issues"
+    salience 100
+    when
+        $app: InsuranceApplication(age < 25, $id: applicationId, dui == false)
+        eval($app.accidentCount >= 2 || $app.violationCount >= 4)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId: $app.applicationId,
+            ageCategory: "Young",
+            experienceLevel: "New",
+            drivingRecord: "Major Issues",
+            riskScore: 85
         }
+end
 
-        console.log("Driver Profile: " + app.applicantName + " - Adult (" + app.age + "), " + record);
-
-        rfl.insert({
-            type: "com.insurance.auto.DriverRiskProfile",
-            applicationId: app.applicationId,
+rule "Driver Profile - Adult Clean Record"
+    salience 100
+    when
+        $app: InsuranceApplication(age >= 25, age <= 65, $id: applicationId, dui == false, accidentCount == 0, violationCount == 0)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId: $app.applicationId,
             ageCategory: "Adult",
-            experienceLevel: expLevel,
-            drivingRecord: record,
-            riskScore: riskScore
-        });
+            experienceLevel: "Experienced",
+            drivingRecord: "Clean",
+            riskScore: 30
+        }
 end
 
-rule "Driver Profile - Senior Driver"
-    salience 100
+rule "Driver Profile - Adult Minor Issues"
+    salience 99
     when
-        $app: InsuranceApplication(age > 65, $id: applicationId)
+        $app: InsuranceApplication(age >= 25, age <= 65, $id: applicationId, dui == false)
+        eval($app.accidentCount >= 1 || $app.violationCount >= 1)
+        eval($app.accidentCount < 2 && $app.violationCount < 4)
         not DriverRiskProfile(applicationId == $id)
     then
-        var expLevel = "Experienced";
-        var record = "Clean";
-        var riskScore = 45;
-
-        if (app.dui) {
-            record = "Uninsurable";
-            riskScore = 100;
-        } else if (app.accidentCount >= 2) {
-            record = "Major Issues";
-            riskScore = 80;
-        } else if (app.accidentCount >= 1 || app.violationCount >= 2) {
-            record = "Minor Issues";
-            riskScore = 60;
+        insert DriverRiskProfile {
+            applicationId: $app.applicationId,
+            ageCategory: "Adult",
+            experienceLevel: "Experienced",
+            drivingRecord: "Minor Issues",
+            riskScore: 45
         }
+end
 
-        // Additional risk for very elderly drivers
-        if (app.age > 80) {
-            riskScore = riskScore + 15;
+rule "Driver Profile - Adult Major Issues"
+    salience 98
+    when
+        $app: InsuranceApplication(age >= 25, age <= 65, $id: applicationId, dui == false)
+        eval($app.accidentCount >= 2 || $app.violationCount >= 4)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId: $app.applicationId,
+            ageCategory: "Adult",
+            experienceLevel: "Experienced",
+            drivingRecord: "Major Issues",
+            riskScore: 70
         }
+end
 
-        console.log("Driver Profile: " + app.applicantName + " - Senior (" + app.age + "), " + record);
-
-        rfl.insert({
-            type: "com.insurance.auto.DriverRiskProfile",
-            applicationId: app.applicationId,
+rule "Driver Profile - Senior Clean Record"
+    salience 100
+    when
+        $app: InsuranceApplication(age > 65, age <= 80, $id: applicationId, dui == false, accidentCount == 0, violationCount < 2)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId: $app.applicationId,
             ageCategory: "Senior",
-            experienceLevel: expLevel,
-            drivingRecord: record,
-            riskScore: riskScore
-        });
+            experienceLevel: "Experienced",
+            drivingRecord: "Clean",
+            riskScore: 45
+        }
+end
+
+rule "Driver Profile - Senior Minor Issues"
+    salience 99
+    when
+        $app: InsuranceApplication(age > 65, age <= 80, $id: applicationId, dui == false)
+        eval($app.accidentCount >= 1 || $app.violationCount >= 2)
+        eval($app.accidentCount < 2)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId: $app.applicationId,
+            ageCategory: "Senior",
+            experienceLevel: "Experienced",
+            drivingRecord: "Minor Issues",
+            riskScore: 60
+        }
+end
+
+rule "Driver Profile - Senior Major Issues"
+    salience 98
+    when
+        $app: InsuranceApplication(age > 65, $id: applicationId, dui == false, accidentCount >= 2)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId: $app.applicationId,
+            ageCategory: "Senior",
+            experienceLevel: "Experienced",
+            drivingRecord: "Major Issues",
+            riskScore: 80
+        }
+end
+
+rule "Driver Profile - Very Elderly"
+    salience 100
+    when
+        $app: InsuranceApplication(age > 80, $id: applicationId, dui == false, accidentCount < 2)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId: $app.applicationId,
+            ageCategory: "Senior",
+            experienceLevel: "Experienced",
+            drivingRecord: "Clean",
+            riskScore: 60
+        }
+end
+
+rule "Driver Profile - DUI History"
+    salience 110
+    when
+        $app: InsuranceApplication($id: applicationId, dui == true)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId: $app.applicationId,
+            ageCategory: "Any",
+            experienceLevel: "Any",
+            drivingRecord: "Uninsurable",
+            riskScore: 100
+        }
 end
 
 // ============================================================================
 // PHASE 2: VEHICLE RISK PROFILING (salience 90)
 // ============================================================================
 
-rule "Vehicle Profile Assessment"
+rule "Vehicle Profile - Sports Car"
     salience 90
+    when
+        $app: InsuranceApplication($id: applicationId, vehicleType == "sports")
+        not VehicleRiskProfile(applicationId == $id)
+    then
+        insert VehicleRiskProfile {
+            applicationId: $app.applicationId,
+            vehicleCategory: "Very High Risk",
+            safetyRating: "Average",
+            vehicleAge: 2024 - $app.vehicleYear
+        }
+end
+
+rule "Vehicle Profile - Motorcycle"
+    salience 90
+    when
+        $app: InsuranceApplication($id: applicationId, vehicleType == "motorcycle")
+        not VehicleRiskProfile(applicationId == $id)
+    then
+        insert VehicleRiskProfile {
+            applicationId: $app.applicationId,
+            vehicleCategory: "Very High Risk",
+            safetyRating: "Poor",
+            vehicleAge: 2024 - $app.vehicleYear
+        }
+end
+
+rule "Vehicle Profile - SUV or Truck"
+    salience 90
+    when
+        $app: InsuranceApplication($id: applicationId, vehicleType in ("suv", "truck"))
+        not VehicleRiskProfile(applicationId == $id)
+    then
+        insert VehicleRiskProfile {
+            applicationId: $app.applicationId,
+            vehicleCategory: "High Risk",
+            safetyRating: "Good",
+            vehicleAge: 2024 - $app.vehicleYear
+        }
+end
+
+rule "Vehicle Profile - Sedan or Minivan with Full Safety"
+    salience 90
+    when
+        $app: InsuranceApplication($id: applicationId, vehicleType in ("sedan", "minivan"), antiTheft == true, airbags == true, absSystem == true)
+        not VehicleRiskProfile(applicationId == $id)
+    then
+        insert VehicleRiskProfile {
+            applicationId: $app.applicationId,
+            vehicleCategory: "Low Risk",
+            safetyRating: "Excellent",
+            vehicleAge: 2024 - $app.vehicleYear
+        }
+end
+
+rule "Vehicle Profile - Sedan or Minivan Standard"
+    salience 89
+    when
+        $app: InsuranceApplication($id: applicationId, vehicleType in ("sedan", "minivan"))
+        not VehicleRiskProfile(applicationId == $id)
+    then
+        insert VehicleRiskProfile {
+            applicationId: $app.applicationId,
+            vehicleCategory: "Low Risk",
+            safetyRating: "Good",
+            vehicleAge: 2024 - $app.vehicleYear
+        }
+end
+
+rule "Vehicle Profile - Standard Vehicle"
+    salience 85
     when
         $app: InsuranceApplication($id: applicationId)
         not VehicleRiskProfile(applicationId == $id)
     then
-        var currentYear = 2024;
-        var vehicleAge = currentYear - app.vehicleYear;
-
-        // Determine vehicle category based on type
-        var category = "Standard";
-        if (app.vehicleType == "sports" || app.vehicleType == "motorcycle") {
-            category = "Very High Risk";
-        } else if (app.vehicleType == "suv" || app.vehicleType == "truck") {
-            category = "High Risk";
-        } else if (app.vehicleType == "sedan" || app.vehicleType == "minivan") {
-            category = "Low Risk";
+        insert VehicleRiskProfile {
+            applicationId: $app.applicationId,
+            vehicleCategory: "Standard",
+            safetyRating: "Average",
+            vehicleAge: 2024 - $app.vehicleYear
         }
-
-        // Adjust for vehicle age
-        if (vehicleAge > 15) {
-            category = "High Risk"; // Old vehicles have more issues
-        }
-
-        // Safety rating based on features
-        var safetyCount = 0;
-        if (app.antiTheft) safetyCount++;
-        if (app.airbags) safetyCount++;
-        if (app.absSystem) safetyCount++;
-
-        var safetyRating = "Poor";
-        if (safetyCount == 3) {
-            safetyRating = "Excellent";
-        } else if (safetyCount == 2) {
-            safetyRating = "Good";
-        } else if (safetyCount == 1) {
-            safetyRating = "Average";
-        }
-
-        console.log("Vehicle Profile: " + app.vehicleYear + " " + app.vehicleMake + " " + app.vehicleModel +
-                    " - " + category + ", Safety: " + safetyRating);
-
-        rfl.insert({
-            type: "com.insurance.auto.VehicleRiskProfile",
-            applicationId: app.applicationId,
-            vehicleCategory: category,
-            safetyRating: safetyRating,
-            vehicleAge: vehicleAge
-        });
 end
 
 // ============================================================================
@@ -248,13 +342,11 @@ rule "Decline - DUI History"
         $app: InsuranceApplication($id: applicationId, dui == true)
         not DeclineReason(applicationId == $id)
     then
-        console.log("AUTO-DECLINE: " + app.applicantName + " - DUI history");
-        rfl.insert({
-            type: "com.insurance.auto.DeclineReason",
-            applicationId: app.applicationId,
+        insert DeclineReason {
+            applicationId: $app.applicationId,
             reason: "Applicants with DUI history are not eligible for coverage",
             code: "DUI_HISTORY"
-        });
+        }
 end
 
 rule "Decline - Too Many Accidents"
@@ -263,13 +355,11 @@ rule "Decline - Too Many Accidents"
         $app: InsuranceApplication($id: applicationId, accidentCount >= 3)
         not DeclineReason(applicationId == $id)
     then
-        console.log("AUTO-DECLINE: " + app.applicantName + " - Excessive accidents (" + app.accidentCount + ")");
-        rfl.insert({
-            type: "com.insurance.auto.DeclineReason",
-            applicationId: app.applicationId,
+        insert DeclineReason {
+            applicationId: $app.applicationId,
             reason: "Too many at-fault accidents in the past 5 years",
             code: "EXCESSIVE_ACCIDENTS"
-        });
+        }
 end
 
 rule "Decline - Too Many Violations"
@@ -278,13 +368,11 @@ rule "Decline - Too Many Violations"
         $app: InsuranceApplication($id: applicationId, violationCount >= 5)
         not DeclineReason(applicationId == $id)
     then
-        console.log("AUTO-DECLINE: " + app.applicantName + " - Excessive violations (" + app.violationCount + ")");
-        rfl.insert({
-            type: "com.insurance.auto.DeclineReason",
-            applicationId: app.applicationId,
+        insert DeclineReason {
+            applicationId: $app.applicationId,
             reason: "Too many traffic violations in the past 3 years",
             code: "EXCESSIVE_VIOLATIONS"
-        });
+        }
 end
 
 rule "Decline - Very Young With Accidents"
@@ -293,119 +381,115 @@ rule "Decline - Very Young With Accidents"
         $app: InsuranceApplication($id: applicationId, age < 21, accidentCount >= 2)
         not DeclineReason(applicationId == $id)
     then
-        console.log("AUTO-DECLINE: " + app.applicantName + " - Young driver with multiple accidents");
-        rfl.insert({
-            type: "com.insurance.auto.DeclineReason",
-            applicationId: app.applicationId,
+        insert DeclineReason {
+            applicationId: $app.applicationId,
             reason: "Drivers under 21 with 2+ accidents are not eligible",
             code: "YOUNG_HIGH_RISK"
-        });
+        }
 end
 
 // ============================================================================
 // PHASE 4: PREMIUM CALCULATION (salience 70)
 // ============================================================================
 
-rule "Calculate Premium - Standard Coverage"
+rule "Calculate Premium - Low Risk Driver Low Risk Vehicle"
     salience 70
     when
+        $app: InsuranceApplication($id: applicationId, multiPolicy == true, accidentCount == 0, violationCount == 0, antiTheft == true, airbags == true, absSystem == true, annualMileage < 7500, garageParked == true, existingCustomer == true)
+        $driver: DriverRiskProfile(applicationId == $id, riskScore <= 30)
+        $vehicle: VehicleRiskProfile(applicationId == $id, vehicleCategory == "Low Risk")
+        not DeclineReason(applicationId == $id)
+        not PremiumCalculation(applicationId == $id)
+    then
+        insert PremiumCalculation {
+            applicationId: $app.applicationId,
+            basePremium: 1200.0,
+            driverMultiplier: 0.85,
+            vehicleMultiplier: 0.90,
+            locationMultiplier: 1.0,
+            discountPercent: 35.0,
+            finalPremium: 1200.0 * 0.85 * 0.90 * 0.65
+        }
+end
+
+rule "Calculate Premium - Low Risk Driver"
+    salience 69
+    when
         $app: InsuranceApplication($id: applicationId)
-        $driver: DriverRiskProfile(applicationId == $id)
+        $driver: DriverRiskProfile(applicationId == $id, riskScore <= 30)
         $vehicle: VehicleRiskProfile(applicationId == $id)
         not DeclineReason(applicationId == $id)
         not PremiumCalculation(applicationId == $id)
     then
-        // Base premium for standard coverage
-        var basePremium = 1200.0;
-
-        // Driver multiplier based on risk score
-        var driverMultiplier = 1.0;
-        if (driver.riskScore <= 30) {
-            driverMultiplier = 0.85;
-        } else if (driver.riskScore <= 50) {
-            driverMultiplier = 1.0;
-        } else if (driver.riskScore <= 70) {
-            driverMultiplier = 1.35;
-        } else {
-            driverMultiplier = 1.75;
+        insert PremiumCalculation {
+            applicationId: $app.applicationId,
+            basePremium: 1200.0,
+            driverMultiplier: 0.85,
+            vehicleMultiplier: 1.0,
+            locationMultiplier: 1.0,
+            discountPercent: 10.0,
+            finalPremium: 1200.0 * 0.85 * 0.90
         }
+end
 
-        // Vehicle multiplier
-        var vehicleMultiplier = 1.0;
-        if (vehicle.vehicleCategory == "Low Risk") {
-            vehicleMultiplier = 0.90;
-        } else if (vehicle.vehicleCategory == "High Risk") {
-            vehicleMultiplier = 1.25;
-        } else if (vehicle.vehicleCategory == "Very High Risk") {
-            vehicleMultiplier = 1.60;
+rule "Calculate Premium - Medium Risk Driver"
+    salience 68
+    when
+        $app: InsuranceApplication($id: applicationId)
+        $driver: DriverRiskProfile(applicationId == $id, riskScore > 30, riskScore <= 50)
+        $vehicle: VehicleRiskProfile(applicationId == $id)
+        not DeclineReason(applicationId == $id)
+        not PremiumCalculation(applicationId == $id)
+    then
+        insert PremiumCalculation {
+            applicationId: $app.applicationId,
+            basePremium: 1200.0,
+            driverMultiplier: 1.0,
+            vehicleMultiplier: 1.0,
+            locationMultiplier: 1.0,
+            discountPercent: 5.0,
+            finalPremium: 1200.0 * 0.95
         }
+end
 
-        // Location multiplier (simplified - would use ZIP code database)
-        var locationMultiplier = 1.0;
-        var zipPrefix = app.zipCode.substring(0, 2);
-        if (zipPrefix == "94" || zipPrefix == "10" || zipPrefix == "90") {
-            locationMultiplier = 1.20; // Urban California, NYC, LA
-        } else if (zipPrefix == "33" || zipPrefix == "77") {
-            locationMultiplier = 1.15; // Florida, Texas urban
+rule "Calculate Premium - High Risk Driver"
+    salience 67
+    when
+        $app: InsuranceApplication($id: applicationId)
+        $driver: DriverRiskProfile(applicationId == $id, riskScore > 50, riskScore <= 70)
+        $vehicle: VehicleRiskProfile(applicationId == $id)
+        not DeclineReason(applicationId == $id)
+        not PremiumCalculation(applicationId == $id)
+    then
+        insert PremiumCalculation {
+            applicationId: $app.applicationId,
+            basePremium: 1200.0,
+            driverMultiplier: 1.35,
+            vehicleMultiplier: 1.0,
+            locationMultiplier: 1.0,
+            discountPercent: 0.0,
+            finalPremium: 1200.0 * 1.35
         }
+end
 
-        // Calculate discounts
-        var discountPercent = 0.0;
-
-        // Multi-policy discount
-        if (app.multiPolicy) {
-            discountPercent = discountPercent + 15.0;
+rule "Calculate Premium - Very High Risk Driver"
+    salience 66
+    when
+        $app: InsuranceApplication($id: applicationId)
+        $driver: DriverRiskProfile(applicationId == $id, riskScore > 70, riskScore < 100)
+        $vehicle: VehicleRiskProfile(applicationId == $id)
+        not DeclineReason(applicationId == $id)
+        not PremiumCalculation(applicationId == $id)
+    then
+        insert PremiumCalculation {
+            applicationId: $app.applicationId,
+            basePremium: 1200.0,
+            driverMultiplier: 1.75,
+            vehicleMultiplier: 1.0,
+            locationMultiplier: 1.0,
+            discountPercent: 0.0,
+            finalPremium: 1200.0 * 1.75
         }
-
-        // Good driver discount
-        if (app.accidentCount == 0 && app.violationCount == 0) {
-            discountPercent = discountPercent + 10.0;
-        }
-
-        // Safety features discount
-        if (app.antiTheft && app.airbags && app.absSystem) {
-            discountPercent = discountPercent + 8.0;
-        }
-
-        // Low mileage discount
-        if (app.annualMileage < 7500) {
-            discountPercent = discountPercent + 5.0;
-        }
-
-        // Garage parked discount
-        if (app.garageParked) {
-            discountPercent = discountPercent + 3.0;
-        }
-
-        // Existing customer discount
-        if (app.existingCustomer) {
-            discountPercent = discountPercent + 5.0;
-        }
-
-        // Cap total discount at 35%
-        if (discountPercent > 35.0) {
-            discountPercent = 35.0;
-        }
-
-        // Calculate final premium
-        var premiumBeforeDiscount = basePremium * driverMultiplier * vehicleMultiplier * locationMultiplier;
-        var finalPremium = premiumBeforeDiscount * (1 - discountPercent / 100);
-
-        console.log("Premium Calculation: " + app.applicantName);
-        console.log("  Base: $" + basePremium + " × Driver: " + driverMultiplier.toFixed(2) +
-                    " × Vehicle: " + vehicleMultiplier.toFixed(2) + " × Location: " + locationMultiplier.toFixed(2));
-        console.log("  Discount: " + discountPercent.toFixed(1) + "% → Final: $" + finalPremium.toFixed(2));
-
-        rfl.insert({
-            type: "com.insurance.auto.PremiumCalculation",
-            applicationId: app.applicationId,
-            basePremium: basePremium,
-            driverMultiplier: driverMultiplier,
-            vehicleMultiplier: vehicleMultiplier,
-            locationMultiplier: locationMultiplier,
-            discountPercent: discountPercent,
-            finalPremium: finalPremium
-        });
 end
 
 // ============================================================================
@@ -420,19 +504,14 @@ rule "Policy Decision - Approved"
         not DeclineReason(applicationId == $id)
         not PolicyDecision(applicationId == $id)
     then
-        var monthlyPayment = premium.finalPremium / 12;
-
-        console.log("POLICY APPROVED: " + app.applicantName + " - $" + premium.finalPremium.toFixed(2) + "/year");
-
-        rfl.insert({
-            type: "com.insurance.auto.PolicyDecision",
-            applicationId: app.applicationId,
+        insert PolicyDecision {
+            applicationId: $app.applicationId,
             approved: true,
-            annualPremium: premium.finalPremium,
-            monthlyPayment: monthlyPayment,
+            annualPremium: $premium.finalPremium,
+            monthlyPayment: $premium.finalPremium / 12,
             coverageLevel: "Standard",
             reason: "Application approved based on risk assessment"
-        });
+        }
 end
 
 rule "Policy Decision - Declined"
@@ -442,17 +521,14 @@ rule "Policy Decision - Declined"
         $decline: DeclineReason(applicationId == $id)
         not PolicyDecision(applicationId == $id)
     then
-        console.log("POLICY DECLINED: " + app.applicantName + " - " + decline.reason);
-
-        rfl.insert({
-            type: "com.insurance.auto.PolicyDecision",
-            applicationId: app.applicationId,
+        insert PolicyDecision {
+            applicationId: $app.applicationId,
             approved: false,
             annualPremium: 0,
             monthlyPayment: 0,
             coverageLevel: "None",
-            reason: decline.reason
-        });
+            reason: $decline.reason
+        }
 end
 
 // ============================================================================

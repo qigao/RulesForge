@@ -13,11 +13,11 @@
 #include "rule_forge.h"
 
 
-// RAII wrapper for RuleForge resources
-class RuleForgeGuard {
+// RAII wrapper for RulesForge resources
+class RulesForgeGuard {
 public:
-  RuleForgeGuard() { ruleforge_init(); }
-  ~RuleForgeGuard() { ruleforge_cleanup(); }
+  RulesForgeGuard() { ruleforge_init(); }
+  ~RulesForgeGuard() { ruleforge_cleanup(); }
 };
 
 // Read file contents
@@ -116,11 +116,14 @@ void print_field_value(ruleforge_fact_t fact, const std::string &field_name) {
 }
 
 int main(int argc, char *argv[]) {
-  cxxopts::Options options("capi_demo", "RuleForge C API Demo - Load RFL rules and JSON facts");
+  cxxopts::Options options("capi_demo",
+                           "RulesForge C API Demo - Load RFL rules and JSON/CSV facts");
   // clang-format off
   options.add_options()
       ("r,rfl", "RFL rules file path", cxxopts::value<std::string>())
       ("j,json", "JSON facts file path", cxxopts::value<std::string>())
+      ("c,csv", "CSV facts file path (header row required)", cxxopts::value<std::string>())
+      ("T,csv-type", "Fact type for CSV rows", cxxopts::value<std::string>())
       ("m,map", "Map JSON array to fact type (format: array:com.package.Type). Can be repeated.",
                                                 cxxopts::value<std::vector<std::string>>())
       ("t,type", "Default fact type for auto-detected array", cxxopts::value<std::string>())
@@ -141,16 +144,23 @@ int main(int argc, char *argv[]) {
       std::cout << options.help() << std::endl;
       std::cout << "\nExamples:" << std::endl;
       std::cout << "  # Single fact type with auto-detect array" << std::endl;
-      std::cout << "  capi_demo -d rules.rfl -j data.json -t com.example.Order -q AllOrders"
+      std::cout << "  capi_demo -r rules.rfl -j data.json -t com.example.Order -q AllOrders"
                 << std::endl;
       std::cout << std::endl;
       std::cout << "  # Multiple fact types with explicit mappings" << std::endl;
-      std::cout << "  capi_demo -d rules.rfl -j data.json \\" << std::endl;
+      std::cout << "  capi_demo -r rules.rfl -j data.json \\" << std::endl;
       std::cout << "    -m orders:com.shop.Order \\" << std::endl;
       std::cout << "    -m customers:com.shop.Customer" << std::endl;
       std::cout << std::endl;
+      std::cout << "  # CSV data source" << std::endl;
+      std::cout << "  capi_demo -r payments.rfl -c payments_test_data.csv \\"
+                << std::endl;
+      std::cout << "    -T com.example.pricing.Order -q OrdersWithDiscount \\"
+                << std::endl;
+      std::cout << "    -f quantity,unitPrice,finalPrice" << std::endl;
+      std::cout << std::endl;
       std::cout << "  # Run loan eligibility example" << std::endl;
-      std::cout << "  capi_demo -d loan-eligibility.rfl -j loan-applications-sample.json \\"
+      std::cout << "  capi_demo -r loan-eligibility.rfl -j loan-applications-sample.json \\"
                 << std::endl;
       std::cout << "    -m applications:com.bank.loan.LoanApplication \\" << std::endl;
       std::cout << "    -q LoanDecisions -b decision \\" << std::endl;
@@ -161,10 +171,10 @@ int main(int argc, char *argv[]) {
     std::string drl_path = result["rfl"].as<std::string>();
     bool verbose = result["verbose"].as<bool>();
 
-    // Initialize RuleForge
-    RuleForgeGuard guard;
+    // Initialize RulesForge
+    RulesForgeGuard guard;
 
-    std::cout << "=== RuleForge C API Demo ===" << std::endl;
+    std::cout << "=== RulesForge C API Demo ===" << std::endl;
     std::cout << "Version: " << ruleforge_get_version() << std::endl << std::endl;
 
     // Read and compile RFL
@@ -193,6 +203,13 @@ int main(int argc, char *argv[]) {
 
     // Load JSON facts if provided
     int total_facts_loaded = 0;
+    if (result.count("json") && result.count("csv")) {
+      std::cerr << "Error: --json and --csv cannot be used together" << std::endl;
+      ruleforge_session_destroy(session);
+      ruleforge_kb_destroy(kb);
+      return 1;
+    }
+
     if (result.count("json")) {
       std::string json_path = result["json"].as<std::string>();
       std::string json_content = read_file(json_path);
@@ -261,6 +278,25 @@ int main(int argc, char *argv[]) {
 
       std::cout << "Total facts loaded from: " << json_path << ": " << total_facts_loaded
                 << std::endl;
+    } else if (result.count("csv")) {
+      if (!result.count("csv-type")) {
+        std::cerr << "Error: --csv-type is required when loading CSV facts" << std::endl;
+        ruleforge_session_destroy(session);
+        ruleforge_kb_destroy(kb);
+        return 1;
+      }
+
+      std::string csv_path = result["csv"].as<std::string>();
+      std::string fact_type = result["csv-type"].as<std::string>();
+      if (!check_result(ruleforge_session_add_facts_csv_file(
+                            session, fact_type.c_str(), csv_path.c_str(), &total_facts_loaded),
+                        "Load CSV facts")) {
+        ruleforge_session_destroy(session);
+        ruleforge_kb_destroy(kb);
+        return 1;
+      }
+      std::cout << "Loaded " << total_facts_loaded << " " << fact_type << " facts from CSV: "
+                << csv_path << std::endl;
     }
 
     std::cout << "Facts in session: " << ruleforge_session_get_fact_count(session) << std::endl;

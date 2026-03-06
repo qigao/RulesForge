@@ -8,13 +8,11 @@ salience 100
 when
     $c : Customer(name == "")
 then
-    console.log("Validation failed: Customer name is empty");
-    rfl.insert({
-        type: "ecommerce.ValidationResult",
+    insert ValidationResult {
         orderId: 0,
         valid: false,
         message: "Customer name cannot be empty"
-    });
+    }
 end
 
 rule "Validate Customer Email"
@@ -22,13 +20,11 @@ salience 100
 when
     $c : Customer(email == "")
 then
-    console.log("Validation failed: Customer email is empty");
-    rfl.insert({
-        type: "ecommerce.ValidationResult",
+    insert ValidationResult {
         orderId: 0,
         valid: false,
         message: "Customer email cannot be empty"
-    });
+    }
 end
 
 rule "Validate Order Has Items"
@@ -36,13 +32,11 @@ salience 100
 when
     $o : Order(itemCount <= 0)
 then
-    console.log("Validation failed: Order has no items");
-    rfl.insert({
-        type: "ecommerce.ValidationResult",
-        orderId: o.id,
+    insert ValidationResult {
+        orderId: $o.id,
         valid: false,
         message: "Order must have at least one item"
-    });
+    }
 end
 
 rule "Validate Order Total"
@@ -50,13 +44,11 @@ salience 100
 when
     $o : Order(subtotal <= 0)
 then
-    console.log("Validation failed: Order total must be positive");
-    rfl.insert({
-        type: "ecommerce.ValidationResult",
-        orderId: o.id,
+    insert ValidationResult {
+        orderId: $o.id,
         valid: false,
         message: "Order subtotal must be positive"
-    });
+    }
 end
 
 rule "Order Valid"
@@ -66,11 +58,9 @@ when
     $o : Order(customerId == $c.id, itemCount > 0, subtotal > 0)
     not ValidationResult(orderId == $o.id, valid == false)
 then
-    console.log("Order " + o.id + " passed validation");
-    rfl.insert({
-        type: "ecommerce.ValidationResult",
-        orderId: o.id,
+    insert ValidationResult {
+        orderId: $o.id,
         valid: true,
         message: "Order is valid"
-    });
+    }
 end

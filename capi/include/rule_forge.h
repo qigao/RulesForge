@@ -24,7 +24,7 @@
 #define RULEFORGE_VERSION_STRING "0.3.0"
 
 // --- Thread Safety ---
-// RuleForge thread safety guarantees:
+// RulesForge thread safety guarantees:
 //   - KnowledgeBase: Thread-safe after compilation. Can be shared across threads.
 //   - StatefulSession: NOT thread-safe. Each session must be used from a single
 //     thread at a time. Create separate sessions for concurrent rule execution.
@@ -99,6 +99,24 @@ RULEFORGE_API ruleforge_status_t ruleforge_kb_destroy(ruleforge_knowledge_base_t
 typedef ruleforge_status_t (*ruleforge_native_function_t)(
     void *ctx, int argc, const char **argv, char **out_result);
 
+// Plugin ABI for DLL function table loading.
+#define RULEFORGE_PLUGIN_ABI_V1 1u
+
+typedef struct {
+  const char *name;
+  ruleforge_native_function_t callback;
+  void *user_data;
+} ruleforge_plugin_function_entry_t;
+
+typedef struct {
+  uint32_t abi_version;
+  uint32_t function_count;
+  const ruleforge_plugin_function_entry_t *functions;
+} ruleforge_plugin_function_table_t;
+
+typedef ruleforge_status_t (*ruleforge_get_function_table_t)(
+    ruleforge_plugin_function_table_t *out_table);
+
 // Register a native C function that can be called from rules
 // kb: Knowledge base
 // function_name: Name of the function (e.g., "republish", "webhook")
@@ -110,6 +128,14 @@ RULEFORGE_API ruleforge_status_t ruleforge_kb_register_native_function(
     const char *function_name,
     ruleforge_native_function_t callback,
     void *user_data);
+
+// Load a DLL/.so plugin that exports a function table and register all entries.
+// library_path: Path to plugin library.
+// symbol_name: Optional exported symbol name. Pass NULL for default "ruleforge_get_function_table".
+RULEFORGE_API ruleforge_status_t ruleforge_kb_load_native_function_table(
+    ruleforge_knowledge_base_t kb,
+    const char *library_path,
+    const char *symbol_name);
 // --- Stateful Session Management ---
 // Creates a new Stateful Session from a Knowledge Base.
 // Returns RULES_FORGE_OK on success, and sets 'out_session' to the handle.
@@ -124,6 +150,22 @@ RULEFORGE_API ruleforge_status_t ruleforge_session_create(ruleforge_knowledge_ba
 RULEFORGE_API ruleforge_status_t ruleforge_session_add_fact_json(ruleforge_stateful_session_t session,
                                                              const char *fact_type,
                                                              const char *fact_json);
+
+// Adds facts to the Stateful Session from CSV content.
+// csv_source must include a header row. Each subsequent row is inserted as one fact.
+// out_loaded_count is optional and receives number of successfully loaded rows.
+RULEFORGE_API ruleforge_status_t ruleforge_session_add_facts_csv(ruleforge_stateful_session_t session,
+                                                             const char *fact_type,
+                                                             const char *csv_source,
+                                                             int *out_loaded_count);
+
+// Adds facts to the Stateful Session from a CSV file.
+// csv_file_path points to a CSV file that includes a header row.
+// out_loaded_count is optional and receives number of successfully loaded rows.
+RULEFORGE_API ruleforge_status_t ruleforge_session_add_facts_csv_file(ruleforge_stateful_session_t session,
+                                                                  const char *fact_type,
+                                                                  const char *csv_file_path,
+                                                                  int *out_loaded_count);
 
 // Fires all rules in the Stateful Session.
 // max_rules: Maximum number of rules to fire (-1 for unlimited).
@@ -252,4 +294,3 @@ RULEFORGE_API ruleforge_status_t ruleforge_fact_get_field_as_bool(
 #endif
 
 #endif // __RULE_FORGE_H__
-

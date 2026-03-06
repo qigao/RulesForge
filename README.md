@@ -1,24 +1,26 @@
-# RuleForge - C++ Rete Rule Engine with JavaScript Integration
+# RulesForge - C++ Rete Rule Engine with JavaScript Integration
 
 [中文文档](./docs/zh-CN/README.md)
 
-This is a sophisticated, high-performance C++ rules engine implementing the **Rete algorithm** with **JavaScript (QuickJS) scripting** for rule consequences, inspired by Java RuleForge but designed specifically for C++ environments.
+This is a sophisticated, high-performance C++ rules engine implementing the **Rete algorithm** with **JavaScript (QuickJS) scripting** for rule consequences, inspired by Java RulesForge but designed specifically for C++ environments.
 
 ## Core Architecture
 
 **Rete Algorithm Implementation**:
-- Full Rete network with alpha/beta nodes (`ruleforge/include/rete/rete_node.hpp:15175 lines`)
-- Immutable `KnowledgeBase` containing compiled rules (`ruleforge/include/knowledge_base.hpp:74`)
-- Mutable `StatefulSession` managing working memory (`ruleforge/include/stateful_session.hpp:141`)
+
+- Full Rete network with alpha/beta nodes (`rulesforge/include/rete/rete_node.hpp:15175 lines`)
+- Immutable `KnowledgeBase` containing compiled rules (`rulesforge/include/knowledge_base.hpp:74`)
+- Mutable `StatefulSession` managing working memory (`rulesforge/include/stateful_session.hpp:141`)
 
 **JavaScript Integration**:
-- `JSScriptingManager` bridges C++ and JavaScript (`ruleforge/src/rfl_js_manager.cpp`)
+
+- `JSScriptingManager` bridges C++ and JavaScript (`rulesforge/src/rfl_js_manager.cpp`)
 - QuickJS library for seamless C++/JavaScript binding (`vcpkg.json:90-92`)
 - Custom `rfl` API exposed to JavaScript for fact manipulation
 
 ## Key Features
 
-1. **RFL Language**: RuleForge-like syntax with comprehensive grammar ([docs/dsl.md](./docs/dsl.md), [docs/USER_GUIDE.md](./docs/USER_GUIDE.md))
+1. **RFL Language**: RulesForge-like syntax with comprehensive grammar ([docs/dsl.md](./docs/dsl.md), [docs/USER_GUIDE.md](./docs/USER_GUIDE.md))
 2. **Advanced Conditional Logic**: Support for `not`, `exists`, `forall` patterns
 3. **Data Aggregation**: Built-in accumulators (`sum`, `count`, `average`, etc.)
 4. **Truth Maintenance System (TMS)**: Logical assertions with automatic dependency tracking
@@ -29,15 +31,14 @@ This is a sophisticated, high-performance C++ rules engine implementing the **Re
 
 - **C++20** standard with modern practices
 - **QuickJS** for JavaScript integration
-- **PEGTL** for parsing (`vcpkg.json:66-68`)
-- **Catch2** for testing
+- **TinyTest** for testing
 - **jsoncons** for json path query
 - **CMake** build system with vcpkg dependency management
 
 ## Project Structure
 
 ```
-ruleforge/
+rulesforge/
 ├── include/           # Headers (AST, parser, Rete nodes, JavaScript manager)
 ├── src/              # Implementation files
 ├── test/             # Comprehensive test suite
@@ -49,11 +50,11 @@ docs/                 # Documentation
 
 ## WebAssembly Demo 🐳
 
-Experience the power of RuleForge in your browser! We've created a complete **WebAssembly demo** that runs the C++ engine directly in web browsers.
+Experience the power of RulesForge in your browser! We've created a complete **WebAssembly demo** that runs the C++ engine directly in web browsers.
 
 ### 🎮 Live Demo Features
 
-- ✅ **Browser-native Rule Engine**: Run C++ RuleForge engine directly via WebAssembly
+- ✅ **Browser-native Rule Engine**: Run C++ RulesForge engine directly via WebAssembly
 - ✅ **Interactive Demo**: Complete web interface for testing rule functionality
 - ✅ **Real-time Performance**: Live metrics and console logging
 - ✅ **Sample Business Rules**: Pre-built customer classification rules
@@ -88,18 +89,19 @@ python3 -m http.server 8000
 ```cpp
 // WebAssembly bindings expose full C API
 EMSCRIPTEN_BINDINGS(ruleforge_module) {
-    class_<RuleForgeEngine>("RuleForgeEngine")
+    class_<RulesForgeEngine>("RulesForgeEngine")
         .constructor()
-        .function("init", &RuleForgeEngine::init)
-        .function("createKnowledgeBase", &RuleForgeEngine::createKnowledgeBase)
-        .function("createSession", &RuleForgeEngine::createSession)
-        .function("insertFact", &RuleForgeEngine::insertFact)
-        .function("fireRules", &RuleForgeEngine::fireRules)
-        .function("query", &RuleForgeEngine::query);
+        .function("init", &RulesForgeEngine::init)
+        .function("createKnowledgeBase", &RulesForgeEngine::createKnowledgeBase)
+        .function("createSession", &RulesForgeEngine::createSession)
+        .function("insertFact", &RulesForgeEngine::insertFact)
+        .function("fireRules", &RulesForgeEngine::fireRules)
+        .function("query", &RulesForgeEngine::query);
 }
 ```
 
 The demo demonstrates:
+
 - **Client-side Processing**: Rules execute in browser, data stays local
 - **Zero Server Dependencies**: Pure static files
 - **Cross-platform Compatibility**: Modern browsers with WebAssembly support
@@ -112,6 +114,7 @@ Here's a simple example to get you up and running.
 ### 1. Write your rules in a RFL file
 
 **`my_rules.rfl`**
+
 ```rfl
 // Define the data model for our facts
 declare Person
@@ -133,10 +136,7 @@ when
     // Ensure we haven't already processed this person
     not ( CanVote( name == $p.name ) )
 then
-    // The 'then' block is JavaScript.
-    // The $p variable is available as 'p'.
-    console.log("Granting voting rights to: " + p.name);
-    rfl.insert({ type: "CanVote", name: p.name });
+    insert CanVote { name = $p.name }
 end
 
 // A query to find all people who can vote
@@ -234,5 +234,6 @@ This is a production-ready rules engine suitable for complex business rule scena
 ## Documentation
 
 For a complete reference on the RFL syntax, features, and advanced design patterns, please see the
+
 - [RFL Language Guide](./docs/USER_GUIDE.md)
 - [RFL Grammar Guide](./docs/dsl.md)

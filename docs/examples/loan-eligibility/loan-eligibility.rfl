@@ -63,13 +63,11 @@ rule "Credit Category - Excellent"
         $app: LoanApplication(creditScore >= 750)
         not CreditCategory(applicationId == $app.applicantId)
     then
-        console.log("Credit Assessment: " + app.applicantName + " - EXCELLENT (" + app.creditScore + ")");
-        rfl.insert({
-            type: "com.bank.loan.CreditCategory",
-            applicationId: app.applicantId,
+        insert CreditCategory {
+            applicationId: $app.applicantId,
             category: "Excellent",
-            score: app.creditScore
-        });
+            score: $app.creditScore
+        }
 end
 
 rule "Credit Category - Good"
@@ -78,13 +76,11 @@ rule "Credit Category - Good"
         $app: LoanApplication(creditScore >= 700, creditScore < 750)
         not CreditCategory(applicationId == $app.applicantId)
     then
-        console.log("Credit Assessment: " + app.applicantName + " - GOOD (" + app.creditScore + ")");
-        rfl.insert({
-            type: "com.bank.loan.CreditCategory",
-            applicationId: app.applicantId,
+        insert CreditCategory {
+            applicationId: $app.applicantId,
             category: "Good",
-            score: app.creditScore
-        });
+            score: $app.creditScore
+        }
 end
 
 rule "Credit Category - Fair"
@@ -93,13 +89,11 @@ rule "Credit Category - Fair"
         $app: LoanApplication(creditScore >= 650, creditScore < 700)
         not CreditCategory(applicationId == $app.applicantId)
     then
-        console.log("Credit Assessment: " + app.applicantName + " - FAIR (" + app.creditScore + ")");
-        rfl.insert({
-            type: "com.bank.loan.CreditCategory",
-            applicationId: app.applicantId,
+        insert CreditCategory {
+            applicationId: $app.applicantId,
             category: "Fair",
-            score: app.creditScore
-        });
+            score: $app.creditScore
+        }
 end
 
 rule "Credit Category - Poor"
@@ -108,13 +102,11 @@ rule "Credit Category - Poor"
         $app: LoanApplication(creditScore >= 550, creditScore < 650)
         not CreditCategory(applicationId == $app.applicantId)
     then
-        console.log("Credit Assessment: " + app.applicantName + " - POOR (" + app.creditScore + ")");
-        rfl.insert({
-            type: "com.bank.loan.CreditCategory",
-            applicationId: app.applicantId,
+        insert CreditCategory {
+            applicationId: $app.applicantId,
             category: "Poor",
-            score: app.creditScore
-        });
+            score: $app.creditScore
+        }
 end
 
 rule "Credit Category - Very Poor"
@@ -123,68 +115,99 @@ rule "Credit Category - Very Poor"
         $app: LoanApplication(creditScore < 550)
         not CreditCategory(applicationId == $app.applicantId)
     then
-        console.log("Credit Assessment: " + app.applicantName + " - VERY POOR (" + app.creditScore + ")");
-        rfl.insert({
-            type: "com.bank.loan.CreditCategory",
-            applicationId: app.applicantId,
+        insert CreditCategory {
+            applicationId: $app.applicantId,
             category: "Very Poor",
-            score: app.creditScore
-        });
+            score: $app.creditScore
+        }
 end
 
 // ============================================================================
-// PHASE 2: RISK ASSESSMENT (salience 90)
+// PHASE 2: RISK ASSESSMENT - Low Risk (salience 90)
 // ============================================================================
 
-rule "Calculate Risk Assessment"
+rule "Risk Assessment - Low Risk"
     salience 90
+    when
+        $app: LoanApplication($id: applicantId, employmentType == "full-time", employmentYears >= 2)
+        $credit: CreditCategory(applicationId == $id, category in ("Excellent", "Good"))
+        eval($app.monthlyDebt / ($app.annualIncome / 12) * 100 < 30)
+        not RiskAssessment(applicationId == $id)
+    then
+        insert RiskAssessment {
+            applicationId: $app.applicantId,
+            riskLevel: "Low",
+            debtToIncomeRatio: $app.monthlyDebt / ($app.annualIncome / 12) * 100,
+            employmentRisk: "Low",
+            collateralRisk: "Low"
+        }
+end
+
+rule "Risk Assessment - Medium Risk"
+    salience 89
+    when
+        $app: LoanApplication($id: applicantId)
+        $credit: CreditCategory(applicationId == $id, category in ("Excellent", "Good", "Fair"))
+        eval($app.monthlyDebt / ($app.annualIncome / 12) * 100 >= 30)
+        eval($app.monthlyDebt / ($app.annualIncome / 12) * 100 <= 43)
+        not RiskAssessment(applicationId == $id)
+    then
+        insert RiskAssessment {
+            applicationId: $app.applicantId,
+            riskLevel: "Medium",
+            debtToIncomeRatio: $app.monthlyDebt / ($app.annualIncome / 12) * 100,
+            employmentRisk: "Medium",
+            collateralRisk: "Medium"
+        }
+end
+
+rule "Risk Assessment - High Risk"
+    salience 88
+    when
+        $app: LoanApplication($id: applicantId)
+        $credit: CreditCategory(applicationId == $id, category == "Poor")
+        not RiskAssessment(applicationId == $id)
+    then
+        insert RiskAssessment {
+            applicationId: $app.applicantId,
+            riskLevel: "High",
+            debtToIncomeRatio: $app.monthlyDebt / ($app.annualIncome / 12) * 100,
+            employmentRisk: "High",
+            collateralRisk: "High"
+        }
+end
+
+rule "Risk Assessment - Very High Risk"
+    salience 87
+    when
+        $app: LoanApplication($id: applicantId)
+        $credit: CreditCategory(applicationId == $id, category == "Very Poor")
+        not RiskAssessment(applicationId == $id)
+    then
+        insert RiskAssessment {
+            applicationId: $app.applicantId,
+            riskLevel: "Very High",
+            debtToIncomeRatio: $app.monthlyDebt / ($app.annualIncome / 12) * 100,
+            employmentRisk: "High",
+            collateralRisk: "High"
+        }
+end
+
+rule "Risk Assessment - High DTI"
+    salience 86
     when
         $app: LoanApplication($id: applicantId)
         $credit: CreditCategory(applicationId == $id)
+        eval($app.monthlyDebt / ($app.annualIncome / 12) * 100 > 43)
         not RiskAssessment(applicationId == $id)
     then
-        var monthlyIncome = app.annualIncome / 12;
-        var dti = (app.monthlyDebt / monthlyIncome) * 100;
-
-        // Determine employment risk
-        var empRisk = "High";
-        if (app.employmentType == "full-time" && app.employmentYears >= 2) {
-            empRisk = "Low";
-        } else if (app.employmentType == "full-time" || app.employmentYears >= 1) {
-            empRisk = "Medium";
+        insert RiskAssessment {
+            applicationId: $app.applicantId,
+            riskLevel: "High",
+            debtToIncomeRatio: $app.monthlyDebt / ($app.annualIncome / 12) * 100,
+            employmentRisk: "Medium",
+            collateralRisk: "Medium"
         }
-
-        // Determine collateral risk
-        var collRisk = "High";
-        if (app.hasCollateral) {
-            var ltv = (app.requestedAmount / app.collateralValue) * 100;
-            if (ltv <= 80) {
-                collRisk = "Low";
-            } else if (ltv <= 95) {
-                collRisk = "Medium";
-            }
-        }
-
-        // Determine overall risk level
-        var riskLevel = "Medium";
-        if (credit.category == "Excellent" && dti < 30 && empRisk == "Low") {
-            riskLevel = "Low";
-        } else if (credit.category == "Very Poor" || dti > 50 || empRisk == "High") {
-            riskLevel = "Very High";
-        } else if (credit.category == "Poor" || dti > 43) {
-            riskLevel = "High";
-        }
-
-        console.log("Risk Assessment: " + app.applicantName + " - " + riskLevel + " (DTI: " + dti.toFixed(1) + "%)");
-
-        rfl.insert({
-            type: "com.bank.loan.RiskAssessment",
-            applicationId: app.applicantId,
-            riskLevel: riskLevel,
-            debtToIncomeRatio: dti,
-            employmentRisk: empRisk,
-            collateralRisk: collRisk
-        });
 end
 
 // ============================================================================
@@ -198,13 +221,11 @@ rule "Reject - Credit Score Too Low"
         not RejectionReason(applicationId == $id)
         not LoanDecision(applicationId == $id)
     then
-        console.log("AUTO-REJECT: " + app.applicantName + " - Credit score below minimum (500)");
-        rfl.insert({
-            type: "com.bank.loan.RejectionReason",
-            applicationId: app.applicantId,
+        insert RejectionReason {
+            applicationId: $app.applicantId,
             reason: "Credit score below minimum threshold of 500",
             code: "CREDIT_TOO_LOW"
-        });
+        }
 end
 
 rule "Reject - DTI Too High"
@@ -215,13 +236,11 @@ rule "Reject - DTI Too High"
         not RejectionReason(applicationId == $id)
         not LoanDecision(applicationId == $id)
     then
-        console.log("AUTO-REJECT: " + app.applicantName + " - DTI exceeds 50%");
-        rfl.insert({
-            type: "com.bank.loan.RejectionReason",
-            applicationId: app.applicantId,
+        insert RejectionReason {
+            applicationId: $app.applicantId,
             reason: "Debt-to-income ratio exceeds maximum of 50%",
             code: "DTI_TOO_HIGH"
-        });
+        }
 end
 
 rule "Reject - Unemployed Without Collateral"
@@ -231,13 +250,11 @@ rule "Reject - Unemployed Without Collateral"
         not RejectionReason(applicationId == $id)
         not LoanDecision(applicationId == $id)
     then
-        console.log("AUTO-REJECT: " + app.applicantName + " - Unemployed without collateral");
-        rfl.insert({
-            type: "com.bank.loan.RejectionReason",
-            applicationId: app.applicantId,
+        insert RejectionReason {
+            applicationId: $app.applicantId,
             reason: "Unemployed applicants require collateral",
             code: "NO_INCOME_NO_COLLATERAL"
-        });
+        }
 end
 
 rule "Reject - Insufficient Income"
@@ -247,13 +264,11 @@ rule "Reject - Insufficient Income"
         not RejectionReason(applicationId == $id)
         not LoanDecision(applicationId == $id)
     then
-        console.log("AUTO-REJECT: " + app.applicantName + " - Annual income below $20,000");
-        rfl.insert({
-            type: "com.bank.loan.RejectionReason",
-            applicationId: app.applicantId,
+        insert RejectionReason {
+            applicationId: $app.applicantId,
             reason: "Annual income below minimum threshold of $20,000",
             code: "INCOME_TOO_LOW"
-        });
+        }
 end
 
 // ============================================================================
@@ -267,16 +282,14 @@ rule "Create Rejection Decision"
         $rejection: RejectionReason(applicationId == $id)
         not LoanDecision(applicationId == $id)
     then
-        console.log("DECISION: " + app.applicantName + " - REJECTED (" + rejection.reason + ")");
-        rfl.insert({
-            type: "com.bank.loan.LoanDecision",
-            applicationId: app.applicantId,
+        insert LoanDecision {
+            applicationId: $app.applicantId,
             approved: false,
             approvedAmount: 0,
             interestRate: 0,
             monthlyPayment: 0,
-            reason: rejection.reason
-        });
+            reason: $rejection.reason
+        }
 end
 
 // ============================================================================
@@ -286,51 +299,62 @@ end
 rule "Approve - Low Risk Application"
     salience 70
     when
-        $app: LoanApplication($id: applicantId)
-        $credit: CreditCategory(applicationId == $id, category in ("Excellent", "Good"))
+        $app: LoanApplication($id: applicantId, existingCustomer == true)
+        $credit: CreditCategory(applicationId == $id, category == "Excellent")
         $risk: RiskAssessment(applicationId == $id, riskLevel == "Low")
         not RejectionReason(applicationId == $id)
         not LoanDecision(applicationId == $id)
     then
-        // Base rate for low risk
-        var baseRate = 5.5;
-
-        // Credit score adjustment
-        if (credit.category == "Excellent") {
-            baseRate = baseRate - 0.5;
-        }
-
-        // Existing customer discount
-        if (app.existingCustomer) {
-            baseRate = baseRate - 0.15;
-        }
-
-        // Collateral adjustment
-        if (app.hasCollateral && app.collateralValue >= app.requestedAmount * 1.2) {
-            baseRate = baseRate - 0.25;
-        }
-
-        // Calculate monthly payment
-        var monthlyRate = baseRate / 100 / 12;
-        var numPayments = app.requestedTermMonths;
-        var monthlyPayment = app.requestedAmount * (monthlyRate * Math.pow(1 + monthlyRate, numPayments)) /
-                            (Math.pow(1 + monthlyRate, numPayments) - 1);
-
-        console.log("DECISION: " + app.applicantName + " - APPROVED at " + baseRate.toFixed(2) + "% APR");
-
-        rfl.insert({
-            type: "com.bank.loan.LoanDecision",
-            applicationId: app.applicantId,
+        insert LoanDecision {
+            applicationId: $app.applicantId,
             approved: true,
-            approvedAmount: app.requestedAmount,
-            interestRate: baseRate,
-            monthlyPayment: monthlyPayment,
+            approvedAmount: $app.requestedAmount,
+            interestRate: 4.6,
+            monthlyPayment: $app.requestedAmount * 0.02,
+            reason: "Low risk application approved - Excellent credit, existing customer"
+        }
+end
+
+rule "Approve - Low Risk New Customer"
+    salience 70
+    when
+        $app: LoanApplication($id: applicantId, existingCustomer == false)
+        $credit: CreditCategory(applicationId == $id, category == "Excellent")
+        $risk: RiskAssessment(applicationId == $id, riskLevel == "Low")
+        not RejectionReason(applicationId == $id)
+        not LoanDecision(applicationId == $id)
+    then
+        insert LoanDecision {
+            applicationId: $app.applicantId,
+            approved: true,
+            approvedAmount: $app.requestedAmount,
+            interestRate: 5.0,
+            monthlyPayment: $app.requestedAmount * 0.021,
             reason: "Low risk application approved"
-        });
+        }
+end
+
+rule "Approve - Low Risk Good Credit"
+    salience 69
+    when
+        $app: LoanApplication($id: applicantId)
+        $credit: CreditCategory(applicationId == $id, category == "Good")
+        $risk: RiskAssessment(applicationId == $id, riskLevel == "Low")
+        not RejectionReason(applicationId == $id)
+        not LoanDecision(applicationId == $id)
+    then
+        insert LoanDecision {
+            applicationId: $app.applicantId,
+            approved: true,
+            approvedAmount: $app.requestedAmount,
+            interestRate: 5.5,
+            monthlyPayment: $app.requestedAmount * 0.022,
+            reason: "Low risk application approved - Good credit"
+        }
 end
 
 rule "Approve - Medium Risk Application"
-    salience 70
+    salience 68
     when
         $app: LoanApplication($id: applicantId)
         $credit: CreditCategory(applicationId == $id, category in ("Excellent", "Good", "Fair"))
@@ -338,117 +362,70 @@ rule "Approve - Medium Risk Application"
         not RejectionReason(applicationId == $id)
         not LoanDecision(applicationId == $id)
     then
-        // Base rate for medium risk
-        var baseRate = 7.5;
-
-        // Credit score adjustment
-        if (credit.category == "Excellent") {
-            baseRate = baseRate - 0.75;
-        } else if (credit.category == "Good") {
-            baseRate = baseRate - 0.5;
-        }
-
-        // Existing customer discount
-        if (app.existingCustomer) {
-            baseRate = baseRate - 0.10;
-        }
-
-        // Collateral adjustment
-        if (app.hasCollateral) {
-            baseRate = baseRate - 0.25;
-        }
-
-        // Calculate monthly payment
-        var monthlyRate = baseRate / 100 / 12;
-        var numPayments = app.requestedTermMonths;
-        var monthlyPayment = app.requestedAmount * (monthlyRate * Math.pow(1 + monthlyRate, numPayments)) /
-                            (Math.pow(1 + monthlyRate, numPayments) - 1);
-
-        console.log("DECISION: " + app.applicantName + " - APPROVED at " + baseRate.toFixed(2) + "% APR");
-
-        rfl.insert({
-            type: "com.bank.loan.LoanDecision",
-            applicationId: app.applicantId,
+        insert LoanDecision {
+            applicationId: $app.applicantId,
             approved: true,
-            approvedAmount: app.requestedAmount,
-            interestRate: baseRate,
-            monthlyPayment: monthlyPayment,
+            approvedAmount: $app.requestedAmount,
+            interestRate: 7.5,
+            monthlyPayment: $app.requestedAmount * 0.025,
             reason: "Medium risk application approved with standard terms"
-        });
+        }
 end
 
 rule "Approve - High Risk With Collateral"
-    salience 70
+    salience 67
     when
         $app: LoanApplication($id: applicantId, hasCollateral == true)
         $credit: CreditCategory(applicationId == $id)
-        $risk: RiskAssessment(applicationId == $id, riskLevel == "High", collateralRisk in ("Low", "Medium"))
+        $risk: RiskAssessment(applicationId == $id, riskLevel == "High")
+        eval($app.requestedAmount <= $app.collateralValue * 0.8)
         not RejectionReason(applicationId == $id)
         not LoanDecision(applicationId == $id)
     then
-        // Base rate for high risk secured
-        var baseRate = 10.5;
-
-        // Reduce amount to 80% of requested if high risk
-        var approvedAmount = app.requestedAmount * 0.8;
-
-        // Calculate monthly payment
-        var monthlyRate = baseRate / 100 / 12;
-        var numPayments = app.requestedTermMonths;
-        var monthlyPayment = approvedAmount * (monthlyRate * Math.pow(1 + monthlyRate, numPayments)) /
-                            (Math.pow(1 + monthlyRate, numPayments) - 1);
-
-        console.log("DECISION: " + app.applicantName + " - APPROVED (reduced) at " + baseRate.toFixed(2) + "% APR");
-
-        rfl.insert({
-            type: "com.bank.loan.LoanDecision",
-            applicationId: app.applicantId,
+        insert LoanDecision {
+            applicationId: $app.applicantId,
             approved: true,
-            approvedAmount: approvedAmount,
-            interestRate: baseRate,
-            monthlyPayment: monthlyPayment,
+            approvedAmount: $app.requestedAmount * 0.8,
+            interestRate: 10.5,
+            monthlyPayment: $app.requestedAmount * 0.8 * 0.03,
             reason: "High risk application approved with reduced amount (secured by collateral)"
-        });
+        }
 end
 
 rule "Reject - High Risk Without Collateral"
-    salience 70
+    salience 66
     when
         $app: LoanApplication($id: applicantId, hasCollateral == false)
         $risk: RiskAssessment(applicationId == $id, riskLevel in ("High", "Very High"))
         not RejectionReason(applicationId == $id)
         not LoanDecision(applicationId == $id)
     then
-        console.log("DECISION: " + app.applicantName + " - REJECTED (high risk, no collateral)");
-        rfl.insert({
-            type: "com.bank.loan.LoanDecision",
-            applicationId: app.applicantId,
+        insert LoanDecision {
+            applicationId: $app.applicantId,
             approved: false,
             approvedAmount: 0,
             interestRate: 0,
             monthlyPayment: 0,
             reason: "High risk applications require collateral"
-        });
+        }
 end
 
 rule "Reject - Very High Risk"
-    salience 70
+    salience 65
     when
         $app: LoanApplication($id: applicantId)
         $risk: RiskAssessment(applicationId == $id, riskLevel == "Very High")
         not RejectionReason(applicationId == $id)
         not LoanDecision(applicationId == $id)
     then
-        console.log("DECISION: " + app.applicantName + " - REJECTED (very high risk)");
-        rfl.insert({
-            type: "com.bank.loan.LoanDecision",
-            applicationId: app.applicantId,
+        insert LoanDecision {
+            applicationId: $app.applicantId,
             approved: false,
             approvedAmount: 0,
             interestRate: 0,
             monthlyPayment: 0,
             reason: "Application exceeds acceptable risk threshold"
-        });
+        }
 end
 
 // ============================================================================

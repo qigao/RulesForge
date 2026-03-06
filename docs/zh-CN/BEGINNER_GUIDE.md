@@ -1,20 +1,21 @@
-# Drills 规则引擎 - 绝对初学者指南
+# RulesForge 规则引擎 - 绝对初学者指南
 
 *从未用过规则引擎？从这里开始。*
 
 ## 什么是规则引擎？
 
 想象一下，您经营一家在线商店，并有以下业务规则：
-- “消费超过 1000 美元的客户成为 VIP 会员”
-- “向新客户发送欢迎邮件”
-- “如果购物车中有 5 件以上商品，则享受 10% 折扣”
+
+- "消费超过 1000 美元的客户成为 VIP 会员"
+- "向新客户发送欢迎邮件"
+- "如果购物车中有 5 件以上商品，则享受 10% 折扣"
 
 与其将这些规则硬编码到分散在应用程序中的 if 语句中，**规则引擎** 允许您以简单、可读的格式编写它们并高效执行。
 
-## 为什么要使用 Drills？
+## 为什么要使用 RulesForge？
 
 ```cpp
-// 没有 Drills - 分散的业务逻辑
+// 没有 RulesForge - 分散的业务逻辑
 if (customer.balance > 1000 && customer.orders.size() > 5) {
     customer.status = "VIP";
     send_notification(customer, "Welcome to VIP!");
@@ -33,28 +34,29 @@ if (customer.failed_logins > 3) {
 ```
 
 ```rfl
-// 使用 Drills - 所有业务逻辑集中在一处
+// 使用 RulesForge - 所有业务逻辑集中在一处
 rule "Promote to VIP"
 when
     $c: Customer(balance > 1000, orderCount > 5)
+    not VipCustomer(customerId == $c.id)
 then
-    console.log(`${c.name} is now VIP!`);
-    rfl.update(c, {status: "VIP"});
-    rfl.insert({type: "Notification", message: "Welcome to VIP!"});
+    update $c { status = "VIP" }
+    insert Notification { customerId = $c.id, message = "Welcome to VIP!" }
 end
 
 rule "Age Verification"
 when
-    $o: Order(), $c: Customer(id == $o.customerId, age < 18)
+    $o: Order()
+    $c: Customer(id == $o.customerId, age < 18)
 then
-    rfl.insert({type: "OrderRejection", reason: "Age verification required"});
+    insert OrderRejection { orderId = $o.id, reason = "Age verification required" }
 end
 
 rule "Account Security"
 when
-    $c: Customer(failedLogins > 3)
+    $c: Customer(failedLogins > 3, accountLocked == false)
 then
-    rfl.update(c, {accountLocked: true});
+    update $c { accountLocked = true }
 end
 ```
 
@@ -65,7 +67,7 @@ end
 ```bash
 # 克隆项目
 git clone <您的仓库 URL>
-cd drills
+cd rulesforge
 
 # 构建 (需要 CMake 和 C++20)
 cmake --preset=default
@@ -98,15 +100,11 @@ when
     // 确保我们尚未处理过他们
     not CanDrive(name == $person.name)
 then
-    // 这是规则匹配时运行的 JavaScript 代码
-    console.log($person.name + " 可以开车！");
-
-    // 向系统添加新事实
-    rfl.insert({
-        type: "CanDrive",
-        name: person.name,
-        reason: "年龄 " + person.age + " 且有驾照"
-    });
+    // 规则匹配时执行的原生动作
+    insert CanDrive {
+        name = $person.name,
+        reason = "eligible"
+    }
 end
 ```
 
@@ -172,15 +170,15 @@ int main() {
 
 ```bash
 # 编译 (根据需要调整路径)
-g++ -std=c++20 -I./drills/include -L./build/lib test_driving.cpp -ldrills -o test_driving
+g++ -std=c++20 -I./rulesforge/include -L./build/lib test_driving.cpp -lruleforge -o test_driving
 
 # 运行
 ./test_driving
 ```
 
 **预期输出：**
+
 ```
-Alice 可以开车！
 执行了 1 条规则
 找到了 1 个可以开车的人
 ```
@@ -190,20 +188,22 @@ Bob 不符合条件，因为他只有 15 岁！
 ## 关键概念简单解释
 
 ### 事实 = 您的数据
+
 将事实视为数据库表中的行：
 
 ```cpp
-// 这是一个“Person”事实
-{
-  type: "Person",
-  name: "Alice",
-  age: 17,
-  hasLicense: true
-}
+// 这是一个"Person"事实
+auto person = std::make_shared<Fact>();
+person->type = "Person";
+person->fields["name"] = "Alice";
+person->fields["age"] = static_cast<int64_t>(17);
+person->fields["hasLicense"] = true;
 ```
 
 ### 规则 = 您的业务逻辑
+
 规则有两部分：
+
 - **WHEN** (条件)：要查找什么模式
 - **THEN** (动作)：找到后做什么
 
@@ -217,6 +217,7 @@ end
 ```
 
 ### 会话 = 您的工作区
+
 - 将事实添加到会话
 - 对这些事实运行规则
 - 规则可以创建新事实或修改现有事实
@@ -230,7 +231,8 @@ auto results = session->get_facts_of_type("Result"); // 获取结果
 ## 常见初学者模式
 
 ### 模式 1: 简单过滤
-“查找所有成年人”
+
+"查找所有成年人"
 
 ```rfl
 declare Adult
@@ -240,13 +242,15 @@ end
 rule "查找成年人"
 when
     $person: Person(age >= 18)
+    not Adult(name == $person.name)
 then
-    rfl.insert({type: "Adult", name: person.name});
+    insert Adult { name = $person.name }
 end
 ```
 
 ### 模式 2: 验证
-“检查数据是否有效”
+
+"检查数据是否有效"
 
 ```rfl
 declare ValidationError
@@ -254,38 +258,36 @@ declare ValidationError
     message: String
 end
 
-rule "验证电子邮件"
+rule "验证年龄"
 when
-    $person: Person($email: email)
-    eval($email == null || $email == "" || !$email.includes("@"))
+    $person: Person(age < 0)
 then
-    rfl.insert({
-        type: "ValidationError",
-        field: "email",
-        message: "电子邮件是必需的，并且必须包含 @"
-    });
+    insert ValidationError {
+        field = "age",
+        message = "年龄不能为负数"
+    }
 end
 ```
 
 ### 模式 3: 计算
-“计算派生值”
+
+"计算派生值"
 
 ```rfl
 declare CreditScore
     name: String
-    score: int
+    score: double
 end
 
 rule "计算信用评分"
 when
     $person: Person(age > 0, income > 0)
+    not CreditScore(name == $person.name)
 then
-    let score = Math.min(850, person.income / 1000 + person.age * 10);
-    rfl.insert({
-        type: "CreditScore",
-        name: person.name,
-        score: score
-    });
+    insert CreditScore {
+        name = $person.name,
+        score = min(850, $person.income / 1000 + $person.age * 10)
+    }
 end
 ```
 
@@ -293,14 +295,15 @@ end
 
 一旦您熟悉了基础知识：
 
-1.  **尝试更多示例**：查看 `/drills/example/` 目录
-2.  **学习更多模式**：查看 [快速入门指南](QUICKSTART.md)
-3.  **高级功能**：转到 [用户指南](USER_GUIDE.md)
-4.  **实际项目**：查看 [专业指南](PROFESSIONAL_GUIDE.md)
+1. **尝试更多示例**：查看 `/rulesforge/example/` 目录
+2. **学习更多模式**：查看 [快速入门指南](QUICKSTART.md)
+3. **高级功能**：转到 [用户指南](USER_GUIDE.md)
+4. **实际项目**：查看 [专业指南](PROFESSIONAL_GUIDE.md)
 
 ## 常见初学者错误
 
 ### ❌ 忘记声明类型
+
 ```rfl
 // 错误 - 没有声明
 rule "Bad Rule"
@@ -320,54 +323,58 @@ when
 ```
 
 ### ❌ 错误的字段类型
+
 ```rfl
 declare Person
     age: String  // 错误 - age 应该是 int
 end
 ```
 
-### ❌ 条件中的 JavaScript 语法
+### ❌ 条件中使用 &&
+
 ```rfl
 rule "Wrong"
 when
-    $p: Person(age >= 18 && income > 1000)  // JavaScript 语法在这里不起作用
+    $p: Person(age >= 18 && income > 1000)  // && 在这里不起作用
 then
-    // JavaScript 在这里
+    // ...
 end
 ```
 
 ```rfl
 rule "Correct"
 when
-    $p: Person(age >= 18, income > 1000)  // 使用逗号，而不是 &&
+    $p: Person(age >= 18, income > 1000)  // 使用逗号分隔约束
 then
-    // JavaScript 在这里
+    // ...
 end
 ```
 
 ## 故障排除
 
-### “规则不触发”
-1.  检查您的事实是否与 `declare` 语句完全匹配
-2.  验证字段类型 (int vs String vs boolean)
-3.  添加 `console.log()` 语句以查看发生了什么
+### "规则不触发"
 
-### “编译错误”
-1.  确保每个 `declare` 块都有匹配的字段类型
-2.  检查字段名称中的拼写错误
-3.  确保 RFL 语法正确 (约束之间用逗号分隔)
+1. 检查您的事实是否与 `declare` 语句完全匹配
+2. 验证字段类型 (int vs String vs boolean)
+3. 启用跟踪：`session->enable_tracing(true)`
 
-### “运行时错误”
-1.  检查 `then` 块中的 JavaScript 语法
-2.  验证变量在使用前是否存在
-3.  使用 `try/catch` 块进行调试
+### "编译错误"
+
+1. 确保每个 `declare` 块都有匹配的字段类型
+2. 检查字段名称中的拼写错误
+3. 确保 RFL 语法正确 (约束之间用逗号分隔)
+
+### "无限循环"
+
+1. `update` 会触发 RETE 重新评估 — 确保更新后 LHS 不再匹配
+2. 添加守卫约束（如 `status == "pending"`）并在 RHS 中修改它
 
 ## 帮助和资源
 
--   📖 **更多示例**：`/drills/example/` 目录
--   🐛 **问题**：在 GitHub 上报告错误
--   💡 **问题**：首先检查现有文档
--   ⚡ **性能**：稍后再担心这个 - 先让它工作起来！
+- 📖 **更多示例**：`/rulesforge/example/` 目录
+- 🐛 **问题**：在 GitHub 上报告错误
+- 💡 **问题**：首先检查现有文档
+- ⚡ **性能**：稍后再担心这个 - 先让它工作起来！
 
 ---
 

@@ -21,7 +21,7 @@ Efficient memory usage is critical for high-performance rule execution.
 ### 1.3 Heap Configuration
 
 *   **C++ Runtime:** Ensure your C++ application's heap is configured appropriately for the expected load. Monitor memory usage with system tools (e.g., `top`, `perf`, `Valgrind`).
-*   **QuickJS Heap:** The JavaScript engine (QuickJS) used in rule actions has its own memory management. While Drills manages its lifecycle, be mindful of complex JavaScript operations that might consume significant temporary memory.
+*   **Expression Runtime Heap:** Expression evaluation has its own runtime memory usage. Be mindful of complex expressions with many intermediate allocations.
 
 ## 2. Security Considerations
 
@@ -29,7 +29,7 @@ Securing your rule engine deployment involves protecting rule sources, fact data
 
 ### 2.1 Rule Source Integrity
 
-*   **Trusted Sources:** Only load rules from trusted and verified sources. Malicious rules can execute arbitrary JavaScript code in rule actions.
+*   **Trusted Sources:** Only load rules from trusted and verified sources. Malicious rules can still trigger unintended side effects through rule actions.
 *   **Access Control:** Implement strict access control to your rule definition files (RFL, CSV for decision tables).
 *   **Version Control:** Store rule definitions in a version control system (e.g., Git) to track changes and enable rollbacks.
 
@@ -39,10 +39,9 @@ Securing your rule engine deployment involves protecting rule sources, fact data
 *   **Tokenization/Encryption:** If sensitive data must be present, tokenize or encrypt it before inserting into facts, and decrypt/detokenize only when absolutely required by a trusted action.
 *   **Data Masking:** For logging or tracing, mask sensitive data to prevent accidental exposure.
 
-### 2.3 JavaScript Sandbox
+### 2.3 Runtime Extension Surface
 
-*   **QuickJS Isolation:** Drills uses QuickJS for rule actions, which provides a degree of isolation. However, it's crucial to understand that rule actions can interact with global objects and potentially external C++ functions exposed to the JS environment.
-*   **Limited Exposure:** When extending Drills with custom C++ functions exposed to JavaScript, ensure these functions are carefully designed and only expose necessary, safe operations. Avoid exposing direct file system access or network operations unless explicitly required and secured.
+*   **Limited Exposure:** Keep any exposed native extension functions minimal and safe. Avoid exposing direct file system or network operations unless explicitly required and secured.
 
 ## 3. Concurrency and Thread Safety
 

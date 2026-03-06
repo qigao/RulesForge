@@ -1,14 +1,10 @@
 {
-    "name": "ruleforge",
+    "name": "rulesforge",
     "version-semver": "0.3.0",
     "dependencies": [
         {
             "name": "yaml-cpp",
             "version>=": "0.8.0"
-        },
-        {
-            "name": "quickjs-ng",
-            "version>=": "0.10.1"
         },
         {
             "name": "jsoncons",
@@ -40,9 +36,6 @@
         {
             "name": "libuv",
             "version>=": "1.48.0"
-        },
-        {
-            "name": "tree-sitter"
         }
     ],
     "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"

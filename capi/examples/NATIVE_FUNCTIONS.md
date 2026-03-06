@@ -1,14 +1,18 @@
-# Native Function Registration in RuleForge
+# Native Function Registration in RulesForge
 
-This document explains how to register and use native C functions in RuleForge rules.
+This document explains how to register and use native C functions in RulesForge rules.
+
+Related complete guides:
+
+- EN: `CAPI_NATIVE_DLL_EN.md`
+- ZH: `CAPI_NATIVE_DLL_ZH.md`
+- This page in Chinese: `NATIVE_FUNCTIONS_ZH.md`
 
 ## Overview
 
-RuleForge allows you to register custom C functions that can be called directly from rule actions (RHS). This is useful for:
+RulesForge allows you to register custom C functions that can be called from rule RHS expressions. This is useful for:
 
-- **MQTT Integration**: Republish messages to different topics
-- **HTTP Webhooks**: Send alerts or notifications to external services
-- **Custom Logging**: Implement application-specific logging
+- **Custom Calculations**: Implement domain-specific math or logic in C
 - **External System Integration**: Call any C/C++ library or system API
 - **Performance-Critical Operations**: Implement computationally intensive operations in C
 
@@ -36,9 +40,27 @@ ruleforge_status_t ruleforge_kb_register_native_function(
 );
 ```
 
+### DLL Function Table Registration
+
+You can also ship multiple native functions from a plugin DLL/.so and load them in one call:
+
+```c
+ruleforge_status_t ruleforge_kb_load_native_function_table(
+    ruleforge_knowledge_base_t kb,
+    const char *library_path,
+    const char *symbol_name /* pass NULL for default symbol */
+);
+```
+
+Plugin export contract:
+
+```c
+ruleforge_status_t ruleforge_get_function_table(ruleforge_plugin_function_table_t *out_table);
+```
+
 **Parameters:**
 - `kb`: Knowledge base handle
-- `function_name`: Name to use in rules (e.g., "republish", "webhook")
+- `function_name`: Name to use in rules
 - `callback`: C function pointer
 - `user_data`: Optional context passed to callback (can be NULL)
 
@@ -49,16 +71,18 @@ ruleforge_status_t ruleforge_kb_register_native_function(
 ### 1. Define Your Native Function
 
 ```c
-ruleforge_status_t log_function(void *ctx, int argc, const char **argv, char **out_result) {
-    // Print all arguments
-    printf("[LOG] ");
-    for (int i = 0; i < argc; i++) {
-        printf("%s ", argv[i]);
+ruleforge_status_t calculate_tax(void *ctx, int argc, const char **argv, char **out_result) {
+    if (argc < 1) {
+        *out_result = strdup("{\"error\": \"requires amount\"}");
+        return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
-    printf("\n");
 
-    // No return value needed
-    *out_result = nullptr;
+    double amount = atof(argv[0]);
+    double tax = amount * 0.08;
+
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer), "%.2f", tax);
+    *out_result = strdup(buffer);
     return RULES_FORGE_OK;
 }
 ```
@@ -69,88 +93,26 @@ ruleforge_status_t log_function(void *ctx, int argc, const char **argv, char **o
 ruleforge_knowledge_base_t kb;
 ruleforge_kb_create(&kb);
 
-// Register the function
-ruleforge_kb_register_native_function(kb, "log", log_function, nullptr);
+ruleforge_kb_register_native_function(kb, "calculateTax", calculate_tax, nullptr);
 ```
 
 ### 3. Use in Rules
 
-```javascript
-rule "Example Rule"
+Native functions can be used in RHS expressions where a value is expected:
+
+```rfl
+rule "Apply Tax"
 when
-    $sensor : Sensor(temperature > 25)
+    $order : Order(status == "pending")
 then
-    // Call your native function
-    log("High temperature:", $sensor.temperature);
+    update $order {
+        tax = calculateTax($order.subtotal),
+        total = $order.subtotal + calculateTax($order.subtotal)
+    }
 end
 ```
 
 ## Advanced Examples
-
-### MQTT Republish
-
-```c
-ruleforge_status_t republish_function(void *ctx, int argc, const char **argv, char **out_result) {
-    if (argc < 2) {
-        *out_result = strdup("{\"error\": \"requires topic and message\"}");
-        return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-    }
-
-    const char *topic = argv[0];
-    const char *message = argv[1];
-
-    // Your MQTT publish code here
-    mqtt_publish(topic, message);
-
-    *out_result = strdup("{\"published\": true}");
-    return RULES_FORGE_OK;
-}
-```
-
-**Usage in rules:**
-```javascript
-rule "Republish Alert"
-when
-    $alert : Alert(severity == "high")
-then
-    republish("alerts/high", JSON.stringify($alert));
-end
-```
-
-### HTTP Webhook
-
-```c
-ruleforge_status_t webhook_function(void *ctx, int argc, const char **argv, char **out_result) {
-    if (argc < 2) {
-        *out_result = strdup("{\"error\": \"requires url and payload\"}");
-        return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-    }
-
-    const char *url = argv[0];
-    const char *payload = argv[1];
-
-    // Make HTTP POST request
-    int status_code = http_post(url, payload);
-
-    char buffer[256];
-    snprintf(buffer, sizeof(buffer), "{\"status\": %d}", status_code);
-    *out_result = strdup(buffer);
-
-    return RULES_FORGE_OK;
-}
-```
-
-**Usage in rules:**
-```javascript
-rule "Send Webhook"
-when
-    $event : Event(type == "critical")
-then
-    var response = webhook("https://api.example.com/alert",
-                          JSON.stringify($event));
-    log("Webhook response:", JSON.stringify(response));
-end
-```
 
 ### Function with Context
 
@@ -160,36 +122,87 @@ struct DatabaseContext {
     const char *table_name;
 };
 
-ruleforge_status_t save_to_db(void *ctx, int argc, const char **argv, char **out_result) {
+ruleforge_status_t lookup_rate(void *ctx, int argc, const char **argv, char **out_result) {
     DatabaseContext *db_ctx = (DatabaseContext *)ctx;
 
     if (argc < 1) {
-        *out_result = strdup("{\"error\": \"requires data\"}");
+        *out_result = strdup("0.0");
         return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
-    // Save to database using context
-    bool success = db_insert(db_ctx->db_connection,
-                            db_ctx->table_name,
-                            argv[0]);
+    // Look up rate from database using context
+    double rate = db_lookup_rate(db_ctx->db_connection, argv[0]);
 
-    *out_result = strdup(success ? "{\"saved\": true}" : "{\"saved\": false}");
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "%.4f", rate);
+    *out_result = strdup(buffer);
     return RULES_FORGE_OK;
 }
 
 // Registration with context
-DatabaseContext db_ctx = {my_db_connection, "events"};
-ruleforge_kb_register_native_function(kb, "saveToDb", save_to_db, &db_ctx);
+DatabaseContext db_ctx = {my_db_connection, "rates"};
+ruleforge_kb_register_native_function(kb, "lookupRate", lookup_rate, &db_ctx);
+```
+
+**Usage in rules:**
+
+```rfl
+rule "Apply Dynamic Rate"
+when
+    $loan : Loan(status == "active")
+then
+    update $loan {
+        rate = lookupRate($loan.category),
+        payment = $loan.principal * lookupRate($loan.category) / 12
+    }
+end
+```
+
+### Calculation with Multiple Arguments
+
+```c
+ruleforge_status_t weighted_score(void *ctx, int argc, const char **argv, char **out_result) {
+    if (argc < 3) {
+        *out_result = strdup("0.0");
+        return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+
+    double score1 = atof(argv[0]);
+    double score2 = atof(argv[1]);
+    double weight = atof(argv[2]);
+
+    double result = score1 * weight + score2 * (1.0 - weight);
+
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "%.2f", result);
+    *out_result = strdup(buffer);
+    return RULES_FORGE_OK;
+}
+```
+
+**Usage in rules:**
+
+```rfl
+rule "Calculate Final Score"
+when
+    $student : Student()
+    not FinalScore(studentId == $student.id)
+then
+    insert FinalScore {
+        studentId = $student.id,
+        score = weightedScore($student.exam, $student.homework, 0.7)
+    }
+end
 ```
 
 ## Important Notes
 
 ### Memory Management
 
-1. **Input Arguments (`argv`)**: Read-only, managed by RuleForge. Do not free.
+1. **Input Arguments (`argv`)**: Read-only, managed by RulesForge. Do not free.
 2. **Output Result (`out_result`)**:
    - Allocate with `malloc()` or `strdup()`
-   - RuleForge will call `free()` on it
+   - RulesForge will call `free()` on it
    - Can be `nullptr` if no return value needed
 
 ### Argument Format
@@ -202,7 +215,7 @@ ruleforge_kb_register_native_function(kb, "saveToDb", save_to_db, &db_ctx);
 
 - Return `RULES_FORGE_OK` (0) for success
 - Return error codes for failures
-- Set `*out_result` to error message JSON on failure
+- Set `*out_result` to error message on failure
 
 ### Thread Safety
 
@@ -212,50 +225,13 @@ ruleforge_kb_register_native_function(kb, "saveToDb", save_to_db, &db_ctx);
 
 ## Complete Example
 
-See `native_functions_demo.cpp` for a complete working example demonstrating:
-- Simple logging
-- Webhook simulation
-- MQTT republish simulation
-- Custom calculations with context
+See `native_functions_demo.cpp` for a complete working example.
 
 ## Building the Example
 
 ```bash
 cmake --build build --target native_functions_demo
 ./build/capi/examples/native_functions_demo
-```
-
-## Integration with MQTT Rules Plugin
-
-For MQTT integration, register functions like:
-
-```c
-// Register MQTT-specific functions
-ruleforge_kb_register_native_function(kb, "republish", mqtt_republish, mqtt_client);
-ruleforge_kb_register_native_function(kb, "webhook", http_webhook, http_client);
-ruleforge_kb_register_native_function(kb, "log", custom_log, log_context);
-```
-
-Then use in rules:
-
-```javascript
-rule "Process Sensor Data"
-when
-    $sensor : SensorData(temperature > threshold)
-then
-    // Log the event
-    log("Threshold exceeded:", $sensor.temperature);
-
-    // Republish to alert topic
-    republish("sensors/alerts", JSON.stringify({
-        id: $sensor.id,
-        temp: $sensor.temperature,
-        timestamp: Date.now()
-    }));
-
-    // Send webhook notification
-    webhook("https://monitoring.example.com/alert", JSON.stringify($sensor));
-end
 ```
 
 ## Error Handling
@@ -273,26 +249,15 @@ if (ruleforge_kb_register_native_function(kb, "myFunc", my_func, ctx) != RULES_F
 ## Best Practices
 
 1. **Keep functions simple**: Native functions should be lightweight
-2. **Use async operations**: For I/O operations, consider async patterns
-3. **Validate inputs**: Always check `argc` and validate arguments
-4. **Return meaningful errors**: Use JSON error objects with descriptive messages
-5. **Document your functions**: Provide clear documentation for rule authors
-6. **Test thoroughly**: Test with various input combinations
-7. **Consider performance**: Native functions are called during rule execution
+2. **Validate inputs**: Always check `argc` and validate arguments
+3. **Return meaningful errors**: Use descriptive error messages
+4. **Test thoroughly**: Test with various input combinations
+5. **Consider performance**: Native functions are called during rule execution
 
 ## Limitations
 
-- Function names must be valid JavaScript identifiers
+- Function names must be valid identifiers
 - Arguments are passed as strings (JSON-encoded)
-- Return values must be JSON-serializable
 - Functions are registered per knowledge base (not per session)
 - Registration must happen before loading rules
-
-## Future Enhancements
-
-Potential future improvements:
-- Async function support
-- Streaming/callback-based functions
-- Type-safe argument passing
-- Automatic JSON serialization/deserialization
-- Function overloading
+- Native functions can only be used in RHS expressions (e.g., field values in `insert`/`update`), not as standalone statements

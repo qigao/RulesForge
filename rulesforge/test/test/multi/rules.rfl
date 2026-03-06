@@ -1,0 +1,26 @@
+package test.multi
+
+// Import shared declarations from common.rfl
+import test.multi.common
+
+rule "Rule A"
+when
+    $a : FactA()
+then
+    // Rule A fired
+end
+
+rule "Rule B"
+when
+    $b : FactB()
+then
+    // Rule B fired
+end
+
+rule "Cross Reference"
+when
+    $a : FactA()
+    $b : FactB()
+then
+    // Both FactA and FactB present
+end

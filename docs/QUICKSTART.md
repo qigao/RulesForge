@@ -1,16 +1,17 @@
-# Drills Rules Engine - Quick Start Guide
+# RulesForge Rules Engine - Quick Start Guide
 
 *Get up and running in 15 minutes*
 
-## What is Drills?
+## What is RulesForge?
 
-Drills is a high-performance C++ rules engine implementing the **Rete algorithm** with **JavaScript** integration. Think "business logic as code" - write your complex conditions in a declarative language, execute actions in JavaScript.
+RulesForge is a high-performance C++ rules engine implementing the **Rete algorithm** with a **Native RHS** action language. Think "business logic as code" - write your complex conditions in a declarative language, execute actions in a clean native syntax.
 
 ## 5-Minute Example
 
 ### 1. Write Your Business Rules
 
 Create `my_rules.rfl`:
+
 ```rfl
 // Define your data model
 declare Customer
@@ -33,13 +34,10 @@ when
     $c: Customer(balance > 10000, status == "Active")
     not VipCustomer(customerId == $c.id)
 then
-    // JavaScript action - 'c' is the matched customer
-    console.log(`Promoting ${c.name} to VIP status`);
-    rfl.insert({
-        type: "VipCustomer", 
-        customerId: c.id,
-        reason: "High Balance: $" + c.balance
-    });
+    insert VipCustomer {
+        customerId = $c.id,
+        reason = "high_balance"
+    }
 end
 
 // Query to find all VIP customers
@@ -61,7 +59,7 @@ int main() {
     std::string rfl = read_file("my_rules.rfl");
     ParsingResult result;
     auto kb = build_knowledge_base(rfl, result);
-    
+
     if (!result.success) {
         for (auto& err : result.errors) {
             std::cerr << err.to_string() << std::endl;
@@ -71,7 +69,7 @@ int main() {
 
     // Create session and add facts
     auto session = kb->create_session();
-    
+
     // Add customer data using type-safe builder
     auto customer = CUSTOMER()
         .id(1001)
@@ -80,24 +78,24 @@ int main() {
         .balance(15000.0)
         .status("Active")
         .build();
-        
+
     session->add_fact(customer);
-    
+
     // Fire rules and see the magic happen
     int rules_fired = session->fire_all_rules();
     std::cout << "Fired " << rules_fired << " rules\n";
-    
+
     // Query results
     auto vips = session->execute_query("find_vip_customers");
     std::cout << "Found " << vips.size() << " VIP customers\n";
-    
+
     return 0;
 }
 ```
 
 ### 3. Expected Output
+
 ```
-Promoting Alice Johnson to VIP status
 Fired 1 rules
 Found 1 VIP customers
 ```
@@ -105,6 +103,7 @@ Found 1 VIP customers
 ## Key Concepts in 2 Minutes
 
 ### Facts = Your Data
+
 ```cpp
 // Traditional approach - manual fact creation
 auto fact = std::make_shared<Fact>();
@@ -112,7 +111,7 @@ fact->type = "Customer";
 fact->fields["name"] = "John";
 fact->fields["balance"] = 5000.0;
 
-// Drills approach - type-safe builders
+// RulesForge approach - type-safe builders
 auto customer = CUSTOMER()
     .name("John")
     .balance(5000.0)
@@ -120,6 +119,7 @@ auto customer = CUSTOMER()
 ```
 
 ### Rules = Your Business Logic
+
 ```rfl
 rule "Rule Name"
 when
@@ -127,12 +127,12 @@ when
     $customer: Customer(balance > 1000, status == "Active")
 then
     // Actions - what to do when matched?
-    console.log("High-value customer: " + customer.name);
-    rfl.insert({type: "HighValueCustomer", id: customer.id});
+    insert HighValueCustomer { customerId = $customer.id }
 end
 ```
 
 ### Sessions = Your Working Memory
+
 ```cpp
 auto session = kb->create_session();
 session->add_fact(customer_data);      // Add data
@@ -143,33 +143,33 @@ auto results = session->execute_query("my_query"); // Query results
 ## Common Patterns
 
 ### Pattern 1: Data Validation
+
 ```rfl
 rule "Validate Customer"
 when
     $c: Customer(age < 18)
 then
-    console.error(`Customer ${c.name} is underage: ${c.age}`);
-    rfl.insert({type: "ValidationError", message: "Customer must be 18+"});
+    insert ValidationError { message = "Customer must be 18+" }
 end
 ```
 
 ### Pattern 2: Data Transformation
+
 ```rfl
 rule "Calculate Credit Score"
 when
     $c: Customer(balance > 0)
     not CreditScore(customerId == $c.id)
 then
-    let score = Math.min(850, Math.max(300, c.balance / 100 + 600));
-    rfl.insert({
-        type: "CreditScore", 
-        customerId: c.id, 
-        score: score
-    });
+    insert CreditScore {
+        customerId = $c.id,
+        score = min(850, max(300, $c.balance / 100 + 600))
+    }
 end
 ```
 
 ### Pattern 3: Complex Conditions
+
 ```rfl
 rule "Loyal Customer Reward"
 when
@@ -180,30 +180,32 @@ when
     )
     eval($orders >= 5)
 then
-    console.log(`${c.name} has ${orders} large orders - reward time!`);
-    rfl.insert({type: "Reward", customerId: c.id, points: 1000});
+    insert Reward { customerId = $c.id, points = 1000 }
 end
 ```
 
 ## Build and Run
 
 ### Prerequisites
+
 - CMake 3.20+
 - C++20 compiler (MSVC 2022, GCC 11+, Clang 13+)
 - vcpkg (for dependencies)
 
 ### Quick Build
+
 ```bash
 git clone <your-repo>
-cd drills
+cd rulesforge
 cmake --preset=default
 cmake --build build
 ```
 
 ### Run Examples
+
 ```bash
 # Basic example
-./build/bin/drills_engine examples/basic.rfl
+./build/bin/ruleforge_engine examples/basic.rfl
 
 # Performance demo
 ./build/bin/memory_optimization_demo
@@ -218,8 +220,8 @@ cmake --build build
 
 - 📖 **Documentation**: All guides are in `/docs/`
 - 🐛 **Issues**: GitHub Issues for bug reports
-- 💡 **Examples**: Check `/drills/example/` directory
+- 💡 **Examples**: Check `/rulesforge/example/` directory
 - ⚡ **Performance**: See memory optimization examples
 
 ---
-*Built with ❤️ using modern C++20, QuickJS, and the Rete algorithm*
+*Built with ❤️ using modern C++20 and the Rete algorithm*

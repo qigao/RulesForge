@@ -11,15 +11,12 @@ when
     $v : ValidationResult(orderId == $o.id, valid == true)
     not PricingResult(orderId == $o.id)
 then
-    var discount = o.subtotal * 0.05;
-    console.log("Bronze tier discount: " + discount);
-    rfl.insert({
-        type: "ecommerce.PricingResult",
-        orderId: o.id,
-        subtotal: o.subtotal,
-        discount: discount,
-        finalPrice: o.subtotal - discount
-    });
+    insert PricingResult {
+        orderId: $o.id,
+        subtotal: $o.subtotal,
+        discount: $o.subtotal * 0.05,
+        finalPrice: $o.subtotal * 0.95
+    }
 end
 
 rule "Calculate Base Price - Silver Tier"
@@ -30,15 +27,12 @@ when
     $v : ValidationResult(orderId == $o.id, valid == true)
     not PricingResult(orderId == $o.id)
 then
-    var discount = o.subtotal * 0.10;
-    console.log("Silver tier discount: " + discount);
-    rfl.insert({
-        type: "ecommerce.PricingResult",
-        orderId: o.id,
-        subtotal: o.subtotal,
-        discount: discount,
-        finalPrice: o.subtotal - discount
-    });
+    insert PricingResult {
+        orderId: $o.id,
+        subtotal: $o.subtotal,
+        discount: $o.subtotal * 0.10,
+        finalPrice: $o.subtotal * 0.90
+    }
 end
 
 rule "Calculate Base Price - Gold Tier"
@@ -49,15 +43,12 @@ when
     $v : ValidationResult(orderId == $o.id, valid == true)
     not PricingResult(orderId == $o.id)
 then
-    var discount = o.subtotal * 0.15;
-    console.log("Gold tier discount: " + discount);
-    rfl.insert({
-        type: "ecommerce.PricingResult",
-        orderId: o.id,
-        subtotal: o.subtotal,
-        discount: discount,
-        finalPrice: o.subtotal - discount
-    });
+    insert PricingResult {
+        orderId: $o.id,
+        subtotal: $o.subtotal,
+        discount: $o.subtotal * 0.15,
+        finalPrice: $o.subtotal * 0.85
+    }
 end
 
 rule "Calculate Base Price - Platinum Tier"
@@ -68,30 +59,25 @@ when
     $v : ValidationResult(orderId == $o.id, valid == true)
     not PricingResult(orderId == $o.id)
 then
-    var discount = o.subtotal * 0.20;
-    console.log("Platinum tier discount: " + discount);
-    rfl.insert({
-        type: "ecommerce.PricingResult",
-        orderId: o.id,
-        subtotal: o.subtotal,
-        discount: discount,
-        finalPrice: o.subtotal - discount
-    });
+    insert PricingResult {
+        orderId: $o.id,
+        subtotal: $o.subtotal,
+        discount: $o.subtotal * 0.20,
+        finalPrice: $o.subtotal * 0.80
+    }
 end
 
 rule "Volume Discount - Large Order"
 salience 5
+no-loop
 when
     $o : Order(itemCount >= 10)
     $p : PricingResult(orderId == $o.id)
 then
-    var extraDiscount = p.subtotal * 0.05;
-    var newDiscount = p.discount + extraDiscount;
-    console.log("Volume discount applied: " + extraDiscount);
-    rfl.update(p, {
-        discount: newDiscount,
-        finalPrice: p.subtotal - newDiscount
-    });
+    update $p {
+        discount: $p.discount + $p.subtotal * 0.05,
+        finalPrice: $p.subtotal - ($p.discount + $p.subtotal * 0.05)
+    }
 end
 
 rule "Print Final Price"
@@ -100,5 +86,5 @@ when
     $o : Order()
     $p : PricingResult(orderId == $o.id)
 then
-    console.log("Order " + o.id + " final price: $" + p.finalPrice + " (saved $" + p.discount + ")");
+    // Final price calculated
 end

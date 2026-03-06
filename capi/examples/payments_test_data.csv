@@ -1,0 +1,11 @@
+description,quantity,unitPrice,finalPrice
+Order with 1 item - should get No Discount,1,25.99,0.01
+Order with 2 items - should get No Discount,2,15.50,0.01
+Order with 3 items - should get Medium Discount (5%),3,30.00,0.01
+Order with 4 items - should get Medium Discount (5%),4,12.75,0.01
+Order with 5 items - should get Medium Discount (5%),5,45.99,0.01
+Order with 6 items - should get High Discount (10%),6,20.00,0.01
+Order with 10 items - should get High Discount (10%),10,18.99,0.01
+Order with 3 items and finalPrice already set - should trigger Round Down rule,3,15.50,44.18
+Order with 1 item and finalPrice already set - should not trigger Round Down rule,1,25.99,25.99
+Order with 7 items - should get High Discount and then Round Down,7,16.50,0.01

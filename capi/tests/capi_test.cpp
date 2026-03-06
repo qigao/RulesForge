@@ -3,6 +3,7 @@
 
 #include <string>
 #include <cstdio>
+#include <fstream>
 
 suite("CAPI") {
     group("Initialization and Cleanup") {
@@ -95,6 +96,58 @@ Rule2,test,passed
             const char* fact_json = R"({"name": "Alice", "age": 30, "isStudent": true, "score": 95.5})";
             check_int_eq(ruleforge_session_add_fact_json(session, fact_type, fact_json), RULES_FORGE_OK);
 
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
+
+        it("adds facts from CSV string") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            const char* csv = "name,age,score,active\nAlice,30,95.5,true\nBob,17,70,false\n";
+            int loaded = 0;
+            check_int_eq(
+                ruleforge_session_add_facts_csv(session, "Person", csv, &loaded),
+                RULES_FORGE_OK
+            );
+            check_int_eq(loaded, 2);
+            check_size_eq(ruleforge_session_get_fact_count(session), 2);
+
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
+
+        it("adds facts from CSV file") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            const char* temp_csv_path = "capi_test_temp.csv";
+            {
+                std::ofstream out(temp_csv_path, std::ios::binary);
+                out << "name,age\nCharlie,21\nDiana,42\n";
+            }
+
+            int loaded = 0;
+            check_int_eq(
+                ruleforge_session_add_facts_csv_file(session, "Person", temp_csv_path, &loaded),
+                RULES_FORGE_OK
+            );
+            check_int_eq(loaded, 2);
+            check_size_eq(ruleforge_session_get_fact_count(session), 2);
+
+            std::remove(temp_csv_path);
             check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
             check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
             ruleforge_cleanup();

@@ -13,7 +13,7 @@ set(PROJECT_VERSION
 
 set(PROJECT_NAME "RulesForge")
 set(PROJECT_DESCRIPTION "A Rete Network based rule engine")
-set(PROJECT_WEBSITE "http://github.com/qigao/project-cpp-template.git")
+set(PROJECT_WEBSITE "http://github.com/qigao/RulesForge")
 set(APPLICATION_LICENSE "Apache2 License")
 
 # Set the project name and language
@@ -27,7 +27,10 @@ project(
 
 # Set the features of the project
 include(ProjectOptions.cmake)
-find_package(TurboNet CONFIG REQUIRED PATHS ${EXTERNAL_ROOT}/turbonet)
+message(STATUS "Searching for TurboNet in: ${EXTERNAL_ROOT}/turbonet")
+find_package(TurboNet CONFIG REQUIRED PATHS "${EXTERNAL_ROOT}/turbonet")
+message(STATUS "Found TurboNet version: ${TurboNet_VERSION}")
+
 find_package(c-ares CONFIG REQUIRED)
 find_package(base64 CONFIG REQUIRED)
 # Output files directory
@@ -40,6 +43,5 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 add_subdirectory(tools)
 include(FindTools)
 # Add subdirectories
-add_subdirectory(shared)
-add_subdirectory(ruleforge)
+add_subdirectory(rulesforge)
 add_subdirectory(capi)
