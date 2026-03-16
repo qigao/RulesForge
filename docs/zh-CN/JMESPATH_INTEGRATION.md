@@ -4,7 +4,7 @@
 
 RulesForge 当前支持在 LHS 使用外部数据源模式：
 
-- `from jmespath(...)`：JSON 提取
+- `from json(...)`：JSON 提取
 - `from dsv(...)` / `from csv(...)`：CSV/DSV 过滤
 
 这些 source 产生的是网络中的临时行 fact，不会持久保存在工作内存中。
@@ -12,14 +12,14 @@ RulesForge 当前支持在 LHS 使用外部数据源模式：
 实现说明：
 
 - 内部 rete 节点名为 `SourceExtractNode` 。
-- DSL 语法不变，仍然使用 `from jmespath(...)` / `from dsv(...)` / `from csv(...)`。
+- DSL 语法不变，仍然使用 `from json(...)` / `from dsv(...)` / `from csv(...)`。
 
 ## JMESPath Source
 
 语法：
 
 ```rfl
-$row: RowType() from jmespath(INPUT, "JMESPATH_EXPRESSION")
+$row: RowType() from json(INPUT, "JMESPATH_EXPRESSION")
 ```
 
 `INPUT` 支持：
@@ -34,7 +34,7 @@ rule "高价值订单"
 when
     $t: Trigger()
     $p: Purchase(amount > 100.0)
-        from jmespath(file("data/orders.json"), "orders[*]")
+        from json(file("data/orders.json"), "orders[*]")
 then
     insert Matched { }
 end
@@ -83,14 +83,14 @@ end
 
 ## 在 accumulate 中使用 Source Pattern
 
-`accumulate(...)` 的 source pattern 也支持 `from jmespath(...)` / `from dsv(...)` / `from csv(...)`。
+`accumulate(...)` 的 source pattern 也支持 `from json(...)` / `from dsv(...)` / `from csv(...)`。
 
 ```rfl
 rule "累计高价值订单金额"
 when
     $t: Trigger()
     $sum: Number(doubleValue > 1000.0) from accumulate(
-        $p: Purchase() from jmespath(file("data/orders.json"), "orders[*]"),
+        $p: Purchase() from json(file("data/orders.json"), "orders[*]"),
         sum($p.amount)
     )
 then
@@ -103,11 +103,11 @@ end
 以下旧写法已废弃：
 
 ```rfl
-$r: Row() from jmespath(PAYLOAD_REF, "orders[*]")
+$r: Row() from json(PAYLOAD_REF, "orders[*]")
 ```
 
 请改为 string/file 输入：
 
 ```rfl
-$r: Row() from jmespath(file("data/orders.json"), "orders[*]")
+$r: Row() from json(file("data/orders.json"), "orders[*]")
 ```

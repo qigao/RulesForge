@@ -9,16 +9,16 @@
 namespace rulesforge {
 
 // Arena dedicated to TokenWMEs.
-// Uses turbo_pool_t for high-performance, contiguous allocation.
+// Uses mem_pool_t for high-performance, contiguous allocation.
 class TokenArena {
 public:
     explicit TokenArena(size_t size = 64 * 1024 * 1024) {
-         turbo_pool_init(&arena_, size);
+         mem_init(&arena_, size);
          init_root();
     }
 
     ~TokenArena() {
-        turbo_pool_free(&arena_);
+        mem_destroy(&arena_);
     }
 
     TokenWME* create_token(TokenWME const* parent, Fact const* fact) {
@@ -40,12 +40,12 @@ public:
     TokenWME const* get_root() const { return root_; }
 
     void reset() {
-        turbo_pool_reset(&arena_);
+        mem_reset(&arena_);
         init_root();
     }
 
     size_t memory_usage() const {
-        return arena_.total_used;
+        return t_atomic_load_size_relaxed((t_atomic_size_t*)&arena_.total_used);
     }
 
 private:
@@ -58,12 +58,12 @@ private:
     }
 
     TokenWME* allocate_raw() {
-        void* p = turbo_pool_alloc(&arena_, sizeof(TokenWME));
+        void* p = mem_alloc(&arena_, sizeof(TokenWME));
         if (!p) throw std::bad_alloc();
         return new (p) TokenWME();
     }
 
-    turbo_pool_t arena_;
+    mem_pool_t arena_;
     TokenWME* root_;
 };
 

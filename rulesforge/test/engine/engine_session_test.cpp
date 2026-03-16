@@ -1,6 +1,7 @@
-#include "parser/rfl_parser.hpp"
+#include "rfl_parser.hpp"
 #include "engine/knowledge_base.hpp"
 #include "engine/stateful_session.hpp"
+#include "core/exceptions.hpp"
 #include "tinytest.h"
 
 struct TestFixture {
@@ -314,6 +315,295 @@ suite("Engine Session") {
 
             QueryResult qr = fixture.session->execute_query("findResults");
             check(qr.size() == 3);
+        }
+    }
+
+    group("Runtime Safety") {
+        it("resets halt state between fire_all_rules calls") {
+            TestFixture fixture;
+            fixture.build_session(R"(
+                declare Signal
+                    id: int
+                end
+
+                rule "StopSignal"
+                when
+                    $s : Signal()
+                then
+                    halt
+                end
+            )");
+
+            auto s1 = std::make_shared<Fact>();
+            s1->type = "Signal";
+            s1->fields["id"] = static_cast<int64_t>(1);
+            fixture.session->add_fact(s1);
+            check(fixture.session->fire_all_rules() == 1);
+
+            auto s2 = std::make_shared<Fact>();
+            s2->type = "Signal";
+            s2->fields["id"] = static_cast<int64_t>(2);
+            fixture.session->add_fact(s2);
+
+            // If halt flag leaks between runs, this becomes 0.
+            check(fixture.session->fire_all_rules() == 1);
+        }
+
+        it("validates facts in add_facts strict mode before insertion") {
+            TestFixture fixture;
+            fixture.build_session(R"(
+                declare Person
+                    age: int
+                end
+            )");
+            fixture.session->set_validation_mode(ValidationMode::Strict);
+
+            auto valid = std::make_shared<Fact>();
+            valid->type = "Person";
+            valid->fields["age"] = static_cast<int64_t>(42);
+
+            auto invalid = std::make_shared<Fact>();
+            invalid->type = "Person";
+            invalid->fields["age"] = std::string("not-an-int");
+
+            bool threw = false;
+            try {
+                fixture.session->add_facts(std::vector<Fact*>{valid.get(), invalid.get()});
+            } catch (SchemaValidationException const&) {
+                threw = true;
+            }
+            check(threw);
+            check(fixture.session->get_fact_count() == 0);
+        }
+
+        it("rolls back update when rhs insert fails in strict mode") {
+            TestFixture fixture;
+            fixture.build_session(R"(
+                declare Person
+                    name: String
+                    age: int
+                end
+                declare Audit
+                    code: int
+                end
+
+                query "findPeople"
+                    $p : Person()
+                end
+
+                rule "UpdateThenFail"
+                when
+                    $p : Person(name == "Alice")
+                then
+                    update $p { name = "Diana" }
+                    insert Audit { code = "bad" }
+                end
+            )");
+            fixture.session->set_validation_mode(ValidationMode::Strict);
+
+            auto person = std::make_shared<Fact>();
+            person->type = "Person";
+            person->fields["name"] = std::string("Alice");
+            person->fields["age"] = static_cast<int64_t>(30);
+            fixture.session->add_fact(person);
+
+            bool threw = false;
+            try {
+                fixture.session->fire_all_rules();
+            } catch (SchemaValidationException const&) {
+                threw = true;
+            }
+            check(threw);
+
+            // Failed RHS must leave working memory in the pre-activation state.
+            check(fixture.session->get_fact_count() == 1);
+            QueryResult query_results = fixture.session->execute_query("findPeople");
+            check(query_results.size() == 1);
+            QueryResultRow row = query_results.single();
+            auto restored_name = row.getFieldAs<std::string>("$p", "name");
+            check(restored_name.has_value());
+            check(restored_name.value() == "Alice");
+        }
+
+        it("rolls back mixed update retract and insert failure") {
+            TestFixture fixture;
+            fixture.build_session(R"(
+                declare Person
+                    name: String
+                    age: int
+                end
+                declare Temp
+                    marker: int
+                end
+                declare Audit
+                    code: int
+                end
+
+                query "findPeople"
+                    $p : Person()
+                end
+
+                rule "MixedFailure"
+                when
+                    $p : Person(name == "Alice")
+                then
+                    update $p { name = "Diana" }
+                    insert Temp { marker = 1 }
+                    retract $p
+                    insert Audit { code = "bad" }
+                end
+            )");
+            fixture.session->set_validation_mode(ValidationMode::Strict);
+
+            auto person = std::make_shared<Fact>();
+            person->type = "Person";
+            person->fields["name"] = std::string("Alice");
+            person->fields["age"] = static_cast<int64_t>(30);
+            fixture.session->add_fact(person);
+
+            bool threw = false;
+            try {
+                fixture.session->fire_all_rules();
+            } catch (SchemaValidationException const&) {
+                threw = true;
+            }
+            check(threw);
+
+            check(fixture.session->get_fact_count() == 1);
+            QueryResult query_results = fixture.session->execute_query("findPeople");
+            check(query_results.size() == 1);
+            QueryResultRow row = query_results.single();
+            auto restored_name = row.getFieldAs<std::string>("$p", "name");
+            check(restored_name.has_value());
+            check(restored_name.value() == "Alice");
+        }
+
+        it("blocks mutating apis after rollback failure until reset") {
+            TestFixture fixture;
+            fixture.build_session(R"(
+                declare Person
+                    name: String
+                    age: int
+                end
+                declare Audit
+                    code: int
+                end
+
+                rule "RollbackFailure"
+                when
+                    $p : Person(name == "Alice")
+                then
+                    update $p { age = "invalid" }
+                    retract $p
+                    insert Audit { code = "bad" }
+                end
+            )");
+            fixture.session->set_validation_mode(ValidationMode::Strict);
+
+            auto person = std::make_shared<Fact>();
+            person->type = "Person";
+            person->fields["name"] = std::string("Alice");
+            person->fields["age"] = static_cast<int64_t>(30);
+            fixture.session->add_fact(person);
+
+            bool fire_threw = false;
+            try {
+                fixture.session->fire_all_rules();
+            } catch (SchemaValidationException const&) {
+                fire_threw = true;
+            }
+            check(fire_threw);
+            check(!fixture.session->is_consistent());
+            check(fixture.session->get_fact_count() == 0);
+
+            auto another = std::make_shared<Fact>();
+            another->type = "Person";
+            another->fields["name"] = std::string("Bob");
+            another->fields["age"] = static_cast<int64_t>(40);
+
+            bool add_threw = false;
+            try {
+                fixture.session->add_fact(another);
+            } catch (std::runtime_error const&) {
+                add_threw = true;
+            }
+            check(add_threw);
+            check(fixture.session->get_fact_count() == 0);
+
+            bool retract_threw = false;
+            try {
+                fixture.session->retract_fact(person);
+            } catch (std::runtime_error const&) {
+                retract_threw = true;
+            }
+            check(retract_threw);
+
+            bool global_threw = false;
+            try {
+                fixture.session->set_global("threshold", static_cast<int64_t>(10));
+            } catch (std::runtime_error const&) {
+                global_threw = true;
+            }
+            check(global_threw);
+
+            bool focus_threw = false;
+            try {
+                fixture.session->set_focus("MAIN");
+            } catch (std::runtime_error const&) {
+                focus_threw = true;
+            }
+            check(focus_threw);
+
+            bool validation_mode_threw = false;
+            try {
+                fixture.session->set_validation_mode(ValidationMode::Warn);
+            } catch (std::runtime_error const&) {
+                validation_mode_threw = true;
+            }
+            check(validation_mode_threw);
+
+            bool tracing_threw = false;
+            try {
+                fixture.session->enable_tracing(true);
+            } catch (std::runtime_error const&) {
+                tracing_threw = true;
+            }
+            check(tracing_threw);
+
+            auto listener = std::make_shared<IEngineListener>();
+            bool add_listener_threw = false;
+            try {
+                fixture.session->addListener(listener);
+            } catch (std::runtime_error const&) {
+                add_listener_threw = true;
+            }
+            check(add_listener_threw);
+
+            bool remove_listener_threw = false;
+            try {
+                fixture.session->removeListener(listener);
+            } catch (std::runtime_error const&) {
+                remove_listener_threw = true;
+            }
+            check(remove_listener_threw);
+
+            fixture.session->reset();
+            check(fixture.session->is_consistent());
+
+            fixture.session->set_global("threshold", static_cast<int64_t>(10));
+            auto threshold = fixture.session->get_global("threshold");
+            check(threshold.has_value());
+            check(std::get<int64_t>(*threshold) == 10);
+
+            fixture.session->set_validation_mode(ValidationMode::Warn);
+            check(fixture.session->get_validation_mode() == ValidationMode::Warn);
+
+            fixture.session->enable_tracing(true);
+            fixture.session->addListener(listener);
+            fixture.session->removeListener(listener);
+
+            fixture.session->add_fact(another);
+            check(fixture.session->get_fact_count() == 1);
         }
     }
 }

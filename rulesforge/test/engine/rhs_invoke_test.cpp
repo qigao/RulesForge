@@ -1,6 +1,6 @@
 #include "engine/knowledge_base.hpp"
 #include "engine/stateful_session.hpp"
-#include "parser/rfl_parser.hpp"
+#include "rfl_parser.hpp"
 #include "tinytest.h"
 
 #include <cstdlib>

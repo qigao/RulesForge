@@ -80,6 +80,43 @@ Rule2,test,passed
             check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
             ruleforge_cleanup();
         }
+
+        it("keeps previous knowledge base when a new load fails") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            const char* valid_drl = R"(
+declare Fact
+    id: long
+end
+
+rule "AnyFactRule"
+    when
+        $f : Fact()
+    then
+end
+)";
+            check_int_eq(ruleforge_kb_load_drl(kb, valid_drl), RULES_FORGE_OK);
+
+            const char* invalid_drl = R"(
+rule "Broken"
+    when
+        $f : MissingParen(
+    then
+end
+)";
+            check_int_eq(ruleforge_kb_load_drl(kb, invalid_drl), RULES_FORGE_ERROR_COMPILATION_FAILED);
+
+            // Should still be able to create session from the previously loaded valid KB.
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
     }
 
     group("Stateful Session and Fact Management") {
@@ -232,26 +269,139 @@ end
             int result_size = ruleforge_query_result_get_size(query_result);
             check_int_eq(result_size, 2);
 
-            ruleforge_fact_t fact_bob = nullptr;
-            check_int_eq(ruleforge_query_result_get_fact_at_index(query_result, 0, "p", &fact_bob), RULES_FORGE_OK);
-            check_not_null(fact_bob);
-
+            bool has_bob = false;
+            bool has_diana = false;
             char name_buffer[50];
             size_t actual_length = 0;
-            check_int_eq(ruleforge_fact_get_field_as_string(fact_bob, "name", name_buffer, sizeof(name_buffer), &actual_length), RULES_FORGE_OK);
-            check_str_eq(name_buffer, "Bob");
+            for (int i = 0; i < result_size; ++i) {
+                ruleforge_fact_t fact_row = nullptr;
+                check_int_eq(ruleforge_query_result_get_fact_at_index(query_result, i, "p", &fact_row), RULES_FORGE_OK);
+                check_not_null(fact_row);
 
-            double age_double = 0.0;
-            check_int_eq(ruleforge_fact_get_field_as_double(fact_bob, "age", &age_double), RULES_FORGE_OK);
-            check_float_eq(age_double, 25.0, 0.001);
+                check_int_eq(
+                    ruleforge_fact_get_field_as_string(
+                        fact_row, "name", name_buffer, sizeof(name_buffer), &actual_length),
+                    RULES_FORGE_OK);
 
-            int64_t age_int = 0;
-            check_int_eq(ruleforge_fact_get_field_as_int(fact_bob, "age", &age_int), RULES_FORGE_OK);
-            check_long_eq(age_int, 25);
+                double age_double = 0.0;
+                check_int_eq(ruleforge_fact_get_field_as_double(fact_row, "age", &age_double), RULES_FORGE_OK);
+                int64_t age_int = 0;
+                check_int_eq(ruleforge_fact_get_field_as_int(fact_row, "age", &age_int), RULES_FORGE_OK);
 
-            check_int_ne(ruleforge_fact_get_field_as_string(fact_bob, "nonExistent", name_buffer, sizeof(name_buffer), &actual_length), RULES_FORGE_OK);
+                if (std::string(name_buffer) == "Bob") {
+                    has_bob = true;
+                    check_float_eq(age_double, 25.0, 0.001);
+                    check_long_eq(age_int, 25);
+                } else if (std::string(name_buffer) == "Diana") {
+                    has_diana = true;
+                    check_float_eq(age_double, 30.0, 0.001);
+                    check_long_eq(age_int, 30);
+                }
+            }
+            check(has_bob);
+            check(has_diana);
+
+            // Keep field-missing path covered.
+            ruleforge_fact_t any_fact = nullptr;
+            check_int_eq(ruleforge_query_result_get_fact_at_index(query_result, 0, "p", &any_fact), RULES_FORGE_OK);
+            check_int_ne(
+                ruleforge_fact_get_field_as_string(
+                    any_fact, "nonExistent", name_buffer, sizeof(name_buffer), &actual_length),
+                RULES_FORGE_OK);
 
             check_int_eq(ruleforge_query_result_destroy(query_result), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
+
+        it("returns query error when query does not exist") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            const char* drl = R"(
+declare Person
+    name: String
+end
+)";
+            check_int_eq(ruleforge_kb_load_drl(kb, drl), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            ruleforge_query_result_t query_result = reinterpret_cast<ruleforge_query_result_t>(0x1);
+            check_int_eq(
+                ruleforge_session_query(session, "NoSuchQuery", &query_result),
+                RULES_FORGE_ERROR_QUERY_FAILED);
+            check(query_result == nullptr);
+            check_str_contains(ruleforge_get_last_error_message(), "not found");
+
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+
+            // Keep this as the last test and extend it with consistency error mapping checks
+            // so tinytest's current test-count cap still covers these assertions.
+            ruleforge_init();
+            kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            const char* failing_drl = R"(
+declare Person
+    name: String
+    age: int
+end
+declare Audit
+    code: int
+end
+
+rule "RollbackFailure"
+    when
+        $p : Person(name == "Alice")
+    then
+        update $p { age = "invalid" }
+        retract $p
+        insert Audit { code = "bad" }
+end
+)";
+            check_int_eq(ruleforge_kb_load_drl(kb, failing_drl), RULES_FORGE_OK);
+
+            session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            check_int_eq(
+                ruleforge_session_set_validation_mode(session, RULES_FORGE_VALIDATION_STRICT),
+                RULES_FORGE_OK);
+            check_int_eq(
+                ruleforge_session_add_fact_json(session, "Person", R"({"name":"Alice","age":30})"),
+                RULES_FORGE_OK);
+
+            // First run fails in RHS and leaves session inconsistent due to rollback failure.
+            check_int_ne(ruleforge_session_fire_all_rules(session, -1, nullptr), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_get_fact_count(session), 0);
+
+            check_int_eq(
+                ruleforge_session_add_fact_json(session, "Person", R"({"name":"Bob","age":40})"),
+                RULES_FORGE_ERROR_SESSION_INCONSISTENT);
+            check_str_contains(ruleforge_get_last_error_message(), "inconsistent");
+
+            check_int_eq(
+                ruleforge_session_set_validation_mode(session, RULES_FORGE_VALIDATION_WARN),
+                RULES_FORGE_ERROR_SESSION_INCONSISTENT);
+            check_int_eq(
+                ruleforge_session_enable_tracing(session, 1),
+                RULES_FORGE_ERROR_SESSION_INCONSISTENT);
+            check_int_eq(
+                ruleforge_session_fire_all_rules(session, -1, nullptr),
+                RULES_FORGE_ERROR_SESSION_INCONSISTENT);
+            check_int_eq(
+                ruleforge_session_set_validation_mode(
+                    session, static_cast<ruleforge_validation_mode_t>(999)),
+                RULES_FORGE_ERROR_INVALID_ARGUMENT);
+
             check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
             check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
             ruleforge_cleanup();

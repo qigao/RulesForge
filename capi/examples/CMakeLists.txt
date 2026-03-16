@@ -12,7 +12,7 @@ target_include_directories(native_table_plugin PRIVATE ${CMAKE_SOURCE_DIR}/capi/
 set_target_properties(native_table_plugin PROPERTIES
     OUTPUT_NAME ruleforge_native_plugin
     FOLDER capi/examples)
-
+target_link_libraries(native_table_plugin PUBLIC TurboNet::Utils)
 add_executable(native_function_table_demo native_function_table_demo.cpp)
 target_link_libraries(native_function_table_demo PRIVATE rule_forge TurboNet::Utils)
 add_dependencies(native_function_table_demo native_table_plugin)

@@ -261,3 +261,9 @@ struct ParsedDeclaration {
     std::optional<std::string> expires;
     std::string source_package;
 };
+
+struct ParsedEnum {
+    std::string enum_name;
+    std::vector<std::string> values;
+    std::string source_package;
+};

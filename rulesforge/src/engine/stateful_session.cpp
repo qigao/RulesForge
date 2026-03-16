@@ -1,6 +1,6 @@
 #include "core/logging_control.hpp"
 
-#include "parser/expression_evaluator.hpp"
+#include "expression_evaluator.hpp"
 #include "core/exceptions.hpp"
 #include "engine/query_engine.hpp"
 #include "engine/rhs_executor.hpp"
@@ -57,7 +57,7 @@ namespace {
 
 StatefulSession::StatefulSession(private_key, std::shared_ptr<KnowledgeBase const> kb) :
     kb_(std::move(kb)),
-    token_arena_(64 * 1024 * 1024), // 64MB
+    token_pool_(1024), // Initial capacity: 1024 tokens
     fact_arena_(64 * 1024 * 1024)   // 64MB
 {
     // Initialize native RHS executor
@@ -65,11 +65,10 @@ StatefulSession::StatefulSession(private_key, std::shared_ptr<KnowledgeBase cons
     query_engine_ = std::make_unique<QueryEngine>(kb_);
 
     tms_ = std::make_unique<TruthMaintenanceSystem>(*this);
-    // PROD-002: Initialize schema validator
     schema_validator_ = std::make_unique<SchemaValidator>(kb_->get_parser_state().parsed_declarations);
 
-    // Root WME is managed by TokenArena
-    dummy_wme_ = token_arena_.get_root();
+    // Root WME is managed by TokenPool
+    dummy_wme_ = token_pool_.get_root();
     phreak_experimental_ = kb_->is_phreak_experimental();
 
     for (auto const& g : kb_->get_parser_state().parsed_globals) {
@@ -105,33 +104,48 @@ void StatefulSession::prime_network_state() {
     }
 }
 
+void StatefulSession::ensure_consistent_for_mutation(char const* operation) const {
+    if (is_consistent_) {
+        return;
+    }
+    throw SessionInconsistentException(
+        std::string("Session is inconsistent due to a previous failed RHS transaction. "
+                    "Call reset() before ") +
+        operation + ".");
+}
+
+void StatefulSession::validate_fact_for_insert(Fact const& fact) const {
+    if (validation_mode_ == ValidationMode::None || !schema_validator_) {
+        return;
+    }
+
+    auto errors = schema_validator_->validate(fact);
+    if (errors.empty()) {
+        return;
+    }
+
+    if (validation_mode_ == ValidationMode::Strict) {
+        throw SchemaValidationException(std::move(errors));
+    }
+
+    for (auto const& e : errors) {
+        logw("Schema validation warning: {}", e.to_string());
+    }
+}
+
 void StatefulSession::add_fact(Fact* fact) {
     if (!fact) return;
-
-    // PROD-002: Schema validation
-    if (validation_mode_ != ValidationMode::None && schema_validator_) {
-        auto errors = schema_validator_->validate(*fact);
-        if (!errors.empty()) {
-            if (validation_mode_ == ValidationMode::Strict) {
-                throw SchemaValidationException(std::move(errors));
-            } else {  // ValidationMode::Warn
-                for (auto const& e : errors) {
-                    logw("Schema validation warning: {}", e.to_string());
-                }
-            }
-        }
-    }
+    ensure_consistent_for_mutation("adding facts");
+    validate_fact_for_insert(*fact);
 
     if (fact->id == 0) { fact->id = working_memory_.reserve_next_id(); }
     working_memory_.assign_nested_ids(*fact);
 
     tracer_.trace_fact_added(fact->id, fact->type);
 
-    // P1-002 FIX: Increment metrics counter
     facts_inserted_total_++;
 
 
-    // P1-001 FIX: Track fact insertion if in a transaction
     if (in_rhs_transaction_) {
         transaction_inserted_facts_.push_back(fact->id);
     }
@@ -147,15 +161,24 @@ void StatefulSession::add_fact(Fact* fact) {
 
 void StatefulSession::add_facts(std::vector<Fact*> const& facts) {
     if (facts.empty()) return;
+    ensure_consistent_for_mutation("adding facts");
+
+    std::vector<Fact*> validated_facts;
+    validated_facts.reserve(facts.size());
+    for (auto* fact : facts) {
+        if (!fact) continue;
+        validate_fact_for_insert(*fact);
+        validated_facts.push_back(fact);
+    }
+    if (validated_facts.empty()) return;
 
     // Pre-size hash map to avoid rehashing during bulk insert
-    working_memory_.reserve_for_additional(facts.size());
+    working_memory_.reserve_for_additional(validated_facts.size());
 
     // Use a map to group facts by type for batch propagation
     std::map<std::string, std::vector<Fact*>> facts_by_type;
 
-    for (auto* fact : facts) {
-        if (!fact) continue;
+    for (auto* fact : validated_facts) {
         if (fact->id == 0) { fact->id = working_memory_.reserve_next_id(); }
 
         // Only recurse into nested facts if any FactList fields exist (rare)
@@ -189,6 +212,8 @@ void StatefulSession::add_facts(std::vector<Fact*> const& facts) {
 }
 void StatefulSession::insert_into(std::string const& stream_name, Fact* fact) {
     if (!fact) return;
+    ensure_consistent_for_mutation("adding facts");
+    validate_fact_for_insert(*fact);
     if (fact->id == 0) { fact->id = working_memory_.reserve_next_id(); }
     working_memory_.assign_nested_ids(*fact);
 
@@ -217,6 +242,7 @@ void StatefulSession::insert_into(std::string const& stream_name, Fact* fact) {
 
 void StatefulSession::retract_facts(std::vector<Fact*> const& facts) {
     if (facts.empty()) return;
+    ensure_consistent_for_mutation("retracting facts");
 
     std::map<std::string, std::vector<Fact*>> facts_by_type;
     for (auto* fact : facts) {
@@ -226,7 +252,7 @@ void StatefulSession::retract_facts(std::vector<Fact*> const& facts) {
             tracer_.trace_fact_retracted(fact->id, fact->type);
             facts_retracted_total_++;
             if (in_rhs_transaction_) {
-                transaction_retracted_facts_.push_back(fact->id);
+                transaction_retracted_facts_.push_back(existing);
             }
             facts_by_type[fact->type].push_back(fact);
             working_memory_.remove(fact->id);
@@ -262,11 +288,16 @@ int StatefulSession::fire_all_rules(int max_rules) {
     int total_fired_count = 0;
     constexpr size_t kAgendaBatchSize = 64;
 
+    if (!is_consistent_) {
+        loge("Session is inconsistent due to a previous failed RHS transaction. Call reset() before firing again.");
+        return 0;
+    }
+
     // Flush any pending facts from deferred batch insertion
     flush_pending_nodes();
 
     // P1 FIX: Reset halt flag at start of each fire_all_rules cycle
-    //halt_requested_ = false;
+    halt_requested_ = false;
 
     // P1 FIX: Reset and seed lock-on-active state for current focus
     agenda_.seed_lock_on_active_for_focus();
@@ -440,14 +471,21 @@ void StatefulSession::fire_activation(Activation& activation) {
 
 void StatefulSession::retract_fact(Fact* fact) {
     if (!fact) return;
+    ensure_consistent_for_mutation("retracting facts");
     auto* fact_to_retract = working_memory_.get(fact->id);
     if (!fact_to_retract) {
         logw("Attempted to retract fact ID {} which is not in working memory.", fact->id);
         return;
     }
 
-    // P1-002 FIX: Increment metrics counter
     facts_retracted_total_++;
+
+    if (in_rhs_transaction_) {
+        // During RHS transaction: defer all cleanup until commit
+        // This preserves the activation's token/WME chain for subsequent actions
+        transaction_retracted_facts_.push_back(fact_to_retract);
+        return;
+    }
 
     working_memory_.remove(fact->id);
 
@@ -490,12 +528,24 @@ void StatefulSession::retract_fact(Fact* fact) {
 
 void StatefulSession::update_fact(Fact* fact, std::function<void(Fact&)> modifier) {
     if (!fact || !working_memory_.contains(fact->id)) return;
+    ensure_consistent_for_mutation("updating facts");
     modifier(*fact);
     auto alpha_it = kb_->network().alpha_entry_points.find(fact->type);
     if (alpha_it != kb_->network().alpha_entry_points.end()) {
         if (phreak_experimental_) mark_phreak_dirty_for_type(fact->type);
         alpha_it->second->right_activate(*this, fact, PropagationType::MODIFY);
     }
+}
+
+void StatefulSession::track_rhs_update_snapshot(Fact const& fact) {
+    if (!in_rhs_transaction_ || fact.id <= 0) {
+        return;
+    }
+    if (transaction_updated_fact_snapshots_.find(fact.id) != transaction_updated_fact_snapshots_.end()) {
+        return;  // First snapshot wins for rollback.
+    }
+    transaction_updated_fact_order_.push_back(fact.id);
+    transaction_updated_fact_snapshots_.emplace(fact.id, fact.fields);
 }
 
 void StatefulSession::propagate_modify(Fact* fact,
@@ -516,6 +566,7 @@ void StatefulSession::propagate_modify(Fact* fact,
 }
 
 Fact* StatefulSession::logical_insert(Fact const& fact) {
+    ensure_consistent_for_mutation("inserting logical facts");
     Fact* new_fact = fact_arena_.create_fact(fact);
     new_fact->id = working_memory_.reserve_next_id();
     working_memory_.assign_nested_ids(*new_fact);
@@ -531,6 +582,7 @@ Fact* StatefulSession::logical_insert(Fact const& fact) {
 
 void StatefulSession::logical_insert(Token& token, Fact* fact) {
     if (!token.wme) return;
+    ensure_consistent_for_mutation("inserting logical facts");
     if (!working_memory_.contains(fact->id)) {
         add_fact(fact);
     }
@@ -551,6 +603,7 @@ QueryResult StatefulSession::execute_query(std::string const& query_name,
 }
 
 void StatefulSession::set_focus(std::string const& group_name) {
+    ensure_consistent_for_mutation("setting focus");
     agenda_.set_focus(group_name);
 }
 
@@ -565,6 +618,7 @@ int64_t StatefulSession::get_next_fact_id() {
 }
 
 void StatefulSession::set_global(std::string const& name, ConstraintValue value) {
+    ensure_consistent_for_mutation("setting globals");
     globals_[name] = std::move(value);
 }
 
@@ -574,7 +628,6 @@ std::optional<ConstraintValue> StatefulSession::get_global(std::string const& na
     return it->second;
 }
 
-// PROD-002: Check if a fact type has a declaration
 bool StatefulSession::has_type_declaration(std::string const& type_name) const {
     return schema_validator_ && schema_validator_->has_declaration(type_name);
 }
@@ -645,10 +698,12 @@ bool StatefulSession::execute_eval(rulesforge::ExpressionEvaluator const& expr,
 }
 
 void StatefulSession::addListener(std::shared_ptr<IEngineListener> listener) {
+    ensure_consistent_for_mutation("adding listeners");
     if (listener) listeners_.push_back(listener);
 }
 
 void StatefulSession::removeListener(std::shared_ptr<IEngineListener> const& listener) {
+    ensure_consistent_for_mutation("removing listeners");
     std::erase(listeners_, listener);
 }
 
@@ -720,11 +775,12 @@ std::map<int, std::shared_ptr<ReteNode>> StatefulSession::get_nodes() const {
     return node_map;
 }
 
-// P1-001 FIX: Transactional semantics implementation
 void StatefulSession::begin_rhs_transaction() {
     in_rhs_transaction_ = true;
     transaction_inserted_facts_.clear();
     transaction_retracted_facts_.clear();
+    transaction_updated_fact_order_.clear();
+    transaction_updated_fact_snapshots_.clear();
 }
 
 void StatefulSession::end_rhs_transaction(bool commit) {
@@ -732,25 +788,124 @@ void StatefulSession::end_rhs_transaction(bool commit) {
         return;  // No transaction in progress
     }
 
-    if (!commit) {
-        // Rollback: retract all facts inserted during this transaction
-        logw("Rolling back RHS transaction: retracting {} inserted facts", transaction_inserted_facts_.size());
-        for (int64_t fact_id : transaction_inserted_facts_) {
-            auto fact_opt = get_fact_by_id(fact_id);
-            if (fact_opt) {
-                // Use internal remove to avoid re-triggering network propagation issues
-                working_memory_.remove(fact_id);
-            }
-        }
-        is_consistent_ = false;  // Mark session as having had a failed transaction
-    }
-
+    auto inserted_ids = std::move(transaction_inserted_facts_);
+    auto retracted_facts = std::move(transaction_retracted_facts_);
+    auto updated_order = std::move(transaction_updated_fact_order_);
+    auto updated_snapshots = std::move(transaction_updated_fact_snapshots_);
     transaction_inserted_facts_.clear();
     transaction_retracted_facts_.clear();
+    transaction_updated_fact_order_.clear();
+    transaction_updated_fact_snapshots_.clear();
     in_rhs_transaction_ = false;
+
+    if (commit) {
+        is_consistent_ = true;
+
+        // Process deferred retractions now that the RHS has completed
+        // This ensures the activation's token remains valid during RHS execution
+        for (Fact* fact : retracted_facts) {
+            if (!fact) continue;
+
+            working_memory_.remove(fact->id);
+            agenda_.remove_activations_with_fact_id(fact->id);
+            tms_->on_fact_retracted(fact);
+
+            auto alpha_it = kb_->network().alpha_entry_points.find(fact->type);
+            if (alpha_it != kb_->network().alpha_entry_points.end()) {
+                if (phreak_experimental_) mark_phreak_dirty_for_type(fact->type);
+                alpha_it->second->right_activate(*this, fact, PropagationType::RETRACT);
+            }
+
+            // Clean up WMEs that reference this fact
+            for (auto it = wme_cache_.begin(); it != wme_cache_.end(); ) {
+                if (!it->second) { ++it; continue; }
+                bool references_fact = false;
+                auto curr = it->second;
+                while (curr && curr->depth > 0) {
+                    if (curr->fact && curr->fact->id == fact->id) {
+                        references_fact = true;
+                        break;
+                    }
+                    curr = curr->parent;
+                }
+                if (references_fact) {
+                    logical_retract(it->second);
+                    it = wme_cache_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+
+        return;
+    }
+
+    bool rollback_ok = true;
+    logw("Rolling back RHS transaction: inserted={}, retracted={}",
+         inserted_ids.size(), retracted_facts.size());
+
+    // Restore update snapshots first
+    for (auto it = updated_order.rbegin(); it != updated_order.rend(); ++it) {
+        auto snapshot_it = updated_snapshots.find(*it);
+        if (snapshot_it == updated_snapshots.end()) {
+            continue;
+        }
+        Fact* fact = get_fact_by_id(*it);
+        if (!fact) {
+            continue;
+        }
+        // Validate current state - if update corrupted data, rollback fails
+        try {
+            validate_fact_for_insert(*fact);
+        } catch (...) {
+            rollback_ok = false;
+            continue;
+        }
+        fact->fields = snapshot_it->second;
+        try {
+            propagate_modify(fact, nullptr);
+        } catch (...) {
+            rollback_ok = false;
+        }
+    }
+
+    // Roll back inserted facts
+    for (auto it = inserted_ids.rbegin(); it != inserted_ids.rend(); ++it) {
+        Fact* inserted = get_fact_by_id(*it);
+        if (!inserted) {
+            continue;
+        }
+        try {
+            retract_fact(inserted);
+        } catch (...) {
+            rollback_ok = false;
+        }
+    }
+
+    // Restore retracted facts (skip if still in working memory - deferred retraction)
+    for (auto it = retracted_facts.rbegin(); it != retracted_facts.rend(); ++it) {
+        Fact* retracted = *it;
+        if (!retracted) {
+            continue;
+        }
+        if (working_memory_.contains(retracted->id)) {
+            continue;
+        }
+        try {
+            add_fact(retracted);
+        } catch (...) {
+            rollback_ok = false;
+        }
+    }
+
+    is_consistent_ = rollback_ok;
+    if (!rollback_ok) {
+        halt_requested_ = true;
+        loge("RHS transaction rollback failed; session marked inconsistent.");
+        working_memory_.clear();
+    }
 }
 
-// P1-002 FIX: Get session metrics for monitoring export
 SessionMetrics StatefulSession::get_metrics() const {
     SessionMetrics metrics;
 
@@ -940,3 +1095,143 @@ void StatefulSession::flush_pending_nodes() {
 
     clear_phreak_dirty_state();
 }
+
+void StatefulSession::reset() {
+    halt_requested_ = false;
+    deferred_mode_ = false;
+    in_rhs_transaction_ = false;
+    is_consistent_ = true;
+    current_activation_ = nullptr;
+    current_modified_fields_ = nullptr;
+
+    transaction_inserted_facts_.clear();
+    transaction_retracted_facts_.clear();
+    transaction_updated_fact_order_.clear();
+    transaction_updated_fact_snapshots_.clear();
+
+    rules_fired_total_ = 0;
+    facts_inserted_total_ = 0;
+    facts_retracted_total_ = 0;
+    reset_runtime_counters();
+
+    agenda_ = Agenda{};
+    wme_cache_.clear();
+    working_memory_.clear();
+    if (tms_) {
+        tms_->clear();
+    }
+    tracer_.clear_trace();
+
+    globals_.clear();
+    for (auto const& g : kb_->get_parser_state().parsed_globals) {
+        globals_.emplace(g.name, default_global_value(g.type));
+    }
+
+    net_mem_ = NetworkMemory{};
+    allocate_network_memory(kb_->network().mem_slot_counts);
+
+    // Facts are session-owned; reset arena after clearing WM/agenda references.
+    fact_arena_.reset();
+    dummy_wme_ = token_pool_.get_root();
+
+    phreak_epoch_ = 0;
+    prime_network_state();
+}
+
+Fact* StatefulSession::add_fact_from_binary(std::string const& type_name, uint8_t const* buf, size_t len) {
+    ensure_consistent_for_mutation("adding fact from binary");
+
+    auto* codec_registry = kb_->get_codec_registry();
+    if (!codec_registry) {
+        throw std::runtime_error("CodecRegistry not initialized");
+    }
+
+    Fact* fact = codec_registry->parse_binary(fact_arena_, type_name, buf, len);
+    if (!fact) {
+        throw std::runtime_error("Failed to parse binary: " + codec_registry->get_last_error());
+    }
+
+    add_fact(fact);
+    return fact;
+}
+
+Fact* StatefulSession::add_fact_from_json(std::string const& type_name, std::string const& json_str) {
+    ensure_consistent_for_mutation("adding fact from JSON");
+
+    auto* codec_registry = kb_->get_codec_registry();
+    if (!codec_registry) {
+        throw std::runtime_error("CodecRegistry not initialized");
+    }
+
+    Fact* fact = codec_registry->parse_json(fact_arena_, type_name, json_str);
+    if (!fact) {
+        throw std::runtime_error("Failed to parse JSON: " + codec_registry->get_last_error());
+    }
+
+    add_fact(fact);
+    return fact;
+}
+
+std::vector<Fact*> StatefulSession::add_facts_from_csv(std::string const& type_name, std::string const& csv_str) {
+    ensure_consistent_for_mutation("adding facts from CSV");
+
+    auto* codec_registry = kb_->get_codec_registry();
+    if (!codec_registry) {
+        throw std::runtime_error("CodecRegistry not initialized");
+    }
+
+    std::vector<Fact*> facts = codec_registry->parse_csv(fact_arena_, type_name, csv_str);
+    if (facts.empty()) {
+        throw std::runtime_error("Failed to parse CSV: " + codec_registry->get_last_error());
+    }
+
+    add_facts(facts);
+    return facts;
+}
+
+void StatefulSession::add_data(rulesforge::DataSource const& source) {
+    ensure_consistent_for_mutation("adding data");
+
+    auto* codec_registry = kb_->get_codec_registry();
+    if (!codec_registry) {
+        throw std::runtime_error("CodecRegistry not initialized");
+    }
+
+    switch (source.type()) {
+        case rulesforge::DataSourceType::FACT:
+            add_fact(source.get_fact());
+            break;
+
+        case rulesforge::DataSourceType::JSON: {
+            // TODO: Extract type_name from JSON or require explicit type
+            // For now, parse as generic Row type
+            Fact* fact = codec_registry->parse_json(fact_arena_, "Row", source.get_content());
+            if (!fact) {
+                throw std::runtime_error("Failed to parse JSON: " + codec_registry->get_last_error());
+            }
+            add_fact(fact);
+            break;
+        }
+
+        case rulesforge::DataSourceType::CSV: {
+            // TODO: Extract type_name from CSV header or require explicit type
+            std::vector<Fact*> facts = codec_registry->parse_csv(fact_arena_, "Row", source.get_content());
+            if (facts.empty()) {
+                throw std::runtime_error("Failed to parse CSV: " + codec_registry->get_last_error());
+            }
+            add_facts(facts);
+            break;
+        }
+
+        case rulesforge::DataSourceType::DSV: {
+            // TODO: Implement DSV parsing
+            throw std::runtime_error("DSV data source not yet implemented");
+        }
+
+        case rulesforge::DataSourceType::BINARY: {
+            // TODO: Implement binary parsing
+            throw std::runtime_error("Binary data source not yet implemented");
+        }
+    }
+}
+

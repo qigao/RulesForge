@@ -22,7 +22,6 @@ struct MemSlotCounts {
     int query_terminal = 0;
     int eval = 0;
     int unnest = 0;
-    int jmespath = 0;
 };
 
 struct NetworkMemory {
@@ -140,13 +139,6 @@ struct NetworkMemory {
                       std::vector<TokenWME const*>>> parent_to_children;
     };
 
-    // --- SourceExtractNode state ---
-    struct JmesPathMem {
-        std::unordered_map<TokenWME const*,
-            std::pair<TokenWME const*,
-                      std::vector<TokenWME const*>>> parent_to_children;
-    };
-
     // Flat arrays — one entry per node of that kind, indexed by mem_slot
     std::vector<AlphaMem> alpha;
     std::vector<SegmentMem> segment;
@@ -159,7 +151,6 @@ struct NetworkMemory {
     std::vector<QueryTerminalMem> query_terminal;
     std::vector<EvalMem> eval;
     std::vector<UnnestMem> unnest;
-    std::vector<JmesPathMem> jmespath;
 
     void allocate(MemSlotCounts const& counts) {
         alpha.resize(counts.alpha);
@@ -173,7 +164,6 @@ struct NetworkMemory {
         query_terminal.resize(counts.query_terminal);
         eval.resize(counts.eval);
         unnest.resize(counts.unnest);
-        jmespath.resize(counts.jmespath);
     }
 };
 

@@ -7,7 +7,7 @@
 // 4. Fact retraction throughput and latency
 
 #include "tinytest.h"
-#include "parser/rfl_parser.hpp"
+#include "rfl_parser.hpp"
 #include "engine/knowledge_base.hpp"
 #include "engine/stateful_session.hpp"
 

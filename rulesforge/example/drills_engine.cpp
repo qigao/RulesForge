@@ -1,4 +1,4 @@
-#include "parser/rfl_parser.hpp"
+#include "rfl_parser.hpp"
 #include "core/errors.hpp"
 #include "engine/knowledge_base.hpp"
 #include "core/logging_control.hpp"

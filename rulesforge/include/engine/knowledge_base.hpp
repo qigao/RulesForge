@@ -3,6 +3,7 @@
 
 #include "core/rfl_parser_state.hpp"
 #include "data/fact_type_registry.hpp"
+#include "codec/codec_registry.hpp"
 
 #include <chrono>
 #include <map>
@@ -58,6 +59,7 @@ public:
     AccumulatorRegistry const& get_accumulator_registry() const;
     FactTypeRegistry& get_fact_type_registry();
     FactTypeRegistry const& get_fact_type_registry() const;
+    rulesforge::CodecRegistry* get_codec_registry() const { return codec_registry_.get(); }
 
     /**
      * @brief Register a custom accumulate function.
@@ -120,6 +122,7 @@ private:
     std::map<std::string, NativeFunction> native_functions_;
     std::unique_ptr<CompiledNetwork> compiled_network_;
     bool phreak_experimental_ = false;
+    mutable std::unique_ptr<rulesforge::CodecRegistry> codec_registry_;
 };
 
 #endif   // KNOWLEDGE_BASE_HPP

@@ -2,7 +2,7 @@
 
 #include "engine/knowledge_base.hpp"
 #include "rete/rete_node.hpp"
-#include "parser/expression_evaluator.hpp"
+#include "expression_evaluator.hpp"
 #include "engine/stateful_session.hpp"
 #include "turbo_parser.h"
 
@@ -1291,8 +1291,6 @@ namespace {
 #include "rete_node_accumulate.inc"
 
 #include "rete_node_unnest.inc"
-
-#include "rete_node_jmespath.inc"
 
 #include "rete_node_eval.inc"
 

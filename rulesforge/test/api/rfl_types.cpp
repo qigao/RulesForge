@@ -1,5 +1,5 @@
 #include "catch2/catch_test_macros.hpp"
-#include "parser/rfl_parser.hpp"
+#include "rfl_parser.hpp"
 #include "engine/knowledge_base.hpp"
 #include "engine/stateful_session.hpp"
 

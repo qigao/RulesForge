@@ -7,7 +7,7 @@
 在 LHS 使用 `from`：
 
 ```rfl
-$var: FactType(...) from jmespath(INPUT, "JMESPATH_EXPRESSION")
+$var: FactType(...) from json(INPUT, "JMESPATH_EXPRESSION")
 $var: FactType(...) from dsv(INPUT, "FILTER_EXPRESSION")
 $var: FactType(...) from csv(INPUT, "FILTER_EXPRESSION")
 ```
@@ -23,7 +23,7 @@ rule "从 JSON 字符串提取高价值订单"
 when
     $t: Trigger()
     $p: Purchase(amount > 100.0)
-        from jmespath("{\"orders\":[{\"orderId\":\"A1\",\"amount\":120.5},{\"orderId\":\"A2\",\"amount\":80.0}]}", "orders[*]")
+        from json("{\"orders\":[{\"orderId\":\"A1\",\"amount\":120.5},{\"orderId\":\"A2\",\"amount\":80.0}]}", "orders[*]")
 then
     insert HighValueOrder { orderId = $p.orderId, total = $p.amount }
 end
@@ -36,7 +36,7 @@ rule "从 JSON 文件提取高价值客户"
 when
     $t: Trigger()
     $c: Customer(tier == "premium")
-        from jmespath(file("data/customers.json"), "customers[*]")
+        from json(file("data/customers.json"), "customers[*]")
 then
     insert PremiumCustomer { customerId = $c.id, name = $c.name }
 end
@@ -78,7 +78,7 @@ rule "累计高价值订单金额"
 when
     $t: Trigger()
     $sum: Number(doubleValue > 1000.0) from accumulate(
-        $p: Purchase() from jmespath(file("data/orders.json"), "orders[*]"),
+        $p: Purchase() from json(file("data/orders.json"), "orders[*]"),
         sum($p.amount)
     )
 then
@@ -101,5 +101,5 @@ end
 
 ## 说明
 
-- 旧的 RHS 写法 `for $x in jmespath(...)` 已是历史示例，不再推荐。
+- 旧的 RHS 写法 `for $x in json(...)` 已是历史示例，不再推荐。
 - 建议统一使用 LHS source pattern，行为更稳定、语义分析更清晰。

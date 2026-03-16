@@ -7,7 +7,7 @@ This document contains examples that match the current RulesForge DSL source syn
 Use source extraction on the LHS:
 
 ```rfl
-$var: FactType(...) from jmespath(INPUT, "JMESPATH_EXPRESSION")
+$var: FactType(...) from json(INPUT, "JMESPATH_EXPRESSION")
 $var: FactType(...) from dsv(INPUT, "FILTER_EXPRESSION")
 $var: FactType(...) from csv(INPUT, "FILTER_EXPRESSION")
 ```
@@ -23,7 +23,7 @@ rule "High Value Orders From JSON String"
 when
     $t: Trigger()
     $p: Purchase(amount > 100.0)
-        from jmespath("{\"orders\":[{\"orderId\":\"A1\",\"amount\":120.5},{\"orderId\":\"A2\",\"amount\":80.0}]}", "orders[*]")
+        from json("{\"orders\":[{\"orderId\":\"A1\",\"amount\":120.5},{\"orderId\":\"A2\",\"amount\":80.0}]}", "orders[*]")
 then
     insert HighValueOrder { orderId = $p.orderId, total = $p.amount }
 end
@@ -36,7 +36,7 @@ rule "Premium Customers From JSON File"
 when
     $t: Trigger()
     $c: Customer(tier == "premium")
-        from jmespath(file("data/customers.json"), "customers[*]")
+        from json(file("data/customers.json"), "customers[*]")
 then
     insert PremiumCustomer { customerId = $c.id, name = $c.name }
 end
@@ -78,7 +78,7 @@ rule "Total High Value Amount"
 when
     $t: Trigger()
     $sum: Number(doubleValue > 1000.0) from accumulate(
-        $p: Purchase() from jmespath(file("data/orders.json"), "orders[*]"),
+        $p: Purchase() from json(file("data/orders.json"), "orders[*]"),
         sum($p.amount)
     )
 then
@@ -101,5 +101,5 @@ end
 
 ## Notes
 
-- Old RHS syntax `for $x in jmespath(...)` is legacy and no longer the primary DSL path.
+- Old RHS syntax `for $x in json(...)` is legacy and no longer the primary DSL path.
 - Prefer LHS source patterns for predictable rete behavior and semantic analysis.

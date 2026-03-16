@@ -67,32 +67,6 @@ private:
   std::map<std::string, int> binding_to_token_idx;
 };
 
-class SourceExtractNode : public ReteNode
-{
-public:
-  static constexpr NodeKind Kind = NodeKind::JmesPath;
-  SourceExtractNode() : ReteNode(NodeKind::JmesPath) {}
-  SourceExtractNode(ParsedJmesPath const&, std::string fact_type,
-                    std::map<std::string, int> const&,
-                    std::vector<ParsedConstraint> constraints);
-  void left_activate(StatefulSession&, Token const&) override;
-
-  void right_activate(StatefulSession&,
-                      Fact*,
-                      PropagationType) override
-  {
-  }
-
-  void print_node(std::ostream& os) const override;
-  friend class ReteSerializer;
-
-private:
-  ParsedJmesPath info;
-  std::string result_fact_type;
-  std::map<std::string, int> binding_to_token_idx;
-  std::vector<ParsedConstraint> constraints_;
-};
-
 
 class EvalNode : public ReteNode
 {

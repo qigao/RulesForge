@@ -4,7 +4,7 @@ This document describes the DSL supported by the current parser and runtime.
 If this doc conflicts with code, code wins.
 
 Primary references:
-- `rulesforge/src/parser/rfl_grammar_lemon.y`
+- `rulesforge/src/rfl_grammar_lemon.y`
 - `rulesforge/src/parser/rhs_parser.cpp`
 - `rulesforge/src/parser/semantic_analyzer.cpp`
 - `rulesforge/src/parser/expression_evaluator.cpp`
@@ -18,6 +18,7 @@ A file is a sequence of top-level statements:
 - `import`
 - `global`
 - `declare`
+- `enum`
 - `function` (parsed and stored)
 - `query`
 - `rule`
@@ -34,6 +35,12 @@ Example:
 package com.example.rules
 import com.example.model.Customer
 global List results
+
+enum Status
+    PENDING
+    ACTIVE
+    CLOSED
+end
 
 declare Customer
     id: int
@@ -97,6 +104,49 @@ declare Basket
     owner: Customer
 end
 ```
+
+## 2.1 Enums
+
+`enum` defines a fixed set of named values:
+
+```rfl
+enum OrderStatus
+    PENDING
+    CONFIRMED
+    SHIPPED
+    DELIVERED
+    CANCELLED
+end
+
+enum Priority
+    LOW
+    MEDIUM
+    HIGH
+end
+```
+
+Enum values can be used in constraints and assignments:
+
+```rfl
+declare Order
+    id: int
+    status: String
+    priority: String
+end
+
+rule "HighPriorityOrders"
+when
+    $o: Order(priority == "HIGH", status == "PENDING")
+then
+    update $o { status = "CONFIRMED" }
+end
+```
+
+Notes:
+- Enum values are symbolic names (identifiers)
+- Trailing commas are optional
+- Enums are registered as types in the semantic analyzer
+- Currently treated as String values at runtime
 
 ## 3. Rule Definition
 
@@ -257,19 +307,43 @@ $items: AnyType() from collect($o: Order())
 $item: Item() from unnest($order.items)
 ```
 
-4. `from jmespath(input, "expr")`
+4. `from json(input, "expr")` **[DEPRECATED]**
+
+> **⚠️ Deprecated**: Use `session->add_data(DataSource::json(...))` in C++ instead.
+> This syntax will be removed in a future version.
 
 ```rfl
-$r: Row() from jmespath("{\"orders\":[{\"amount\":120.5}]}", "orders[*]")
-$r: Row() from jmespath(file("data/orders.json"), "orders[*]")
+$r: Row() from json("{\"orders\":[{\"amount\":120.5}]}", "orders[*]")
+$r: Row() from json(file("data/orders.json"), "orders[*]")
 ```
 
-5. `from dsv/csv(input, "filter-expr")`
+**Recommended approach**:
+```cpp
+// Load data in C++
+session->add_data(DataSource::json(json_content, "orders[*]"));
+
+// Simplified rule
+$r: Row()
+```
+
+5. `from dsv/csv(input, "filter-expr")` **[DEPRECATED]**
+
+> **⚠️ Deprecated**: Use `session->add_data(DataSource::csv(...))` in C++ instead.
+> This syntax will be removed in a future version.
 
 ```rfl
 $r: Row() from dsv("amount_n,sym_s\n120.5,A\n80.0,B\n", "amount > 100 and sym == \"A\"")
 $r: Row() from dsv(file("data/orders.csv"), "amount > 100 and sym == \"A\"")
 $r: Row() from csv(file("data/orders.csv"), "amount > 100")
+```
+
+**Recommended approach**:
+```cpp
+// Load data in C++
+session->add_data(DataSource::csv("data/orders.csv", "amount > 100"));
+
+// Simplified rule
+$r: Row()
 ```
 
 6. `from entry-point "stream-name"`
@@ -284,7 +358,7 @@ Accumulate source pattern also supports the same data-source clauses:
 
 ```rfl
 $sum: Number() from accumulate(
-    $p: Purchase() from jmespath(file("data/orders.json"), "orders[*]"),
+    $p: Purchase() from json(file("data/orders.json"), "orders[*]"),
     sum($p.amount)
 )
 
@@ -406,6 +480,69 @@ Runtime resolution:
 See full C API examples:
 - `capi/examples/CAPI_NATIVE_DLL_EN.md`
 - `capi/examples/NATIVE_FUNCTIONS.md`
+
+## 5.5 Data Ingestion API
+
+RulesForge provides a unified `add_data()` API for loading data from multiple sources.
+
+### C++ API
+
+```cpp
+#include "engine/data_source.hpp"
+
+// Add fact object
+session->add_data(fact);
+session->add_data(DataSource::fact(fact));
+
+// Add from JSON
+std::string json_content = read_file("orders.json");
+session->add_data(DataSource::json(json_content, "orders[*]"));
+
+// Add from CSV
+session->add_data(DataSource::csv("data.csv", "amount > 100"));
+
+// Add from DSV
+session->add_data(DataSource::dsv(dsv_content, "filter_expr"));
+
+// Add from binary (future)
+session->add_data(DataSource::binary(buffer));
+```
+
+### Migration from `from` clauses
+
+**Before** (deprecated):
+```rfl
+rule "ProcessOrders"
+when
+    $r: Row() from json(file("orders.json"), "orders[*]")
+then
+    insert Order { id = $r.id }
+end
+```
+
+**After** (recommended):
+```cpp
+// C++ side
+auto json_content = read_file("orders.json");
+session->add_data(DataSource::json(json_content, "orders[*]"));
+```
+
+```rfl
+// Simplified rule
+rule "ProcessOrders"
+when
+    $r: Row()
+then
+    insert Order { id = $r.id }
+end
+```
+
+### Benefits
+
+- **Unified interface**: Single entry point for all data types
+- **Better control**: Load data when needed, not on every rule match
+- **Performance**: One-time loading vs repeated file I/O
+- **Testability**: Easy to mock data sources in tests
 
 ## 6. Queries
 

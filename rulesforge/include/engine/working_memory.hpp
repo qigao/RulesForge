@@ -40,6 +40,13 @@ public:
         return facts_.size();
     }
 
+    void clear(bool reset_next_id = true) {
+        facts_.clear();
+        if (reset_next_id) {
+            next_id_ = 1;
+        }
+    }
+
     void reserve_for_additional(std::size_t count) {
         facts_.reserve(facts_.size() + count);
     }

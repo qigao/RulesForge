@@ -10,16 +10,24 @@
 // This struct has been simplified to hold only the final results of parsing.
 // The temporary state used by a previous action-based parser design has been removed.
 // This makes the struct a simple, copyable data container for the AST.
+
+struct BinaryCodecImport {
+    std::string type_name;
+    std::string dll_path;
+};
+
 struct parser_state {
     // Top-level metadata
     std::string package_name;
     std::vector<std::string> parsed_imports;
+    std::vector<BinaryCodecImport> binary_codec_imports;
 
     // All successfully parsed top-level items
     std::vector<ParsedRule> parsed_rules;
     std::vector<ParsedQuery> parsed_queries;
     std::vector<ParsedFunction> parsed_functions;
     std::vector<ParsedDeclaration> parsed_declarations;
+    std::vector<ParsedEnum> parsed_enums;
     std::vector<ParsedGlobal> parsed_globals;
 
     // The default copy constructor, copy assignment operator, move constructor,

@@ -38,15 +38,6 @@ struct ParsedUnnest {
   std::string source_field;
 };
 
-struct ParsedJmesPath {
-  enum class EngineKind { JmesPath, DsvFilter };
-  enum class InputKind { JsonString, JsonFile };
-  EngineKind engine_kind = EngineKind::JmesPath;
-  InputKind input_kind = InputKind::JsonString;
-  std::string input_value;
-  std::string expression;
-};
-
 struct ParsedQueryCall {
   std::string query_name;
   std::vector<std::string> arguments;
@@ -57,7 +48,7 @@ struct ParsedForall {
 };
 
 using PatternSource = std::variant<std::monostate, ParsedAccumulate, ParsedUnnest, ParsedQueryCall,
-                                   ParsedJmesPath, std::string>;
+                                   std::string>;
 
 struct ParsedPattern {
   PatternType type = PatternType::STANDARD;

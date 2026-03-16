@@ -12,7 +12,7 @@ Real-world business rule examples demonstrating the full capabilities of the Rul
 | [Order Fulfillment](./order-fulfillment/) | E-commerce | Inventory management, discount stacking, shipping optimization |
 | [Travel Booking](./travel-booking/) | Travel Industry | Multi-service orchestration, eligibility checks, package pricing |
 | [Modular Rules](./modular-rules/) | Architecture | Multi-file imports, shared types, modular rule organization |
-| [Source Extraction](./JMESPATH_EXAMPLES.md) | Data Integration | `from jmespath`, `from dsv/csv`, source + accumulate |
+| [Source Extraction](./JMESPATH_EXAMPLES.md) | Data Integration | `from json`, `from dsv/csv`, source + accumulate |
 
 ## Quick Start
 
@@ -127,7 +127,7 @@ int main() {
 | Temporal Operators | - | - | ✓ | - | - | - |
 | Queries | ✓ | ✓ | ✓ | ✓ | ✓ | - |
 | Multi-phase Execution | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Source Clauses (`jmespath/dsv/csv`) | - | - | - | - | - | - |
+| Source Clauses (`json/dsv/csv`) | - | - | - | - | - | - |
 
 ## Example Details
 
@@ -289,18 +289,18 @@ modular-rules/
 
 Demonstrates source-driven pattern matching with:
 
-- `from jmespath(...)` using JSON string/file input
+- `from json(...)` using JSON string/file input
 - `from dsv(...)` and `from csv(...)` with filter expressions
-- `accumulate(...)` where the source pattern itself uses `from jmespath/csv`
+- `accumulate(...)` where the source pattern itself uses `from json/csv`
 
 **Key Patterns**:
 
 ```rfl
-$p: Purchase() from jmespath(file("data/orders.json"), "orders[*]")
+$p: Purchase() from json(file("data/orders.json"), "orders[*]")
 $r: Purchase() from csv(file("data/orders.csv"), "amount > 100")
 
 $sum: Number(doubleValue > 1000.0) from accumulate(
-    $x: Purchase() from jmespath(file("data/orders.json"), "orders[*]"),
+    $x: Purchase() from json(file("data/orders.json"), "orders[*]"),
     sum($x.amount)
 )
 ```

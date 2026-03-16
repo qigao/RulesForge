@@ -68,8 +68,7 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::build() {
         bool adds_fact_to_token =
             (pattern.type == PatternType::STANDARD && std::holds_alternative<std::monostate>(pattern.source)) ||
             std::holds_alternative<ParsedAccumulate>(pattern.source) ||
-            std::holds_alternative<ParsedUnnest>(pattern.source) ||
-            std::holds_alternative<ParsedJmesPath>(pattern.source);
+            std::holds_alternative<ParsedUnnest>(pattern.source);
         if (adds_fact_to_token) {
             logd("    -> Pattern adds fact to token, incrementing depth to {}", pattern_depth + 1);
             pattern_depth++;
@@ -113,10 +112,6 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::create_node_for_pattern(ParsedPatt
     if (std::holds_alternative<ParsedUnnest>(pattern.source)) {
         auto& un_source = std::get<ParsedUnnest>(pattern.source);
         return create_unnest_node(pattern, un_source);
-    }
-    if (std::holds_alternative<ParsedJmesPath>(pattern.source)) {
-        auto& jp_source = std::get<ParsedJmesPath>(pattern.source);
-        return create_jmespath_node(pattern, jp_source);
     }
 
     std::vector<ParsedConstraint> join_constraints;
@@ -314,27 +309,6 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::create_unnest_node(ParsedPattern& 
 
     if (last_node_) {
         logd("    -> Attaching UnnestNode ID {} to previous node ID {}", node->id, last_node_->id);
-        last_node_->add_child(node);
-    }
-    return node;
-}
-
-std::shared_ptr<ReteNode> BetaNetworkBuilder::create_jmespath_node(ParsedPattern& p, ParsedJmesPath& jp) {
-    logd("  -> Creating source node engine='{}' source kind='{}', expr '{}'",
-         jp.engine_kind == ParsedJmesPath::EngineKind::DsvFilter ? "dsv" : "jmespath",
-         jp.input_kind == ParsedJmesPath::InputKind::JsonFile ? "file" : "string", jp.expression);
-    std::vector<ParsedConstraint> constraints;
-    if (p.constraint_root) {
-        auto alpha_root = kb_.partition_and_get_alpha_root(p, constraints);
-        if (alpha_root) {
-            collect_leaf_constraints(alpha_root.get(), constraints);
-        }
-    }
-
-    auto node = network_.create_node<SourceExtractNode>(jp, p.fact_type, binding_to_idx_, std::move(constraints));
-
-    if (last_node_) {
-        logd("    -> Attaching SourceExtractNode ID {} to previous node ID {}", node->id, last_node_->id);
         last_node_->add_child(node);
     }
     return node;

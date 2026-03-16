@@ -1,7 +1,7 @@
 #include "engine/rhs_executor.hpp"
 #include "engine/i_network_callback.hpp"
 #include "engine/stateful_session.hpp"
-#include "parser/expression_evaluator.hpp"
+#include "expression_evaluator.hpp"
 #include "core/logging_control.hpp"
 
 #include <atomic>
@@ -120,7 +120,6 @@ void RhsExecutor::execute(std::vector<CompiledAction> const& actions,
     break_requested_ = false;
     continue_requested_ = false;
 
-
     callback_.begin_rhs_transaction();
     bool committed = false;
 
@@ -196,7 +195,19 @@ void RhsExecutor::execute_update(CompiledAction const& action) {
     }
 
     bool changed = false;
+    bool snapshot_taken = false;
     rulesforge::ModifiedFieldsHint changed_fields;
+    auto ensure_snapshot = [&]() {
+        if (!snapshot_taken) {
+            callback_.track_rhs_update_snapshot(*fact);
+            snapshot_taken = true;
+        }
+    };
+    auto mark_changed = [&](std::string_view field_name) {
+        changed = true;
+        changed_fields.add(field_name);
+    };
+
     for (auto const& assign : action.assignments) {
         std::string_view field_key = assign.field_key.empty() ? std::string_view(assign.field_name) : assign.field_key;
         rulesforge::InternedString interned_key(field_key);
@@ -208,19 +219,19 @@ void RhsExecutor::execute_update(CompiledAction const& action) {
                 }
                 if (auto const* lit = std::get_if<std::string>(&assign.precomputed_literal)) {
                     if (auto* cur = std::get_if<std::string>(&it->second)) {
+                        ensure_snapshot();
                         *cur = *lit;
-                        changed = true;
-                        changed_fields.add(assign.field_name);
+                        mark_changed(assign.field_name);
                         continue;
                     }
                 }
+                ensure_snapshot();
                 it->second = assign.precomputed_literal;
-                changed = true;
-                changed_fields.add(assign.field_name);
+                mark_changed(assign.field_name);
             } else {
+                ensure_snapshot();
                 fact->fields[interned_key] = assign.precomputed_literal;
-                changed = true;
-                changed_fields.add(assign.field_name);
+                mark_changed(assign.field_name);
             }
             continue;
         }
@@ -231,13 +242,13 @@ void RhsExecutor::execute_update(CompiledAction const& action) {
             if (it->second == value) {
                 continue;
             }
+            ensure_snapshot();
             it->second = std::move(value);
-            changed = true;
-            changed_fields.add(assign.field_name);
+            mark_changed(assign.field_name);
         } else {
+            ensure_snapshot();
             fact->fields[interned_key] = std::move(value);
-            changed = true;
-            changed_fields.add(assign.field_name);
+            mark_changed(assign.field_name);
         }
     }
 

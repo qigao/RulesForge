@@ -32,7 +32,6 @@ class NotNode;
 class ExistsNode;
 class AccumulateNode;
 class UnnestNode;
-class SourceExtractNode;
 class EvalNode;
 class TerminalNode;
 class QueryTerminalNode;
@@ -47,7 +46,6 @@ enum class NodeKind : uint8_t {
   Exists,
   Accumulate,
   Unnest,
-  JmesPath,
   Eval,
   Terminal,
   QueryTerminal,
@@ -70,7 +68,6 @@ public:
       case NodeKind::Accumulate:
       case NodeKind::Eval:
       case NodeKind::Unnest:
-      case NodeKind::JmesPath:
       case NodeKind::QueryInput:
         return true;
       default:

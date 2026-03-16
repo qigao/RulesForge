@@ -9,26 +9,19 @@ set(RULEFORGE_VERSION_PATCH 0)
 set(CAPI_TARGET_NAME rule_forge)
 
 # Add the shared library target
-add_library(${CAPI_TARGET_NAME} SHARED src/rule_forge.cpp)
+add_library(
+    ${CAPI_TARGET_NAME} SHARED src/rule_forge.cpp rfl_value_bridge.cpp
+                               binary_splitters.c
+)
 
 target_compile_definitions(${CAPI_TARGET_NAME} PRIVATE SHARED_CXX)
-generate_export_header(
-    ${CAPI_TARGET_NAME}
-    BASE_NAME
-    RULEFORGE_CAPI
-    EXPORT_MACRO_NAME
-    RULEFORGE_CAPI_EXPORT
-    NO_EXPORT_MACRO_NAME
-    RULEFORGE_CAPI_NO_EXPORT
-    DEPRECATED_MACRO_NAME
-    RULEFORGE_CAPI_DEPRECATED
-)
 
 # Include directories for the CAPI. PUBLIC: Only the C API header - this is what
 # consumers need
 target_include_directories(
     ${CAPI_TARGET_NAME}
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+           $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
            $<INSTALL_INTERFACE:include>
 )
 # PRIVATE: Internal implementation headers - not exposed to consumers
@@ -36,7 +29,11 @@ target_include_directories(
     ${CAPI_TARGET_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/rulesforge/include
 )
 
-target_link_libraries(${CAPI_TARGET_NAME} PRIVATE RulesForge)
+target_link_libraries(
+    ${CAPI_TARGET_NAME}
+    PRIVATE RulesForge rfl_parser
+    PUBLIC TurboNet::Utils
+)
 set_target_properties(${CAPI_TARGET_NAME} PROPERTIES FOLDER capi/)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")

@@ -2,9 +2,9 @@
 #include <fstream>
 #include <iostream>
 
-#include "parser/decision_table_converter.hpp"
-#include "parser/decision_table_parser.hpp"
-#include "parser/rfl_parser.hpp"
+#include "decision_table_converter.hpp"
+#include "decision_table_parser.hpp"
+#include "rfl_parser.hpp"
 #include "engine/knowledge_base.hpp"
 #include "engine/query_result.hpp"
 #include "engine/stateful_session.hpp"

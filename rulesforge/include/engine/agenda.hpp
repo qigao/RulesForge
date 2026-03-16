@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/token.hpp"
+#include "core/parsed_rule.hpp"
 
 
 class Agenda {

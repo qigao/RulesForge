@@ -2,6 +2,7 @@
 #define STATEFUL_SESSION_HPP
 #include <cstdint>
 #include <queue>
+#include <unordered_map>
 
 #include "core/parsed_rule.hpp"
 #include "core/token.hpp"
@@ -10,6 +11,7 @@
 #include "engine/knowledge_base.hpp"
 #include "engine/metrics_exporter.hpp"
 #include "engine/agenda.hpp"
+#include "engine/data_source.hpp"
 
 #include "engine/query_result.hpp"
 #include "rete/network_memory.hpp"
@@ -19,7 +21,7 @@
 #include "core/value_types.hpp"
 
 #include "data/session_arena.hpp"
-#include "data/token_arena.hpp" // Added for TokenArena
+#include "data/token_pool.hpp" // Object pool for long-running engines
 #include "data/fact_arena.hpp"  // Added for FactArena (if we use it internally)
 
 // Forward declarations
@@ -88,6 +90,30 @@ public:
   }
 
   /**
+   * @brief Unified data ingestion interface
+   */
+  void add_data(rulesforge::DataSource const& source);
+  void add_data(Fact* fact) { add_fact(fact); }
+
+  /**
+   * @brief Add fact from binary data using data_bind codec
+   * @deprecated Use add_data(DataSource::binary(...)) instead
+   */
+  Fact* add_fact_from_binary(std::string const& type_name, uint8_t const* buf, size_t len);
+
+  /**
+   * @brief Add fact from JSON string
+   * @deprecated Use add_data(DataSource::json(...)) instead
+   */
+  Fact* add_fact_from_json(std::string const& type_name, std::string const& json_str);
+
+  /**
+   * @brief Add facts from CSV string (batch insert)
+   * @deprecated Use add_data(DataSource::csv(...)) instead
+   */
+  std::vector<Fact*> add_facts_from_csv(std::string const& type_name, std::string const& csv_str);
+
+  /**
    * @brief Insert a fact into a named entry point stream.
    */
   void insert_into(std::string const& stream_name, Fact* fact);
@@ -103,6 +129,7 @@ public:
                    std::function<void(Fact&)> modifier) override;
   void propagate_modify(Fact* fact,
                         rulesforge::ModifiedFieldsHint const* changed_fields = nullptr) override;
+  void track_rhs_update_snapshot(Fact const& fact) override;
 
   // ... (halt, is_consistent methods remain same) ...
   void halt() { halt_requested_ = true; }
@@ -134,14 +161,20 @@ public:
   void set_global(std::string const& name, ConstraintValue value);
   std::optional<ConstraintValue> get_global(std::string const& name) const;
 
-  void set_validation_mode(ValidationMode mode) { validation_mode_ = mode; }
+  void set_validation_mode(ValidationMode mode) {
+      ensure_consistent_for_mutation("setting validation mode");
+      validation_mode_ = mode;
+  }
   ValidationMode get_validation_mode() const { return validation_mode_; }
 
   bool has_type_declaration(std::string const& type_name) const;
 
   // Rule execution tracing
   RuleExecutionTracer& get_tracer() { return tracer_; }
-  void enable_tracing(bool enabled = true) { tracer_.enable_tracing(enabled); }
+  void enable_tracing(bool enabled = true) {
+      ensure_consistent_for_mutation("setting tracing mode");
+      tracer_.enable_tracing(enabled);
+  }
   std::string get_execution_trace(bool include_network = false) const {
       return tracer_.format_trace(include_network);
   }
@@ -171,6 +204,17 @@ public:
     return listeners_;
   }
 
+  /**
+   * @brief Reset session state for reuse
+   *
+   * Clears all runtime state while preserving the knowledge base.
+   * Used by SessionPool to recycle sessions.
+   *
+   * WARNING: Does not reset network memory or compiled network.
+   * Only suitable for stateless rule processing.
+   */
+  void reset();
+
   // --- Internal & INetworkCallback API ---
   void _internal_add_fact(Fact* fact);
   void _internal_add_facts_batch(std::vector<Fact*> const& facts);
@@ -189,7 +233,7 @@ public:
       TokenWME const* parent_wme, Fact const* fact)
   {
     if (!parent_wme) {
-         parent_wme = token_arena_.get_root();
+         parent_wme = token_pool_.get_root();
     }
 
     size_t parent_hash = parent_wme ? parent_wme->hash : 0;
@@ -201,7 +245,7 @@ public:
       return it->second;
     }
 
-    TokenWME* new_wme = token_arena_.create_token(parent_wme, fact);
+    TokenWME* new_wme = token_pool_.create_token(parent_wme, fact);
 
     wme_cache_[hash] = new_wme;
     return new_wme;
@@ -212,15 +256,20 @@ public:
       TokenWME const* parent_wme, Fact const* fact)
   {
     if (!parent_wme) {
-         parent_wme = token_arena_.get_root();
+         parent_wme = token_pool_.get_root();
     }
-    return token_arena_.create_token(parent_wme, fact);
+    return token_pool_.create_token(parent_wme, fact);
   }
 
-  inline TokenWME const* get_dummy_wme() { return token_arena_.get_root(); }
+  inline TokenWME const* get_dummy_wme() { return token_pool_.get_root(); }
 
   inline void invalidate_wme_cache(size_t hash) {
-    wme_cache_.erase(hash);
+    auto it = wme_cache_.find(hash);
+    if (it != wme_cache_.end()) {
+      // Destroy the token and remove from cache
+      token_pool_.destroy_token(const_cast<TokenWME*>(it->second));
+      wme_cache_.erase(it);
+    }
   }
 
   void add_activation(Activation const& activation);
@@ -246,6 +295,8 @@ public:
   bool is_deferred_mode() const { return deferred_mode_; }
 
 private:
+  void ensure_consistent_for_mutation(char const* operation) const;
+  void validate_fact_for_insert(Fact const& fact) const;
   void prime_network_state();
   void fire_activation(Activation& activation);
   bool is_node_pending_dirty(ReteNode const& node) const;
@@ -265,7 +316,7 @@ private:
   std::unique_ptr<TruthMaintenanceSystem> tms_;
   RuleExecutionTracer tracer_;
   SessionArena arena_;
-  rulesforge::TokenArena token_arena_;
+  rulesforge::TokenPool token_pool_;
   rulesforge::FactArena fact_arena_;
 
   // dummy_wme_ is managed by TokenArena (root)
@@ -283,7 +334,9 @@ private:
   bool phreak_experimental_ = false;
   std::map<std::string, ConstraintValue> globals_;
   std::vector<int64_t> transaction_inserted_facts_;
-  std::vector<int64_t> transaction_retracted_facts_;
+  std::vector<Fact*> transaction_retracted_facts_;
+  std::vector<int64_t> transaction_updated_fact_order_;
+  std::unordered_map<int64_t, rulesforge::InternedKeyMap<ConstraintValue>> transaction_updated_fact_snapshots_;
 
   ValidationMode validation_mode_ = ValidationMode::None;
   std::unique_ptr<SchemaValidator> schema_validator_;

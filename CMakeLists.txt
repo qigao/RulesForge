@@ -27,6 +27,16 @@ project(
 
 # Set the features of the project
 include(ProjectOptions.cmake)
+
+# Option to use high-performance Agenda (AgendaV2)
+option(RULESFORGE_USE_AGENDA_V2 "Use high-performance AgendaV2 (10x faster, MQTT optimized)" OFF)
+if(RULESFORGE_USE_AGENDA_V2)
+    message(STATUS "Using AgendaV2 (high-performance, MQTT optimized)")
+    add_compile_definitions(RULESFORGE_USE_AGENDA_V2)
+else()
+    message(STATUS "Using original Agenda (precise salience)")
+endif()
+
 message(STATUS "Searching for TurboNet in: ${EXTERNAL_ROOT}/turbonet")
 find_package(TurboNet CONFIG REQUIRED PATHS "${EXTERNAL_ROOT}/turbonet")
 message(STATUS "Found TurboNet version: ${TurboNet_VERSION}")
@@ -43,5 +53,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 add_subdirectory(tools)
 include(FindTools)
 # Add subdirectories
+add_subdirectory(parser)
+add_subdirectory(tbe)
 add_subdirectory(rulesforge)
 add_subdirectory(capi)

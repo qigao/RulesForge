@@ -1,4 +1,4 @@
-#include "parser/rfl_parser.hpp"
+#include "rfl_parser.hpp"
 #include "engine/knowledge_base.hpp"
 #include "engine/stateful_session.hpp"
 #include "tinytest.h"

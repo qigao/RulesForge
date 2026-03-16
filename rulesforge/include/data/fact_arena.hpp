@@ -14,7 +14,7 @@ namespace rulesforge {
 class FactArena {
 public:
     explicit FactArena(size_t size = 64 * 1024 * 1024) { // 64MB default
-        turbo_pool_init(&arena_, size);
+        mem_init(&arena_, size);
     }
 
     ~FactArena() {
@@ -53,12 +53,12 @@ public:
         for (auto* fact : facts_) {
             fact->~Fact();
         }
-        turbo_pool_free(&arena_);
+        mem_destroy(&arena_);
     }
 
     template<typename... Args>
     Fact* create_fact(Args&&... args) {
-        void* p = turbo_pool_alloc(&arena_, sizeof(Fact));
+        void* p = mem_alloc(&arena_, sizeof(Fact));
         if (!p) throw std::bad_alloc();
         Fact* fact = new (p) Fact(std::forward<Args>(args)...);
         facts_.push_back(fact);
@@ -75,15 +75,15 @@ public:
             fact->~Fact();
         }
         facts_.clear();
-        turbo_pool_reset(&arena_);
+        mem_reset(&arena_);
     }
 
     size_t memory_usage() const {
-        return arena_.total_used;
+        return t_atomic_load_size_relaxed((t_atomic_size_t*)&arena_.total_used);
     }
 
 private:
-    turbo_pool_t arena_;
+    mem_pool_t arena_;
     std::vector<Fact*> facts_; // To track for destruction
 };
 

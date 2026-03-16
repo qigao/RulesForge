@@ -31,7 +31,6 @@ private:
                                                      std::vector<std::shared_ptr<ReteNode>> const&,
                                                      std::vector<ParsedConstraint> const&);
     std::shared_ptr<ReteNode> create_unnest_node(ParsedPattern&, ParsedUnnest&);
-    std::shared_ptr<ReteNode> create_jmespath_node(ParsedPattern&, ParsedJmesPath&);
     std::shared_ptr<ReteNode> create_negative_node(ParsedPattern&, std::vector<std::shared_ptr<ReteNode>> const&,
                                                    std::vector<ParsedConstraint> const&);
     std::shared_ptr<ReteNode> create_existential_node(ParsedPattern&, std::vector<std::shared_ptr<ReteNode>> const&,

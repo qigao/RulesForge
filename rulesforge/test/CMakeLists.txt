@@ -1,4 +1,4 @@
-file(GLOB_RECURSE TEST_SOURCES parser/*_test.cpp engine/*_test.cpp)
+file(GLOB_RECURSE TEST_SOURCES engine/*_test.cpp data/*_test.cpp api/*_test.cpp codec/*.cpp)
 
 set(folder_name ${TARGET_NAME}/test)
 
@@ -8,7 +8,7 @@ foreach(test_source ${TEST_SOURCES})
     set(executable_name "${test_name}.${TARGET_NAME}")
     add_executable(${executable_name} ${test_source})
     target_link_libraries(
-        ${executable_name} PRIVATE TurboNet::TinyTest ${TARGET_NAME}
+        ${executable_name} PRIVATE TurboNet::TinyTest ${TARGET_NAME} data_bind
     )
     target_compile_definitions(
         ${executable_name}
@@ -19,9 +19,8 @@ foreach(test_source ${TEST_SOURCES})
         ${executable_name}
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                $<INSTALL_INTERFACE:include/rulesforge>
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/parser
-                ${CMAKE_CURRENT_BINARY_DIR}/parser_gen
-                ${CMAKE_CURRENT_SOURCE_DIR}
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+                ${CMAKE_SOURCE_DIR}/tbe/data_bind
     )
     set_target_properties(${executable_name} PROPERTIES FOLDER ${folder_name})
 endforeach()

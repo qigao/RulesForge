@@ -49,7 +49,7 @@ private:
 using MemoryPressureCallback = std::function<void(size_t used, size_t max_size, int usage_percent)>;
 
 /**
- * @brief Per-session arena allocator using TurboNet's turbo_pool_t
+ * @brief Per-session arena allocator using TurboNet's mem_pool_t
  *
  * The arena is used for temporary objects that live only during a single
  * fire_all_rules() call.
@@ -70,11 +70,11 @@ public:
         warning_threshold_percent_(DEFAULT_WARNING_THRESHOLD_PERCENT),
         warning_fired_(false),
         peak_used_(0) {
-    turbo_pool_init(&arena_, max_size);
+    mem_init(&arena_, max_size);
   }
 
   ~SessionArena() {
-    turbo_pool_free(&arena_);
+    mem_destroy(&arena_);
   }
 
   // Non-copyable, non-movable
@@ -92,7 +92,7 @@ public:
   T* allocate(Args&&... args) {
     check_memory_pressure();
 
-    void* ptr = turbo_pool_alloc(&arena_, sizeof(T));
+    void* ptr = mem_alloc(&arena_, sizeof(T));
     if (!ptr) {
       throw SessionMemoryExhaustedException(sizeof(T), memory_available(), max_size_);
     }
@@ -104,7 +104,7 @@ public:
    * @brief Reset all temporary allocations (call after fire_all_rules)
    */
   void reset_temporaries() {
-    turbo_pool_reset(&arena_);
+    mem_reset(&arena_);
     warning_fired_ = false;
   }
 
@@ -124,21 +124,24 @@ public:
   }
 
   // Statistics
-  size_t memory_used() const { return arena_.total_used; }
+  size_t memory_used() const {
+    return t_atomic_load_size_relaxed((t_atomic_size_t*)&arena_.total_used);
+  }
   size_t memory_available() const {
-    return max_size_ > arena_.total_used ? max_size_ - arena_.total_used : 0;
+    size_t used = memory_used();
+    return max_size_ > used ? max_size_ - used : 0;
   }
   size_t memory_peak() const { return peak_used_; }
 
   int usage_percent() const {
     if (max_size_ == 0) return 0;
-    return static_cast<int>((arena_.total_used * 100) / max_size_);
+    return static_cast<int>((memory_used() * 100) / max_size_);
   }
 
   std::string format_stats() const {
     std::ostringstream oss;
     oss << "SessionArena: "
-        << "used=" << arena_.total_used / 1024 << "KB (" << usage_percent() << "%), "
+        << "used=" << memory_used() / 1024 << "KB (" << usage_percent() << "%), "
         << "peak=" << peak_used_ / 1024 << "KB, "
         << "max=" << max_size_ / 1024 << "KB";
     return oss.str();
@@ -151,17 +154,18 @@ private:
     int percent = usage_percent();
     if (percent >= warning_threshold_percent_) {
       warning_fired_ = true;
-      pressure_callback_(arena_.total_used, max_size_, percent);
+      pressure_callback_(memory_used(), max_size_, percent);
     }
   }
 
   void update_peak() {
-    if (arena_.total_used > peak_used_) {
-      peak_used_ = arena_.total_used;
+    size_t used = memory_used();
+    if (used > peak_used_) {
+      peak_used_ = used;
     }
   }
 
-  turbo_pool_t arena_;
+  mem_pool_t arena_;
   size_t max_size_;
   int warning_threshold_percent_;
   bool warning_fired_;
@@ -172,7 +176,7 @@ private:
 /**
  * @brief RAII scope guard for temporary allocations
  *
- * Note: turbo_pool_t doesn't support mark/rewind, so this scope
+ * Note: mem_pool_t doesn't support mark/rewind, so this scope
  * guard is a no-op placeholder for API compatibility.
  */
 class ArenaScope {

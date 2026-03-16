@@ -64,6 +64,8 @@ public:
     virtual void update_fact(Fact* fact, std::function<void(Fact&)> modifier) = 0;
     virtual void propagate_modify(Fact* fact,
                                   rulesforge::ModifiedFieldsHint const* changed_fields = nullptr) = 0;
+    // Capture pre-update snapshot for transactional rollback (first update per fact).
+    virtual void track_rhs_update_snapshot(Fact const& fact) = 0;
     virtual void logical_insert(Token& token, Fact* fact) = 0;
     virtual Fact* logical_insert(Fact const& fact) = 0;
     virtual void set_focus(std::string const& group_name) = 0;

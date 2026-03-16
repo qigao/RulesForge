@@ -15,7 +15,6 @@ This is a sophisticated, high-performance C++ rules engine implementing the **Re
 **JavaScript Integration**:
 
 - `JSScriptingManager` bridges C++ and JavaScript (`rulesforge/src/rfl_js_manager.cpp`)
-- QuickJS library for seamless C++/JavaScript binding (`vcpkg.json:90-92`)
 - Custom `rfl` API exposed to JavaScript for fact manipulation
 
 ## Key Features
@@ -30,7 +29,6 @@ This is a sophisticated, high-performance C++ rules engine implementing the **Re
 ## Technology Stack
 
 - **C++20** standard with modern practices
-- **QuickJS** for JavaScript integration
 - **TinyTest** for testing
 - **jsoncons** for json path query
 - **CMake** build system with vcpkg dependency management
@@ -48,64 +46,15 @@ docs/                 # Documentation
 └── README.md        # Quick start guide (Chinese)
 ```
 
-## WebAssembly Demo 🐳
+## WebAssembly Demo
 
-Experience the power of RulesForge in your browser! We've created a complete **WebAssembly demo** that runs the C++ engine directly in web browsers.
-
-### 🎮 Live Demo Features
-
-- ✅ **Browser-native Rule Engine**: Run C++ RulesForge engine directly via WebAssembly
-- ✅ **Interactive Demo**: Complete web interface for testing rule functionality
-- ✅ **Real-time Performance**: Live metrics and console logging
-- ✅ **Sample Business Rules**: Pre-built customer classification rules
-- ✅ **JSON I/O**: Native JSON fact handling and query results
-- ✅ **Memory Monitoring**: Real-time memory usage tracking
-
-### 🚀 Try It Now
+Run RulesForge in your browser via WebAssembly.
 
 ```bash
-# Build the WebAssembly demo (requires Emscripten)
-cd wasm
-./build.sh
-
-# Serve the demo locally
-cd build
-python3 -m http.server 8000
-
-# Open http://localhost:8000 in your browser
+cd wasm && ./build.sh
+cd build && python3 -m http.server 8000
+# Open http://localhost:8000
 ```
-
-### 📱 Demo Workflow
-
-1. **Initialize Engine** - Load the WebAssembly module in your browser
-2. **Load Sample Rules** - Import business rules for customer classification
-3. **Insert Customer Data** - Add JSON facts (Alice: 35yo, $120k income)
-4. **Fire Rules** - Execute rules and see automatic VIP classification
-5. **Execute Queries** - Retrieve processed results with applied discounts
-6. **Monitor Performance** - Real-time metrics and memory usage
-
-### 🔧 Technical Highlights
-
-```cpp
-// WebAssembly bindings expose full C API
-EMSCRIPTEN_BINDINGS(ruleforge_module) {
-    class_<RulesForgeEngine>("RulesForgeEngine")
-        .constructor()
-        .function("init", &RulesForgeEngine::init)
-        .function("createKnowledgeBase", &RulesForgeEngine::createKnowledgeBase)
-        .function("createSession", &RulesForgeEngine::createSession)
-        .function("insertFact", &RulesForgeEngine::insertFact)
-        .function("fireRules", &RulesForgeEngine::fireRules)
-        .function("query", &RulesForgeEngine::query);
-}
-```
-
-The demo demonstrates:
-
-- **Client-side Processing**: Rules execute in browser, data stays local
-- **Zero Server Dependencies**: Pure static files
-- **Cross-platform Compatibility**: Modern browsers with WebAssembly support
-- **Educational Value**: Perfect for learning rule engine concepts
 
 ## Quick Start
 
@@ -220,16 +169,35 @@ int main() {
 }
 ```
 
+## Data Ingestion
+
+RulesForge provides a unified `add_data()` API for loading data from multiple sources:
+
+```cpp
+#include "engine/data_source.hpp"
+
+// Add fact objects
+session->add_data(person);
+
+// Load from JSON
+std::string json = read_file("orders.json");
+session->add_data(DataSource::json(json, "orders[*]"));
+
+// Load from CSV
+session->add_data(DataSource::csv("customers.csv", "age > 18"));
+
+// Load from DSV
+session->add_data(DataSource::dsv(dsv_content, "amount > 100"));
+```
+
+This replaces the deprecated `from json/csv` syntax in rules, providing better performance and control.
+
 ## Strengths
 
-- **Performance-oriented**: Rete algorithm optimized for high-throughput scenarios
-- **Clean separation**: Immutable knowledge base vs. mutable sessions
-- **Comprehensive**: Full feature set including TMS, CEP, aggregations
-- **Well-documented**: Extensive guides and examples
-- **Modern C++**: Leverages C++20 features and best practices
-- **Testing**: Thorough test coverage
-
-This is a production-ready rules engine suitable for complex business rule scenarios requiring both high performance and flexible rule authoring through the combination of declarative RFL syntax and JavaScript scripting capabilities.
+- Performance-oriented Rete algorithm
+- Immutable knowledge base, mutable sessions
+- Comprehensive feature set (TMS, CEP, aggregations)
+- Modern C++20 with thorough test coverage
 
 ## Documentation
 

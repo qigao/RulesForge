@@ -11,22 +11,22 @@
 #include "rete/rete_node.hpp"
 
 
-// C++ allocator backed by turbo_pool_t.
+// C++ allocator backed by mem_pool_t.
 // allocate() bumps the arena pointer (fast, contiguous).
 // deallocate() is a no-op — the arena frees everything at once on destruction.
 template<typename T>
 struct ArenaAllocator {
     using value_type = T;
 
-    turbo_pool_t* arena;
+    mem_pool_t* arena;
 
-    explicit ArenaAllocator(turbo_pool_t* a) noexcept : arena(a) {}
+    explicit ArenaAllocator(mem_pool_t* a) noexcept : arena(a) {}
 
     template<typename U>
     ArenaAllocator(ArenaAllocator<U> const& o) noexcept : arena(o.arena) {}
 
     T* allocate(size_t n) {
-        void* p = turbo_pool_alloc(arena, n * sizeof(T));
+        void* p = mem_alloc(arena, n * sizeof(T));
         if (!p) throw std::bad_alloc();
         return static_cast<T*>(p);
     }
@@ -162,7 +162,7 @@ struct CompiledNetwork {
 
     // Arena MUST be declared before all_nodes so it outlives the shared_ptrs.
     // Destruction order: caches -> all_nodes -> arena_
-    turbo_pool_t arena_;
+    mem_pool_t arena_;
 
     std::vector<std::shared_ptr<ReteNode>> all_nodes;
     std::vector<ReteNode*> node_index;
@@ -183,7 +183,7 @@ struct CompiledNetwork {
 
     CompiledNetwork() {
         // 4MB initial arena — enough for ~10K nodes without realloc
-        turbo_pool_init(&arena_, 4 * 1024 * 1024);
+        mem_init(&arena_, 4 * 1024 * 1024);
     }
 
     ~CompiledNetwork() {
@@ -204,7 +204,7 @@ struct CompiledNetwork {
         terminal_to_path_id.clear();
         all_nodes.clear();
         // Now safe to free the arena
-        turbo_pool_free(&arena_);
+        mem_destroy(&arena_);
     }
 
     CompiledNetwork(CompiledNetwork const&) = delete;
@@ -426,9 +426,6 @@ private:
                 break;
             case NodeKind::Unnest:
                 node.mem_slot = mem_slot_counts.unnest++;
-                break;
-            case NodeKind::JmesPath:
-                node.mem_slot = mem_slot_counts.jmespath++;
                 break;
             default:
                 break; // Alpha, EntryPoint, QueryInput don't need mem_slot

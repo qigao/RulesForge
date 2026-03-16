@@ -1,4 +1,4 @@
-# Drills Rules Engine - Complete User Guide
+# RulesForge - Complete User Guide
 
 *Master the art of declarative business logic*
 
@@ -17,7 +17,7 @@
 
 ### The Rete Algorithm in Practice
 
-Drills implements the **Rete algorithm**, a powerful pattern-matching technique that:
+RulesForge implements the **Rete algorithm**, a powerful pattern-matching technique that:
 
 - ✅ **Incremental Processing** - Only recompute what changed
 - ✅ **Memory Networks** - Store intermediate results for speed
@@ -53,7 +53,7 @@ session2->add_fact(customer2); // Independent data
 
 ### Data Flow: Facts, Rules, and the Engine
 
-Understanding how data moves through the Drills engine is crucial. It's a continuous cycle of **Facts** (your input data) interacting with **Rules** (your defined logic) within the engine's **Working Memory**.
+Understanding how data moves through the RulesForge engine is crucial. It's a continuous cycle of **Facts** (your input data) interacting with **Rules** (your defined logic) within the engine's **Working Memory**.
 
 1. **Rules Ingested into Knowledge Base:**
     - Your rules, whether defined in RFL files, decision tables (like CSVs), or other formats, are first parsed and compiled into an optimized internal representation, primarily a Rete network.
@@ -560,7 +560,7 @@ Process JSON data using an LHS source pattern:
 ```rfl
 rule "Process Order Items"
 when
-    $item: OrderItem() from jmespath(file("data/order_items.json"), "items[*]")
+    $item: OrderItem() from json(file("data/order_items.json"), "items[*]")
 then
     insert ProcessedItem {
         name = $item.name,
@@ -732,7 +732,7 @@ rule "Process High Value Orders"
 when
     $order: Order(total > 1000, status == "new")
     $item: ProcessedItem(orderId == $order.id)
-        from jmespath(file("data/order_items.json"), "items[*]")
+        from json(file("data/order_items.json"), "items[*]")
 then
     update $order { status = "processed" }
     insert HighValueOrder { orderId = $order.id }
@@ -1303,4 +1303,4 @@ Ready for advanced topics?
 
 *"Good programmers worry about data structures and their relationships. Bad programmers worry about the code."* - Linus Torvalds
 
-The Drills engine is built around elegant data structures that make complex business logic simple to express and blazingly fast to execute.
+The RulesForge engine is built around elegant data structures that make complex business logic simple to express and blazingly fast to execute.

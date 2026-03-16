@@ -16,4 +16,10 @@ private:
     std::string rule_name_;
 };
 
+class SessionInconsistentException : public std::runtime_error {
+public:
+    explicit SessionInconsistentException(std::string const& message)
+        : std::runtime_error(message) {}
+};
+
 #endif  // RULEFORGE_EXCEPTIONS_HPP

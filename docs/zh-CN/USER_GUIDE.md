@@ -469,7 +469,7 @@ end
 ```rfl
 rule "处理订单项"
 when
-    $item: OrderItem() from jmespath(file("data/order_items.json"), "items[*]")
+    $item: OrderItem() from json(file("data/order_items.json"), "items[*]")
 then
     insert ProcessedItem {
         orderId = $item.orderId,
