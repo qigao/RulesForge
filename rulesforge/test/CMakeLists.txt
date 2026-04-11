@@ -8,12 +8,19 @@ foreach(test_source ${TEST_SOURCES})
     set(executable_name "${test_name}.${TARGET_NAME}")
     add_executable(${executable_name} ${test_source})
     target_link_libraries(
-        ${executable_name} PRIVATE TurboNet::TinyTest ${TARGET_NAME} data_bind
+        ${executable_name}
+        PRIVATE TurboNet::TinyTest data_bind rfl_parser ${TARGET_NAME} Threads::Threads
     )
     target_compile_definitions(
         ${executable_name}
         PRIVATE RFL_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test"
     )
+    if(test_name STREQUAL "fraud_example_test")
+        target_compile_definitions(
+            ${executable_name}
+            PRIVATE RULESFORGE_FRAUD_EXAMPLE_RFL="${CMAKE_SOURCE_DIR}/docs/examples/fraud-detection/fraud-detection.rfl"
+        )
+    endif()
     add_test(NAME ${executable_name} COMMAND ${executable_name})
     target_include_directories(
         ${executable_name}

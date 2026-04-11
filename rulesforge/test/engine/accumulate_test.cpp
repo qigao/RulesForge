@@ -2,6 +2,7 @@
 #include "engine/knowledge_base.hpp"
 #include "engine/query_result.hpp"
 #include "engine/stateful_session.hpp"
+#include "test_helpers.hpp"
 #include "tinytest.h"
 
 template <typename T>
@@ -33,12 +34,7 @@ struct AccumulateTestFixture {
     void build_session(std::string const& drl) {
         ParsingResult result;
         kb = build_knowledge_base(drl, result);
-        if (!result.success) {
-            for (auto const& err : result.errors) {
-                throw std::runtime_error("RFL parsing failed: " + err.to_string());
-            }
-            throw std::runtime_error("RFL parsing failed: Unknown error");
-        }
+        if (!result.success) throw_parse_failure(result);
         if (!kb) { throw std::runtime_error("KnowledgeBase is null"); }
         session = kb->create_session();
         if (!session) { throw std::runtime_error("Session is null"); }

@@ -8,6 +8,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <map>
 #include <variant>
 #include <vector>
 
@@ -29,6 +30,10 @@ using ConstraintValue =
 
 struct ConstraintValueCompare {
   bool operator()(ConstraintValue const &a, ConstraintValue const &b) const;
+};
+
+struct ConstraintValueHasher {
+  std::size_t operator()(ConstraintValue const &v) const;
 };
 
 struct TypedList {
@@ -53,12 +58,8 @@ inline ConstraintValue make_value_map() { return std::make_shared<ValueMap>(); }
 
 std::string to_string(ConstraintValue const &val);
 
-struct ConstraintValueHasher {
-  std::size_t operator()(ConstraintValue const &v) const;
-};
-
-inline bool operator==(FactList const &, FactList const &) { return false; }
-inline bool operator!=(FactList const &, FactList const &) { return true; }
+bool operator==(FactList const &a, FactList const &b);
+bool operator!=(FactList const &a, FactList const &b);
 inline bool operator==(NilValue const &, NilValue const &) { return true; }
 inline bool operator!=(NilValue const &, NilValue const &) { return false; }
 inline bool operator==(TypedList const &a, TypedList const &b) { return a.values == b.values; }

@@ -3,7 +3,6 @@
 # =============================================================================
 # This library contains the RulesForge DSL parser (lexer + grammar + impl) It
 # can be used by both RulesForge engine and external tools (like data_bind)
-
 set(TARGET_NAME rfl_parser)
 
 # --- re2c + Lemon code generation ---
@@ -37,15 +36,15 @@ set_source_files_properties(
     ${PARSER_GEN_DIR}/rfl_grammar_lemon.c PROPERTIES LANGUAGE CXX
 )
 file(GLOB_RECURSE SOURCE_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c*
-     ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h*)
+     ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h*
+)
 # Parser library sources (only lexer + grammar + impl, no high-level API)
 set(PARSER_SOURCES
     ${PARSER_GEN_DIR}/rfl_lexer.cpp
     ${PARSER_GEN_DIR}/rfl_grammar_lemon.c
- 
     ${CMAKE_SOURCE_DIR}/rulesforge/src/core/rfl_rete_defs.cpp # Type
                                                               # implementations
-    ${SOURCE_FILES}                                                     # needed by parser
+    ${SOURCE_FILES} # needed by parser
 )
 
 add_library(${TARGET_NAME} STATIC ${PARSER_SOURCES})
@@ -64,7 +63,9 @@ target_include_directories(
             ${CMAKE_CURRENT_BINARY_DIR}/parser_gen
 )
 
-target_link_libraries(${TARGET_NAME} PUBLIC TurboNet::Utils TurboNet::Parser)
+target_link_libraries(
+    ${TARGET_NAME} PUBLIC TurboNet::Utils TurboNet::Parser TurboScript::ExprTk
+)
 
 if(MSVC)
     target_compile_options(${TARGET_NAME} PRIVATE /bigobj)
@@ -81,5 +82,6 @@ set_target_properties(
 add_library(RulesForge::Parser ALIAS ${TARGET_NAME})
 
 # Tests
-add_subdirectory(tests)
-
+if(ENABLE_TESTS)
+    add_subdirectory(tests)
+endif()

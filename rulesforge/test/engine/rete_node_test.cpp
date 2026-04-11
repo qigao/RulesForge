@@ -2,6 +2,7 @@
 #include "engine/knowledge_base.hpp"
 #include "engine/query_result.hpp"
 #include "engine/stateful_session.hpp"
+#include "test_helpers.hpp"
 #include "tinytest.h"
 
 using namespace rulesforge;
@@ -14,9 +15,7 @@ struct QueryTestFixture {
     void build(std::string const& drl) {
         ParsingResult result;
         kb = build_knowledge_base(drl, result);
-        if (!result.success) {
-            throw std::runtime_error("RFL parsing failed: " + (result.errors.empty() ? "Unknown error" : result.errors[0].to_string()));
-        }
+        if (!result.success) throw_parse_failure(result);
         if (!kb) { throw std::runtime_error("KnowledgeBase is null"); }
         session = kb->create_session();
         if (!session) { throw std::runtime_error("Session is null"); }

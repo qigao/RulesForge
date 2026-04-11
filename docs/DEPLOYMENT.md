@@ -1,99 +1,95 @@
-# Drills Rules Engine - Deployment Guide
+# RulesForge Deployment Guide
 
-This guide provides practical advice and configuration examples for deploying the Drills Rules Engine in various environments, focusing on performance, memory management, security, and operational best practices.
+This guide focuses on what the current code supports, not on theoretical architecture.
 
-## 1. Memory Management
+## 1. Build Once, Reuse Often
 
-Efficient memory usage is critical for high-performance rule execution.
+The intended production shape is:
 
-### 1.1 Fact Object Sizing
+- compile rules into one `KnowledgeBase`
+- register native functions and codecs during setup
+- create many short-lived or pooled `StatefulSession` instances from that knowledge base
 
-*   **Understand your Fact structure:** Each `Fact` object (or `Fact` instance created via `FAST_CUSTOMER()` etc.) consumes memory. The size depends on the number and type of fields it contains.
-*   **Minimize unnecessary data:** Only include data in your facts that is relevant for rule matching or actions. Avoid storing large binary blobs or extensive text if not directly used by rules.
-*   **Use optimized types:** Drills provides optimized fact builders (e.g., `FAST_CUSTOMER()` in `memory_optimized_types.hpp`) that leverage object pools and string interning to reduce memory overhead for frequently created facts. Prefer these over generic `Fact` objects when possible.
+Do not recompile the same rules for every request unless you enjoy burning CPU for no reason.
 
-### 1.2 Session Management
+## 2. Thread Safety
 
-*   **Short-lived sessions:** For transactional, request-response style applications, create a `StatefulSession` per request/transaction. This ensures memory is released quickly after processing.
-*   **Long-lived sessions (caution):** If you maintain long-lived sessions (e.g., for continuous event processing), you *must* actively manage facts. Use `session->retract_fact()` or `session->retract_facts_of_type()` to remove facts that are no longer relevant to prevent memory leaks.
-*   **Object Pools:** Drills uses internal object pools. Monitor their usage (see `PoolStatsCollector` in `memory_optimization_demo.cpp`) to understand memory allocation patterns.
+Current contract:
 
-### 1.3 Heap Configuration
+- `KnowledgeBase`: safe to share only after setup is complete
+- `StatefulSession`: not thread-safe
 
-*   **C++ Runtime:** Ensure your C++ application's heap is configured appropriately for the expected load. Monitor memory usage with system tools (e.g., `top`, `perf`, `Valgrind`).
-*   **Expression Runtime Heap:** Expression evaluation has its own runtime memory usage. Be mindful of complex expressions with many intermediate allocations.
+Practical rule:
 
-## 2. Security Considerations
+- one session per worker thread, request, or message flow
 
-Securing your rule engine deployment involves protecting rule sources, fact data, and runtime execution.
+## 3. Data Ingestion Choices
 
-### 2.1 Rule Source Integrity
+Choose one boring path for each boundary:
 
-*   **Trusted Sources:** Only load rules from trusted and verified sources. Malicious rules can still trigger unintended side effects through rule actions.
-*   **Access Control:** Implement strict access control to your rule definition files (RFL, CSV for decision tables).
-*   **Version Control:** Store rule definitions in a version control system (e.g., Git) to track changes and enable rollbacks.
+- JSON for general service integrations
+- CSV for batch/offline loads
+- binary only when you already control codecs and care about throughput
 
-### 2.2 Fact Data Sensitivity
+If your integration does not need all three, do not document or ship all three.
 
-*   **Minimize Sensitive Data:** Avoid inserting highly sensitive data (e.g., full credit card numbers, passwords) directly into facts if not absolutely necessary for rule evaluation.
-*   **Tokenization/Encryption:** If sensitive data must be present, tokenize or encrypt it before inserting into facts, and decrypt/detokenize only when absolutely required by a trusted action.
-*   **Data Masking:** For logging or tracing, mask sensitive data to prevent accidental exposure.
+## 4. Validation And Failure Mode
 
-### 2.3 Runtime Extension Surface
+RulesForge exposes session validation mode and per-call status results through the C API.
 
-*   **Limited Exposure:** Keep any exposed native extension functions minimal and safe. Avoid exposing direct file system or network operations unless explicitly required and secured.
+Production advice:
 
-## 3. Concurrency and Thread Safety
+- reject malformed facts early
+- keep representative sample payloads in CI
+- do not hide rule compilation errors behind fallback behavior
 
-Understanding Drills' concurrency model is vital for multi-threaded applications.
+The right failure mode is usually “fail fast during load or test”, not “invent magic defaults”.
 
-*   **`KnowledgeBase` (Thread-Safe):** A compiled `KnowledgeBase` is immutable and thread-safe. You can safely share a single `KnowledgeBase` instance across multiple threads.
-*   **`StatefulSession` (Not Thread-Safe):** A `StatefulSession` represents the working memory and is *not* thread-safe. Each thread or concurrent request *must* create its own `StatefulSession` instance from the shared `KnowledgeBase`.
-    ```cpp
-    // Example: Thread-safe usage
-    std::shared_ptr<KnowledgeBase> shared_kb = build_knowledge_base(...); // Build once
+## 5. Native Extensions
 
-    // In Thread 1
-    auto session1 = shared_kb->create_session();
-    session1->add_fact(...);
-    session1->fire_all_rules();
+There are two extension surfaces:
 
-    // In Thread 2
-    auto session2 = shared_kb->create_session();
-    session2->add_fact(...);
-    session2->fire_all_rules();
-    ```
-*   **Batch Processing:** For high-throughput scenarios, consider batching fact insertions (`session->add_facts()`) to minimize context switching and Rete network propagation overhead.
+- native RHS functions loaded into a knowledge base
+- source/sink plugins following [`include/rule_forge_plugin.h`](/C:/projects/cpp/rulesforge/include/rule_forge_plugin.h)
 
-## 4. Logging and Monitoring
+Operational rules:
 
-Effective logging and monitoring are essential for debugging, performance tuning, and operational visibility.
+- keep callbacks deterministic
+- limit external I/O in rule-triggered code
+- version your plugin binaries with the rule pack that needs them
 
-### 4.1 Rule Execution Tracing
+## 6. Observability
 
-*   **Enable Tracing:** Use `session->enable_tracing(true)` to get detailed logs of rule activations, fact insertions/retractions, and rule execution times. This is invaluable for debugging rule logic.
-*   **Performance Summaries:** After `fire_all_rules()`, retrieve `session->get_rule_performance_summary()` to identify slow or frequently executed rules.
-*   **Production Use:** Tracing can be verbose and have a performance impact. Use it judiciously in production, perhaps enabling it only for specific problematic sessions or during debugging periods.
+The C++ runtime exposes:
 
-### 4.2 System-Level Monitoring
+- rule execution tracing
+- rule performance summaries
+- session metrics exporters
 
-*   **CPU/Memory:** Monitor your application's CPU and memory usage. Spikes might indicate inefficient rule design or fact management.
-*   **Custom Metrics:** Integrate Drills' internal metrics (e.g., object pool statistics) into your application's monitoring system.
-*   **Application Logs:** Ensure your application logs rule engine errors, warnings, and significant events (e.g., rule compilation failures, critical rule firings).
+Use them for diagnostics and profiling, not as an excuse to leave noisy tracing enabled in normal production traffic.
 
-## 5. Build and Deployment
+## 7. Packaging
 
-### 5.1 Build Configuration
+Public install surface from this repo includes:
 
-*   **Release Builds:** Always deploy release builds of your application. Debug builds include extra assertions and debugging information that can significantly impact performance.
-*   **Compiler Optimizations:** Ensure your C++ compiler is configured for maximum optimization (`-O2`, `-O3` for GCC/Clang, `/O2` for MSVC).
+- C headers under `include/`
+- `rule_forge` shared library from `capi/`
+- exported CMake package files under `lib/cmake/RulesForge`
 
-### 5.2 Environment Variables
+If you are shipping RulesForge as a product dependency, treat that surface as the contract and keep private headers out of your downstream integration docs.
 
-*   **No specific Drills environment variables:** Drills does not rely on specific environment variables for its core operation. All configurations are typically done programmatically.
+## 8. Recommended Release Checklist
 
----
+- confirm build inputs for `TurboNet`, `TurboScript`, `TurboNet`, and `vcpkg`
+- compile rules in CI
+- run `ctest --output-on-failure`
+- exercise one JSON example and one CSV example
+- verify plugin binaries load if your rules depend on them
+- document the exact rule pack, plugin pack, and app version together
 
-## Next Steps
+## 9. Related Docs
 
-*   **[User Guide](USER_GUIDE.md)** - Get started with Drills and understand core concepts.
+- onboarding: [`QUICKSTART.md`](/C:/projects/cpp/rulesforge/docs/QUICKSTART.md)
+- product guide: [`USER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/USER_GUIDE.md)
+- exact DSL reference: [`dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md)
+- data loading practices: [`PRODUCTION_DATABIND_BEST_PRACTICES.md`](/C:/projects/cpp/rulesforge/docs/PRODUCTION_DATABIND_BEST_PRACTICES.md)

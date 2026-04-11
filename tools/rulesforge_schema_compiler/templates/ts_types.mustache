@@ -1,0 +1,16 @@
+{{#enums}}
+export enum {{name}} {
+{{#values}}
+  {{name}} = "{{name}}",
+{{/values}}
+}
+
+{{/enums}}
+{{#declarations}}
+export interface {{ts_name}} {
+{{#fields}}
+  {{name}}: {{{ts_type}}};
+{{/fields}}
+}
+
+{{/declarations}}

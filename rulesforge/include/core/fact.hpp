@@ -17,6 +17,7 @@ struct IndexAccess {
     bool is_integer;
     int64_t int_index;
     std::string str_index;
+    bool valid = true;
 };
 
 struct PathSegment {

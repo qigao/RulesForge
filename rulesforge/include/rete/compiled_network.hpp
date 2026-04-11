@@ -96,6 +96,7 @@ struct BetaCacheKey {
 
     // EvalNode specific
     std::string eval_expr;
+    std::map<std::string, std::string> eval_scalar_fields;
 
     bool operator==(BetaCacheKey const& o) const {
         return kind == o.kind
@@ -104,7 +105,8 @@ struct BetaCacheKey {
             && bindings == o.bindings
             && right_hash_field == o.right_hash_field
             && left_hash_info == o.left_hash_info
-            && eval_expr == o.eval_expr;
+            && eval_expr == o.eval_expr
+            && eval_scalar_fields == o.eval_scalar_fields;
     }
 };
 
@@ -138,6 +140,13 @@ struct BetaCacheHasher {
         if (!k.eval_expr.empty()) {
             h ^= std::hash<std::string>{}(k.eval_expr) + 0x9e3779b9 + (h << 6) + (h >> 2);
         }
+        size_t scalar_h = 0;
+        for (auto const& kv : k.eval_scalar_fields) {
+            size_t entry = std::hash<std::string>{}(kv.first) ^ (std::hash<std::string>{}(kv.second) << 1);
+            entry = (entry ^ (entry >> 16)) * 0x45d9f3b;
+            scalar_h ^= entry;
+        }
+        h ^= scalar_h + 0x9e3779b9 + (h << 6) + (h >> 2);
         return h;
     }
 };
@@ -426,6 +435,9 @@ private:
                 break;
             case NodeKind::Unnest:
                 node.mem_slot = mem_slot_counts.unnest++;
+                break;
+            case NodeKind::Window:
+                node.mem_slot = mem_slot_counts.window++;
                 break;
             default:
                 break; // Alpha, EntryPoint, QueryInput don't need mem_slot

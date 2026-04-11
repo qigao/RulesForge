@@ -49,6 +49,7 @@ private:
     int parameter_count_;
     std::shared_ptr<ReteNode> last_node_;
     std::map<std::string, int> binding_to_idx_;
+    std::map<std::string, std::string> inline_binding_to_field_;
 };
 
 #endif   // BETA_BUILDER_HPP

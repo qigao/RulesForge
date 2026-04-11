@@ -3,6 +3,8 @@
 
 #include "core/errors.hpp"
 #include "core/rfl_parser_state.hpp"
+#include "core/constraint_types.hpp"
+#include "core/parsed_rule.hpp"
 
 #include <map>
 #include <string>

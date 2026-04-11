@@ -1,101 +1,95 @@
-# Drills 规则引擎 - 部署指南
+# RulesForge 部署指南
 
-本指南提供了在各种环境中部署 Drills 规则引擎的实用建议和配置示例，重点关注性能、内存管理、安全性以及操作最佳实践。
+此文只談現碼所真有者，不談紙上完美架構。
 
-## 1. 内存管理
+## 1. 編譯一次，重用多次
 
-高效的内存使用对于高性能规则执行至关重要。
+建議之生產形態如下：
 
-### 1.1 事实对象大小
+- 將規則編譯為一個 `KnowledgeBase`
+- 在初始化階段註冊 native function 與 codec
+- 由此 knowledge base 建立多個短生命或可池化之 `StatefulSession`
 
-* **理解您的事实结构：** 每个 `Fact` 对象（或通过 `FAST_CUSTOMER()` 等创建的 `Fact` 实例）都会消耗内存。大小取决于它包含的字段数量和类型。
-* **最小化不必要的数据：** 您的事实中只包含与规则匹配或操作相关的数据。避免存储大型二进制数据或大量文本，如果规则不直接使用它们。
-* **使用优化类型：** Drills 提供了优化的事实构建器（例如 `memory_optimized_types.hpp` 中的 `FAST_CUSTOMER()`），它们利用对象池和字符串驻留来减少频繁创建事实的内存开销。尽可能优先使用这些而不是通用的 `Fact` 对象。
+若每個請求都重編同一套規則，那不是架構，是浪費 CPU。
 
-### 1.2 会话管理
+## 2. 執行緒安全
 
-* **短生命周期会话：** 对于事务性、请求-响应式应用程序，为每个请求/事务创建一个 `StatefulSession`。这确保了处理后内存能够快速释放。
-* **长生命周期会话（注意）：** 如果您维护长生命周期会话（例如，用于连续事件处理），您 *必须* 主动管理事实。使用 `session->retract_fact()` 或 `session->retract_facts_of_type()` 来移除不再相关的事实，以防止内存泄漏。
-* **对象池：** Drills 使用内部对象池。监控它们的用法（参见 `memory_optimization_demo.cpp` 中的 `PoolStatsCollector`）以了解内存分配模式。
+當前契約：
 
-### 1.3 堆配置
+- `KnowledgeBase`：僅於初始化完成後可安全共享
+- `StatefulSession`：非 thread-safe
 
-* **C++ 运行时：** 确保您的 C++ 应用程序的堆已根据预期负载进行适当配置。使用系统工具（例如 `top`、`perf`、`Valgrind`）监控内存使用情况。
-* **表达式运行时堆：** 表达式求值有独立运行时内存开销。请留意复杂表达式带来的临时分配。
+實務規則：
 
-## 2. 安全注意事项
+- 每個 worker thread、請求、或消息流，各用一個 session
 
-保护您的规则引擎部署涉及保护规则源、事实数据和运行时执行。
+## 3. 資料載入怎麼選
 
-### 2.1 规则源完整性
+每個整合邊界只選一條平實路徑：
 
-* **受信任的来源：** 仅从受信任和验证的来源加载规则。恶意规则仍可能通过规则动作触发非预期副作用。
-* **访问控制：** 对您的规则定义文件（RFL、决策表的 CSV）实施严格的访问控制。
-* **版本控制：** 将规则定义存储在版本控制系统（例如 Git）中，以跟踪更改并启用回滚。
+- JSON：一般服務整合
+- CSV：批量或離線載入
+- binary：僅在汝已掌控 codec 且確實在乎吞吐時再用
 
-### 2.2 事实数据敏感性
+若汝的整合根本不需要三種都上，就別把三種都寫進產品文檔。
 
-* **最小化敏感数据：** 避免将高度敏感数据（例如完整的信用卡号、密码）直接插入事实中，除非规则评估绝对必要。
-* **令牌化/加密：** 如果必须存在敏感数据，请在将其插入事实之前对其进行令牌化或加密，并且仅在受信任的操作绝对需要时才解密/解令牌。
-* **数据掩码：** 对于日志记录或跟踪，掩码敏感数据以防止意外暴露。
+## 4. 驗證與失敗模式
 
-### 2.3 运行时扩展面
+RulesForge 經由 C API 提供 session 驗證模式與逐次呼叫狀態碼。
 
-* **有限暴露：** 暴露给运行时的原生扩展函数应最小化且安全。除非明确必要并已加固，否则不要暴露文件系统或网络操作。
+生產建議：
 
-## 3. 并发和线程安全
+- 盡早拒收不合法事實
+- 在 CI 保留代表性樣本 payload
+- 規則編譯錯誤不要用 fallback 蓋掉
 
-理解 Drills 的并发模型对于多线程应用程序至关重要。
+正確之失敗模式，通常是「載入或測試時立即失敗」，而非「偷偷補預設值」。
 
-* **`KnowledgeBase` (线程安全)：** 已编译的 `KnowledgeBase` 是不可变的且线程安全的。您可以安全地在多个线程之间共享单个 `KnowledgeBase` 实例。
-* **`StatefulSession` (非线程安全)：** `StatefulSession` 表示工作内存，并且 *不是* 线程安全的。每个线程或并发请求 *必须* 从共享的 `KnowledgeBase` 创建自己的 `StatefulSession` 实例。
+## 5. 原生擴展
 
-    ```cpp
-    // 示例：线程安全用法
-    std::shared_ptr<KnowledgeBase> shared_kb = build_knowledge_base(...); // 构建一次
+有兩種擴展面：
 
-    // 在线程 1 中
-    auto session1 = shared_kb->create_session();
-    session1->add_fact(...);
-    session1->fire_all_rules();
+- 載入到 knowledge base 的 native RHS 函數
+- 依 [`include/rule_forge_plugin.h`](/C:/projects/cpp/rulesforge/include/rule_forge_plugin.h) 實作之 source/sink 外掛
 
-    // 在线程 2 中
-    auto session2 = shared_kb->create_session();
-    session2->add_fact(...);
-    session2->fire_all_rules();
-    ```
+運維原則：
 
-* **批处理：** 对于高吞吐量场景，考虑批处理事实插入（`session->add_facts()`）以最小化上下文切换和 Rete 网络传播开销。
+- callback 要可預測
+- 規則觸發之程式內，盡量限制外部 I/O
+- plugin binary 應與依賴它的 rule pack 一同版控
 
-## 4. 日志和监控
+## 6. 可觀測性
 
-有效的日志和监控对于调试、性能调优和操作可见性至关重要。
+C++ runtime 已提供：
 
-### 4.1 规则执行跟踪
+- 規則執行追蹤
+- 規則效能摘要
+- session 指標匯出器
 
-* **启用跟踪：** 使用 `session->enable_tracing(true)` 获取规则激活、事实插入/撤销和规则执行时间的详细日志。这对于调试规则逻辑非常宝贵。
-* **性能摘要：** 在 `fire_all_rules()` 之后，检索 `session->get_rule_performance_summary()` 以识别缓慢或频繁执行的规则。
-* **生产使用：** 跟踪可能冗长且对性能有影响。在生产中谨慎使用，或许只在特定问题会话或调试期间启用。
+它們是診斷與剖析工具，不是長期把高噪音 tracing 開在生產流量上的藉口。
 
-### 4.2 系统级监控
+## 7. 打包
 
-* **CPU/内存：** 监控应用程序的 CPU 和内存使用情况。峰值可能表示规则设计或事实管理效率低下。
-* **自定义指标：** 将 Drills 的内部指标（例如，对象池统计信息）集成到应用程序的监控系统中。
-* **应用程序日志：** 确保您的应用程序记录规则引擎错误、警告和重要事件（例如，规则编译失败、关键规则触发）。
+此倉目前對外安裝面主要有：
 
-## 5. 构建和部署
+- `include/` 下之 C 頭檔
+- `capi/` 產生之 `rule_forge` 共享庫
+- `lib/cmake/RulesForge` 下之 CMake package 檔
 
-### 5.1 构建配置
+若汝將 RulesForge 當產品依賴發行，便應以此為契約，勿把私有頭檔混進下游整合文檔。
 
-* **发布构建：** 始终部署应用程序的发布构建。调试构建包含额外的断言和调试信息，这可能会显著影响性能。
-* **编译器优化：** 确保您的 C++ 编译器配置为最大优化（GCC/Clang 为 `-O2`、`-O3`，MSVC 为 `/O2`）。
+## 8. 建議發版檢查表
 
-### 5.2 环境变量
+- 確認 `TurboNet`、`TurboScript`、`TurboNet`、`vcpkg` 之構建輸入
+- 在 CI 編譯規則
+- 執行 `ctest --output-on-failure`
+- 至少驗證一個 JSON 示例與一個 CSV 示例
+- 若規則依賴 plugin，驗證 plugin binary 可載入
+- 將 rule pack、plugin pack、應用版本一併記錄
 
-* **没有特定的 Drills 环境变量：** Drills 不依赖特定的环境变量进行其核心操作。所有配置通常都是通过编程方式完成的。
+## 9. 相關文檔
 
----
-
-## 下一步
-
-* **[用户指南](USER_GUIDE.md)** - 开始使用 Drills 并理解核心概念。
+- 上手：[`QUICKSTART.md`](/C:/projects/cpp/rulesforge/docs/zh-CN/QUICKSTART.md)
+- 產品指南：[`USER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/zh-CN/USER_GUIDE.md)
+- 精確 DSL：[`../dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md)
+- 資料載入實務：[`../PRODUCTION_DATABIND_BEST_PRACTICES.md`](/C:/projects/cpp/rulesforge/docs/PRODUCTION_DATABIND_BEST_PRACTICES.md)

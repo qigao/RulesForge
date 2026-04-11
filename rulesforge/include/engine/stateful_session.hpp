@@ -80,14 +80,9 @@ public:
 
   // --- User-facing Runtime API ---
   void add_fact(Fact* fact) override;
-  void add_fact(std::shared_ptr<Fact> const& fact) { add_fact(fact.get()); }
+  void add_fact(std::shared_ptr<Fact> const& fact);
   void add_facts(std::vector<Fact*> const& facts);
-  void add_facts(std::vector<std::shared_ptr<Fact>> const& facts) {
-      std::vector<Fact*> raw;
-      raw.reserve(facts.size());
-      for (auto& f : facts) raw.push_back(f.get());
-      add_facts(raw);
-  }
+  void add_facts(std::vector<std::shared_ptr<Fact>> const& facts);
 
   /**
    * @brief Unified data ingestion interface
@@ -168,6 +163,7 @@ public:
   ValidationMode get_validation_mode() const { return validation_mode_; }
 
   bool has_type_declaration(std::string const& type_name) const;
+  std::string canonicalize_fact_type_name(std::string const& type_name) const;
 
   // Rule execution tracing
   RuleExecutionTracer& get_tracer() { return tracer_; }
@@ -223,11 +219,7 @@ public:
   void logical_insert(Token& token, Fact* fact) override;
   Fact* logical_insert(Fact const& fact) override;
 
-  Fact* create_fact(std::string const& type) override {
-      Fact* f = fact_arena_.create_fact();
-      f->type = type;
-      return f;
-  }
+  Fact* create_fact(std::string const& type) override;
 
   inline TokenWME const* get_or_create_wme(
       TokenWME const* parent_wme, Fact const* fact)
@@ -295,6 +287,8 @@ public:
   bool is_deferred_mode() const { return deferred_mode_; }
 
 private:
+  void retain_shared_fact(std::shared_ptr<Fact> const& fact);
+  void release_retained_fact(int64_t fact_id);
   void ensure_consistent_for_mutation(char const* operation) const;
   void validate_fact_for_insert(Fact const& fact) const;
   void prime_network_state();
@@ -323,6 +317,7 @@ private:
   TokenWME const* dummy_wme_ = nullptr;
   TokenWMECache wme_cache_;
   WorkingMemory working_memory_;
+  std::unordered_map<int64_t, std::shared_ptr<Fact>> retained_shared_facts_;
   Activation const* current_activation_ = nullptr;
   Agenda agenda_;
   std::vector<std::shared_ptr<IEngineListener>> listeners_;

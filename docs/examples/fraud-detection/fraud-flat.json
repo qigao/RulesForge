@@ -1,0 +1,216 @@
+{
+  "accountProfiles": [
+    {
+      "accountId": "ACC-001",
+      "accountType": "checking",
+      "avgMonthlySpend": 2500,
+      "avgTransactionAmount": 85,
+      "primaryCountry": "US",
+      "lastKnownLatitude": 37.7749,
+      "lastKnownLongitude": -122.4194,
+      "lastTransactionTime": 1704067200000
+    },
+    {
+      "accountId": "ACC-002",
+      "accountType": "credit",
+      "avgMonthlySpend": 5000,
+      "avgTransactionAmount": 150,
+      "primaryCountry": "US",
+      "lastKnownLatitude": 40.7128,
+      "lastKnownLongitude": -74.006,
+      "lastTransactionTime": 1704063600000
+    },
+    {
+      "accountId": "ACC-003",
+      "accountType": "business",
+      "avgMonthlySpend": 25000,
+      "avgTransactionAmount": 500,
+      "primaryCountry": "US",
+      "lastKnownLatitude": 34.0522,
+      "lastKnownLongitude": -118.2437,
+      "lastTransactionTime": 1704060000000
+    }
+  ],
+  "highRiskCountries": [
+    {
+      "countryCode": "NG",
+      "riskLevel": "high"
+    },
+    {
+      "countryCode": "RO",
+      "riskLevel": "high"
+    }
+  ],
+  "transactions": [
+    {
+      "transactionId": "TXN-NORM-001",
+      "accountId": "ACC-001",
+      "amount": 75.5,
+      "merchantCountry": "US",
+      "merchantCity": "San Francisco",
+      "channel": "pos",
+      "timestamp": 1704070800000,
+      "latitude": 37.7849,
+      "longitude": -122.4094
+    },
+    {
+      "transactionId": "TXN-TEST-001",
+      "accountId": "ACC-001",
+      "amount": 1.0,
+      "merchantCountry": "US",
+      "channel": "online",
+      "timestamp": 1704070800000
+    },
+    {
+      "transactionId": "TXN-TEST-002",
+      "accountId": "ACC-001",
+      "amount": 1.0,
+      "merchantCountry": "US",
+      "channel": "online",
+      "timestamp": 1704070810000
+    },
+    {
+      "transactionId": "TXN-TEST-003",
+      "accountId": "ACC-001",
+      "amount": 1.0,
+      "merchantCountry": "US",
+      "channel": "online",
+      "timestamp": 1704070820000
+    },
+    {
+      "transactionId": "TXN-TEST-004",
+      "accountId": "ACC-001",
+      "amount": 1.0,
+      "merchantCountry": "US",
+      "channel": "online",
+      "timestamp": 1704070830000
+    },
+    {
+      "transactionId": "TXN-TEST-005",
+      "accountId": "ACC-001",
+      "amount": 1.0,
+      "merchantCountry": "US",
+      "channel": "online",
+      "timestamp": 1704070840000
+    },
+    {
+      "transactionId": "TXN-TEST-006",
+      "accountId": "ACC-001",
+      "amount": 500.0,
+      "merchantCountry": "US",
+      "channel": "online",
+      "timestamp": 1704070850000
+    },
+    {
+      "transactionId": "TXN-TRAVEL-001",
+      "accountId": "ACC-001",
+      "amount": 200.0,
+      "merchantCountry": "GB",
+      "merchantCity": "London",
+      "channel": "pos",
+      "timestamp": 1704069000000,
+      "latitude": 51.5074,
+      "longitude": -0.1278
+    },
+    {
+      "transactionId": "TXN-COUNTRY-001",
+      "accountId": "ACC-002",
+      "amount": 3000.0,
+      "merchantCountry": "NG",
+      "merchantCity": "Lagos",
+      "channel": "online",
+      "timestamp": 1704074400000,
+      "latitude": 6.5244,
+      "longitude": 3.3792
+    },
+    {
+      "transactionId": "TXN-ATM-001",
+      "accountId": "ACC-001",
+      "amount": 400.0,
+      "merchantCountry": "US",
+      "channel": "atm",
+      "timestamp": 1704070800000
+    },
+    {
+      "transactionId": "TXN-ATM-002",
+      "accountId": "ACC-001",
+      "amount": 400.0,
+      "merchantCountry": "US",
+      "channel": "atm",
+      "timestamp": 1704071100000
+    },
+    {
+      "transactionId": "TXN-ATM-003",
+      "accountId": "ACC-001",
+      "amount": 400.0,
+      "merchantCountry": "US",
+      "channel": "atm",
+      "timestamp": 1704071400000
+    },
+    {
+      "transactionId": "TXN-ATM-004",
+      "accountId": "ACC-001",
+      "amount": 400.0,
+      "merchantCountry": "US",
+      "channel": "atm",
+      "timestamp": 1704071700000
+    },
+    {
+      "transactionId": "TXN-STRUCT-001",
+      "accountId": "ACC-003",
+      "amount": 9500.0,
+      "merchantCountry": "US",
+      "channel": "pos",
+      "timestamp": 1704070800000
+    },
+    {
+      "transactionId": "TXN-STRUCT-002",
+      "accountId": "ACC-003",
+      "amount": 9800.0,
+      "merchantCountry": "US",
+      "channel": "pos",
+      "timestamp": 1704074400000
+    },
+    {
+      "transactionId": "TXN-STRUCT-003",
+      "accountId": "ACC-003",
+      "amount": 9999.0,
+      "merchantCountry": "US",
+      "channel": "pos",
+      "timestamp": 1704078000000
+    },
+    {
+      "transactionId": "TXN-ATO-001",
+      "accountId": "ACC-001",
+      "amount": 2500.0,
+      "merchantCountry": "RO",
+      "merchantCity": "Bucharest",
+      "channel": "online",
+      "timestamp": 1704070800000,
+      "latitude": 44.4268,
+      "longitude": 26.1025
+    },
+    {
+      "transactionId": "TXN-ATO-002",
+      "accountId": "ACC-001",
+      "amount": 2500.0,
+      "merchantCountry": "RO",
+      "merchantCity": "Bucharest",
+      "channel": "online",
+      "timestamp": 1704070920000,
+      "latitude": 44.4268,
+      "longitude": 26.1025
+    },
+    {
+      "transactionId": "TXN-ATO-003",
+      "accountId": "ACC-001",
+      "amount": 2500.0,
+      "merchantCountry": "RO",
+      "merchantCity": "Bucharest",
+      "channel": "online",
+      "timestamp": 1704071040000,
+      "latitude": 44.4268,
+      "longitude": 26.1025
+    }
+  ]
+}

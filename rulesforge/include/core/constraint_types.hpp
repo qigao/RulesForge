@@ -264,6 +264,7 @@ struct ParsedDeclaration {
 
 struct ParsedEnum {
     std::string enum_name;
+    std::string underlying_type = "int";  /* default int32 */
     std::vector<std::string> values;
     std::string source_package;
 };

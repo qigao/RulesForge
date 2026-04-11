@@ -19,16 +19,16 @@ namespace
 int calculate_levenshtein_distance(std::string const& s1, std::string const& s2)
 {
   logd("Calculating Levenshtein distance between '{}' and '{}'", s1, s2);
-  int const n = s1.length();
-  int const m = s2.length();
+  size_t const n = s1.length();
+  size_t const m = s2.length();
   std::vector<int> p(m + 1);
   std::vector<int> d(m + 1);
-  for (int i = 0; i <= m; i++) {
-    p[i] = i;
+  for (size_t i = 0; i <= m; i++) {
+    p[i] = static_cast<int>(i);
   }
-  for (int j = 1; j <= n; j++) {
-    d[0] = j;
-    for (int i = 1; i <= m; i++) {
+  for (size_t j = 1; j <= n; j++) {
+    d[0] = static_cast<int>(j);
+    for (size_t i = 1; i <= m; i++) {
       int const cost = (s1[j - 1] == s2[i - 1]) ? 0 : 1;
       d[i] = std::min({p[i] + 1, d[i - 1] + 1, p[i - 1] + cost});
     }

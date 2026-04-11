@@ -98,6 +98,7 @@ public:
                                                StringViewHash>::const_iterator it) {
     map_.erase(it);
   }
+  void reserve(size_t count) { map_.reserve(count); }
   void clear() { map_.clear(); }
 };
 
@@ -152,6 +153,7 @@ public:
 
   size_t size() const { return map_.size(); }
   bool empty() const { return map_.empty(); }
+  void reserve(size_t count) { map_.reserve(count); }
   void clear() { map_.clear(); }
 
   // Insert overloads

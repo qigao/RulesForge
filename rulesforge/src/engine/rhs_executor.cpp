@@ -5,13 +5,27 @@
 #include "core/logging_control.hpp"
 
 #include <atomic>
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <ctime>
 #include <limits>
 #include <stdexcept>
+#include <variant>
+#include <optional>
+#include <vector>
+#include <string>
+#include <iostream>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 namespace rulesforge {
 namespace {
@@ -46,8 +60,9 @@ double constraint_value_to_double(ConstraintValue const& value) {
             return arg;
         } else if constexpr (std::is_same_v<T, std::string>) {
             try { return std::stod(arg); } catch (...) { return 0.0; }
+        } else {
+            return 0.0;
         }
-        return 0.0;
     }, value);
 }
 
@@ -319,14 +334,19 @@ void RhsExecutor::execute_if(CompiledAction const& action) {
     }
 
     auto t0 = std::chrono::steady_clock::now();
-    double result = action.condition->evaluate([this](std::string const& var) { return resolve_variable(var); });
+    ConstraintValue result_val = action.condition->evaluate([this](std::string const& var) { return resolve_variable(var); });
     auto t1 = std::chrono::steady_clock::now();
     g_condition_eval_us.fetch_add(
         static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count()),
         std::memory_order_relaxed);
 
+    bool is_truthy = false;
+    if (auto* d = std::get_if<double>(&result_val)) is_truthy = (*d != 0.0);
+    else if (auto* i = std::get_if<int64_t>(&result_val)) is_truthy = (*i != 0);
+    else if (auto* s = std::get_if<std::string>(&result_val)) is_truthy = (!s->empty() && *s != "false" && *s != "0");
+    else if (!std::holds_alternative<NilValue>(result_val)) is_truthy = true;
 
-    if (result != 0.0) {
+    if (is_truthy) {
         for (auto const& then_action : action.then_actions) {
             execute_action(then_action);
         }
@@ -437,13 +457,19 @@ void RhsExecutor::execute_while(CompiledAction const& action) {
 
     while (iterations < max_iter) {
         auto t0 = std::chrono::steady_clock::now();
-        double result = action.condition->evaluate([this](std::string const& var) { return resolve_variable(var); });
+        ConstraintValue result_val = action.condition->evaluate([this](std::string const& var) { return resolve_variable(var); });
         auto t1 = std::chrono::steady_clock::now();
         g_condition_eval_us.fetch_add(
             static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count()),
             std::memory_order_relaxed);
 
-        if (result == 0.0) break;
+        bool is_truthy = false;
+        if (auto* d = std::get_if<double>(&result_val)) is_truthy = (*d != 0.0);
+        else if (auto* i = std::get_if<int64_t>(&result_val)) is_truthy = (*i != 0);
+        else if (auto* s = std::get_if<std::string>(&result_val)) is_truthy = (!s->empty() && *s != "false" && *s != "0");
+        else if (!std::holds_alternative<NilValue>(result_val)) is_truthy = true;
+
+        if (!is_truthy) break;
 
         for (auto const& body_action : action.body_actions) {
             execute_action(body_action);
@@ -474,7 +500,7 @@ void RhsExecutor::execute_switch(CompiledAction const& action) {
     }
 
     auto t0 = std::chrono::steady_clock::now();
-    double switch_value = action.switch_expr->evaluate([this](std::string const& var) {
+    ConstraintValue switch_value = action.switch_expr->evaluate([this](std::string const& var) {
         return resolve_variable(var);
     });
     auto t1 = std::chrono::steady_clock::now();
@@ -494,7 +520,7 @@ void RhsExecutor::execute_switch(CompiledAction const& action) {
 
         if (sc.value) {
             auto t2 = std::chrono::steady_clock::now();
-            double case_value = sc.value->evaluate([this](std::string const& var) {
+            ConstraintValue case_value = sc.value->evaluate([this](std::string const& var) {
                 return resolve_variable(var);
             });
             auto t3 = std::chrono::steady_clock::now();
@@ -502,7 +528,17 @@ void RhsExecutor::execute_switch(CompiledAction const& action) {
                 static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count()),
                 std::memory_order_relaxed);
 
-            if (switch_value == case_value) {
+            bool matched_case = false;
+            // Handle numeric type coercion implicitly if needed, else exact match
+            if (std::holds_alternative<double>(switch_value) && std::holds_alternative<int64_t>(case_value)) {
+                matched_case = (std::get<double>(switch_value) == static_cast<double>(std::get<int64_t>(case_value)));
+            } else if (std::holds_alternative<int64_t>(switch_value) && std::holds_alternative<double>(case_value)) {
+                matched_case = (static_cast<double>(std::get<int64_t>(switch_value)) == std::get<double>(case_value));
+            } else {
+                matched_case = (switch_value == case_value);
+            }
+
+            if (matched_case) {
                 matched = true;
                 for (auto const& case_action : sc.actions) {
                     execute_action(case_action);
@@ -536,14 +572,9 @@ ConstraintValue RhsExecutor::evaluate_assignment(FieldAssignment const& assign) 
     switch (assign.type) {
         case RhsValueType::NUMERIC:
             if (assign.numeric_expr) {
-                double result = assign.numeric_expr->evaluate([this](std::string const& var) {
+                ConstraintValue result = assign.numeric_expr->evaluate([this](std::string const& var) {
                     return resolve_variable(var);
                 });
-                // Check if result is integer
-                if (result == std::floor(result) && result >= std::numeric_limits<int64_t>::min()
-                    && result <= std::numeric_limits<int64_t>::max()) {
-                    return static_cast<int64_t>(result);
-                }
                 return result;
             }
             return 0.0;
@@ -665,7 +696,7 @@ ConstraintValue RhsExecutor::parse_native_result(char const* out_result) const {
     return raw;
 }
 
-double RhsExecutor::resolve_variable(std::string const& var_name) {
+ConstraintValue RhsExecutor::resolve_variable(std::string const& var_name) {
     // Handle $var.field format
     size_t dot_pos = var_name.find('.');
     std::string base_var = (dot_pos != std::string::npos) ? var_name.substr(0, dot_pos) : var_name;
@@ -673,17 +704,17 @@ double RhsExecutor::resolve_variable(std::string const& var_name) {
 
     auto fact = get_bound_fact(base_var);
     if (fact) {
-        if (field_name == "this" || field_name == "id") {
-            return static_cast<double>(fact->id);
+        if (field_name == "this") {
+            return NilValue{}; // Handle properly if needed
         }
 
         auto field_val = fact->get_field(field_name);
         if (!field_val) {
             logw("RhsExecutor: Field '{}' not found on '{}'", field_name, base_var);
-            return 0.0;
+            return NilValue{};
         }
 
-        return constraint_value_to_double(*field_val);
+        return *field_val;
     }
 
     auto global_val = get_global_value(base_var);

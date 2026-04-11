@@ -4,11 +4,11 @@ This document describes the DSL supported by the current parser and runtime.
 If this doc conflicts with code, code wins.
 
 Primary references:
-- `rulesforge/src/rfl_grammar_lemon.y`
-- `rulesforge/src/parser/rhs_parser.cpp`
-- `rulesforge/src/parser/semantic_analyzer.cpp`
-- `rulesforge/src/parser/expression_evaluator.cpp`
-- parser tests under `rulesforge/test/parser/`
+- `parser/parser/rfl_grammar_lemon.y`
+- `parser/src/rhs_parser.cpp`
+- `parser/src/semantic_analyzer.cpp`
+- `parser/src/expression_evaluator.cpp`
+- parser tests under `parser/tests/`
 
 ## 1. File Structure
 
@@ -54,6 +54,29 @@ then
     insert AuditLog { msg = "hit" }
 end
 ```
+
+Notes:
+- Qualified names used by `package`, `import`, globals, and type references may contain segments such as `time`, `length`, and `window`.
+- Duration literals supported by the parser are `ms`, `s`, `m`, and `h`.
+
+## 1.2 Import Forms
+
+Standard namespace imports are accepted:
+
+```rfl
+import com.example.model.Customer
+import com.example.model.*
+```
+
+Binary codec imports are also supported:
+
+```rfl
+import binary codec "Person" from "plugins/person_codec.dll"
+```
+
+Runtime note:
+- the KnowledgeBase loads imported binary codecs during build
+- build fails if the DLL or exported codec symbol cannot be loaded
 
 ## 1.1 Globals
 
@@ -286,6 +309,32 @@ $total: Number() from accumulate(
 )
 ```
 
+Accumulate source patterns also support sliding-window declarations:
+
+```rfl
+$count: Number() from accumulate(
+    Event() over window:length(5),
+    count()
+)
+
+$recent: Number() from accumulate(
+    Event() over window:time(60s),
+    count()
+)
+
+$recentMs: Number() from accumulate(
+    Event() over window:time(50),
+    count()
+)
+```
+
+Window notes:
+- `over window:length(N)` keeps the latest `N` matching facts.
+- `over window:time(X)` accepts either a duration literal such as `60s` or a bare integer in milliseconds such as `50`.
+- Time windows use the fact `timestamp` field when present.
+- `count()` counts matching source facts directly.
+- `count(1)` is also accepted and is equivalent for counting matches.
+
 Also supports arithmetic expression in accumulate argument:
 
 ```rfl
@@ -339,12 +388,17 @@ $r: Row() from csv(file("data/orders.csv"), "amount > 100")
 
 **Recommended approach**:
 ```cpp
-// Load data in C++
-session->add_data(DataSource::csv("data/orders.csv", "amount > 100"));
+// Load data from a CSV file path in C++
+session->add_data(DataSource::csv("data/orders.csv"));
 
 // Simplified rule
 $r: Row()
 ```
+
+Note:
+- `DataSource::csv(...)` currently reads CSV from a file path
+- its `filter` parameter is accepted by the API but is not applied by `add_data()`
+- `DataSource::dsv(...)` is not implemented in `add_data()`
 
 6. `from entry-point "stream-name"`
 
@@ -446,13 +500,23 @@ Expression syntax in RHS supports:
 - function call style: `fn(arg1, arg2)`
 - constants: `pi`, `e`, `inf`, `epsilon`
 
-Built-in expression functions (from `ExpressionEvaluator`):
+Built-in expression functions (current runtime support):
 - basic/math: `abs ceil floor round trunc sgn frac sqrt pow root exp log log2 log10`
 - trig/hyperbolic: `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh`
 - comparison/range: `min max clamp inrange`
 - aggregate: `avg sum mul`
 - special: `erf erfc ncdf hypot mod fmod expm1 log1p logn`
 - conditional: `if(cond, a, b)`
+- string: `strlen substr trim replace indexOf contains upper lower toUpper toLower`
+
+RHS parser compatibility aliases:
+- `concat(a, b, c)` is supported and rewritten to string concatenation: `(a + b + c)`
+- `to_upper(x)` is normalized to `upper(x)`
+- `to_lower(x)` is normalized to `lower(x)`
+
+Practical note:
+- document only functions that the current parser accepts and the current runtime actually registers
+- do not assume the entire upstream ExprTk function surface is available unless it is wired here
 
 ### 5.4 Native Function and DLL Function Table Support
 
@@ -478,8 +542,8 @@ Runtime resolution:
 4. call native callback
 
 See full C API examples:
-- `capi/examples/CAPI_NATIVE_DLL_EN.md`
-- `capi/examples/NATIVE_FUNCTIONS.md`
+- `plugins/examples/CAPI_NATIVE_DLL_EN.md`
+- `plugins/examples/NATIVE_FUNCTIONS.md`
 
 ## 5.5 Data Ingestion API
 
@@ -494,19 +558,29 @@ RulesForge provides a unified `add_data()` API for loading data from multiple so
 session->add_data(fact);
 session->add_data(DataSource::fact(fact));
 
-// Add from JSON
+// Add one fact from a JSON object
 std::string json_content = read_file("orders.json");
+session->add_data(DataSource::json(json_content));
+
+// Apply JMESPath and add one fact per extracted object
 session->add_data(DataSource::json(json_content, "orders[*]"));
 
-// Add from CSV
-session->add_data(DataSource::csv("data.csv", "amount > 100"));
+// Add from CSV file path
+session->add_data(DataSource::csv("data/orders.csv"));
 
-// Add from DSV
-session->add_data(DataSource::dsv(dsv_content, "filter_expr"));
-
-// Add from binary (future)
+// Add from binary buffer
 session->add_data(DataSource::binary(buffer));
 ```
+
+Current runtime behavior:
+- `add_data(JSON/CSV/BINARY)` infers the target declaration type
+- inference prefers a declaration named `Row`
+- otherwise exactly one declaration must exist, or `add_data()` throws
+- `DataSource::json(content, "expr")` applies JMESPath before parsing
+- `DataSource::csv(path)` reads the file content at `path`
+- `DataSource::csv(path, filter)` accepts `filter`, but `add_data()` does not apply it yet
+- `DataSource::dsv(...)` is not implemented in `add_data()`
+- `DataSource::binary(buffer)` requires declarations or imported binary codecs to be loaded into the `KnowledgeBase`
 
 ### Migration from `from` clauses
 
@@ -600,3 +674,4 @@ query "VipOrders"
     $o: Order(tier == "VIP")
 end
 ```
+

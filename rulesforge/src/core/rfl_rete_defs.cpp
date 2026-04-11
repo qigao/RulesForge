@@ -39,7 +39,19 @@ bool ConstraintValueCompare::operator()(ConstraintValue const& a, ConstraintValu
         } else if constexpr (std::is_same_v<T, double>) {
             return val_a < val_b;
         } else if constexpr (std::is_same_v<T, FactList>) {
-            return false;  // FactLists are not comparable
+            auto fact_key = [](Fact const* fact) {
+                if (!fact) return std::pair<int64_t, uintptr_t>{0, 0};
+                if (fact->id != 0) {
+                    return std::pair<int64_t, uintptr_t>{fact->id, 0};
+                }
+                return std::pair<int64_t, uintptr_t>{0, reinterpret_cast<uintptr_t>(fact)};
+            };
+            return std::lexicographical_compare(
+                val_a.facts.begin(), val_a.facts.end(),
+                val_b.facts.begin(), val_b.facts.end(),
+                [&fact_key](Fact const* lhs, Fact const* rhs) {
+                    return fact_key(lhs) < fact_key(rhs);
+                });
         } else if constexpr (std::is_same_v<T, NilValue>) {
             return false;  // All nils are equal
         } else if constexpr (std::is_same_v<T, std::shared_ptr<TypedList>>) {
@@ -74,9 +86,40 @@ bool ConstraintValueCompare::operator()(ConstraintValue const& a, ConstraintValu
                 ++it_b;
             }
             return it_a == val_a->entries.end() && it_b != val_b->entries.end();
+        } else {
+            return false;
         }
-        return false;
     }, a);
+}
+
+bool operator==(FactList const& a, FactList const& b) {
+    if (a.facts.size() != b.facts.size()) {
+        return false;
+    }
+
+    auto same_fact = [](Fact const* lhs, Fact const* rhs) {
+        if (lhs == rhs) {
+            return true;
+        }
+        if (!lhs || !rhs) {
+            return false;
+        }
+        if (lhs->id != 0 && rhs->id != 0) {
+            return lhs->id == rhs->id;
+        }
+        return lhs == rhs;
+    };
+
+    for (size_t i = 0; i < a.facts.size(); ++i) {
+        if (!same_fact(a.facts[i], b.facts[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool operator!=(FactList const& a, FactList const& b) {
+    return !(a == b);
 }
 
 ParsedConstraint::ParsedConstraint(ParsedConstraint const& other)
@@ -136,13 +179,11 @@ bool ParsedConstraint::operator==(ParsedConstraint const& other) const {
         if (t1.window_ms != t2.window_ms) return false;
     }
 
-    // Check compiled expressions - compare by expression string for sharing
+    // Compiled expressions are parser-owned implementation details.
+    // Keep core equality at the structural level and only compare presence.
     bool this_has_expr = (compiled_expr != nullptr);
     bool other_has_expr = (other.compiled_expr != nullptr);
     if (this_has_expr != other_has_expr) return false;
-    if (this_has_expr && compiled_expr->expression_string() != other.compiled_expr->expression_string()) {
-        return false;
-    }
 
     return true;
 }
@@ -190,8 +231,9 @@ std::string to_string(ConstraintValue const& val) {
                     first = false;
                 }
                 return result + "}";
+            } else {
+                return "UNKNOWN";
             }
-            return "UNKNOWN";
         },
         val);
 }
@@ -227,7 +269,18 @@ std::size_t ConstraintValueHasher::operator()(ConstraintValue const& v) const {
     return std::visit(
         [](auto const& arg) {
             using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, FactList> || std::is_same_v<T, NilValue>) {
+            if constexpr (std::is_same_v<T, FactList>) {
+                size_t h = 0;
+                for (auto const* fact : arg.facts) {
+                    size_t fact_hash = 0;
+                    if (fact) {
+                        fact_hash = fact->id != 0 ? std::hash<int64_t>{}(fact->id)
+                                                  : std::hash<uintptr_t>{}(reinterpret_cast<uintptr_t>(fact));
+                    }
+                    h ^= fact_hash + 0x9e3779b9 + (h << 6) + (h >> 2);
+                }
+                return h;
+            } else if constexpr (std::is_same_v<T, NilValue>) {
                 return (size_t)0;
             } else if constexpr (std::is_same_v<T, std::shared_ptr<TypedList>>) {
                 if (!arg) return (size_t)0;
@@ -291,7 +344,7 @@ std::size_t ConstraintValueHasher::operator()(ConstraintValue const& v) const {
                 try {
                     idx.int_index = std::stoll(index_str);
                 } catch (...) {
-                    idx.int_index = 0;  // Default to 0 on parse error
+                    idx.valid = false;
                 }
             }
             result.indices.push_back(idx);
@@ -359,6 +412,9 @@ std::size_t ConstraintValueHasher::operator()(ConstraintValue const& v) const {
 
     // Apply index access to a ConstraintValue
     std::optional<ConstraintValue> apply_index(ConstraintValue const& val, IndexAccess const& idx, bool null_safe) {
+        if (!idx.valid) {
+            return std::nullopt;
+        }
         if (std::holds_alternative<FactList>(val)) {
             FactList const& fl = std::get<FactList>(val);
             if (idx.is_integer) {
@@ -495,6 +551,11 @@ std::optional<ConstraintValue> Fact::get_field(std::vector<PathSegment> const& s
         if (std::holds_alternative<FactList>(*current_value)) {
             FactList const& fl = std::get<FactList>(*current_value);
             if (fl.facts.empty()) {
+                bool next_null_safe = (i + 1 < segments.size()) && segments[i + 1].null_safe;
+                if (seg.null_safe || next_null_safe) return NilValue{};
+                return std::nullopt;
+            }
+            if (fl.facts.size() != 1) {
                 bool next_null_safe = (i + 1 < segments.size()) && segments[i + 1].null_safe;
                 if (seg.null_safe || next_null_safe) return NilValue{};
                 return std::nullopt;
@@ -654,6 +715,7 @@ ParsedRule::ParsedRule() = default;
 ParsedPattern::ParsedPattern(ParsedPattern const& other) :
     type(other.type), pos(other.pos), binding(other.binding), fact_type(other.fact_type),
     nested_patterns(other.nested_patterns), eval_expression(other.eval_expression), forall_info(other.forall_info),
+    window_info(other.window_info),
     source(other.source) {
     constraint_root = other.constraint_root ? std::make_unique<ConstraintNode>(*other.constraint_root) : nullptr;
 }
@@ -668,6 +730,7 @@ ParsedPattern& ParsedPattern::operator=(ParsedPattern const& other) {
     nested_patterns = other.nested_patterns;
     eval_expression = other.eval_expression;
     forall_info = other.forall_info;
+    window_info = other.window_info;
     source = other.source;
     return *this;
 }

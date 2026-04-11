@@ -62,12 +62,12 @@ void KnowledgeBase::build(parser_state&& state) {
     logd("KnowledgeBase::build -> Building from parser state with {} rules.", state.parsed_rules.size());
     this->parser_state_ = std::move(state);
 
-    // Initialize CodecRegistry with declarations
+    // Initialize CodecRegistry when declarations exist.
     if (!parser_state_.parsed_declarations.empty()) {
         codec_registry_ = std::make_unique<rulesforge::CodecRegistry>();
-        codec_registry_->load_declarations(parser_state_.parsed_declarations);
-        logd("KnowledgeBase::build -> Loaded {} type declarations into CodecRegistry",
-             parser_state_.parsed_declarations.size());
+        codec_registry_->load_declarations(parser_state_.parsed_declarations, parser_state_.parsed_enums);
+        logd("KnowledgeBase::build -> Loaded {} type declarations and {} enums into CodecRegistry",
+             parser_state_.parsed_declarations.size(), parser_state_.parsed_enums.size());
     }
 
     // Build rule map once for O(1) parent lookup
@@ -207,5 +207,3 @@ void KnowledgeBase::compile_network() {
          compiled_network_->mem_slot_counts.eval,
          compiled_network_->mem_slot_counts.unnest);
 }
-
-

@@ -12,17 +12,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <fmt.h>
 
 /* ───── Mock Value: stores up to 32 named fields ───── */
 
 #define MAX_FIELDS 32
 
-typedef enum { MOCK_INT, MOCK_DOUBLE, MOCK_STRING, MOCK_BYTES } MockFieldType;
+typedef enum { MOCK_INT, MOCK_INT64, MOCK_DOUBLE, MOCK_STRING, MOCK_BYTES } MockFieldType;
 
 typedef struct {
     char name[128];
     MockFieldType type;
     int32_t  int_val;
+    int64_t  int64_val;
     double   dbl_val;
     char     str_val[256];
     uint8_t  bytes_val[256];
@@ -47,6 +49,14 @@ static void mock_set_field_int(Value* obj, const char* name, int32_t val) {
     strncpy(f->name, name, sizeof(f->name) - 1);
     f->type = MOCK_INT;
     f->int_val = val;
+}
+
+static void mock_set_field_int64(Value* obj, const char* name, int64_t val) {
+    if (!obj || obj->field_count >= MAX_FIELDS) return;
+    MockField* f = &obj->fields[obj->field_count++];
+    strncpy(f->name, name, sizeof(f->name) - 1);
+    f->type = MOCK_INT64;
+    f->int64_val = val;
 }
 
 static void mock_set_field_double(Value* obj, const char* name, double val) {
@@ -74,12 +84,18 @@ static void mock_set_field_bytes(Value* obj, const char* name, const uint8_t* da
     if (data) memcpy(f->bytes_val, data, f->bytes_len);
 }
 
+static void mock_destroy_value(Value* obj) {
+    free(obj);
+}
+
 static DataBindValueApi test_api = {
-    .create_object   = mock_create_object,
+    .create_object    = mock_create_object,
     .set_field_int    = mock_set_field_int,
+    .set_field_int64  = mock_set_field_int64,
     .set_field_double = mock_set_field_double,
     .set_field_string = mock_set_field_string,
     .set_field_bytes  = mock_set_field_bytes,
+    .destroy_value    = mock_destroy_value,
 };
 
 /* ───── Helpers to look up fields by name ───── */
@@ -192,7 +208,7 @@ suite("Data Bind") {
 
                             MockField* f_d = find_field(v, "d");
                             check_not_null(f_d);
-                            if (f_d) { check(f_d->type == MOCK_DOUBLE); check(fabs(f_d->dbl_val - 1000000.0) < 1.0); }
+                            if (f_d) { check(f_d->type == MOCK_INT64); check(f_d->int64_val == 1000000LL); }
 
                             free(v);
                         }
@@ -398,6 +414,34 @@ suite("Data Bind") {
                 if (codec) data_bind_free(codec);
             }
 
+            when("recovering with a valid parse after an earlier error") {
+                DataBind* codec = data_bind_create("test_errh.rfl", &test_api);
+
+                then("codec should be created") {
+                    check_not_null(codec);
+                }
+
+                then("successful parse should clear the stale type-not-found error") {
+                    if (codec) {
+                        uint8_t bad_buf[4] = {0};
+                        Value* bad = data_bind_parse(codec, "Bar", bad_buf, sizeof(bad_buf));
+                        check_null(bad);
+
+                        uint8_t good_buf[4] = {7, 0, 0, 0};
+                        Value* good = data_bind_parse(codec, "Foo", good_buf, sizeof(good_buf));
+                        check_not_null(good);
+
+                        const char* err = data_bind_get_error(codec);
+                        check_not_null(err);
+                        if (err) check(strstr(err, "Bar") == NULL);
+
+                        if (good) free(good);
+                    }
+                }
+
+                if (codec) data_bind_free(codec);
+            }
+
             when("passing NULL buffer") {
                 DataBind* codec = data_bind_create("test_errh.rfl", &test_api);
 
@@ -458,7 +502,8 @@ suite("Data Bind") {
                 .set_field_int    = mock_set_field_int,
                 .set_field_double = mock_set_field_double,
                 .set_field_string = mock_set_field_string,
-                .set_field_bytes  = NULL
+                .set_field_bytes  = NULL,
+                .destroy_value    = mock_destroy_value
             };
 
             write_schema("test_no_bytes.rfl",
@@ -528,7 +573,7 @@ suite("Data Bind") {
 
                         for (int i = 0; i < 3; i++) {
                             char type[32];
-                            snprintf(type, sizeof(type), "Msg%d", i);
+                            fmt(type, sizeof(type), "Msg{}", i);
                             Value* v = data_bind_parse(codec, type, buf, sizeof(buf));
                             if (v) {
                                 success_count++;

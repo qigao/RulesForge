@@ -1,0 +1,25 @@
+#pragma once
+
+#include <any>
+#include <cstdint>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+
+{{#enums}}
+enum class {{name}} {
+{{#values}}
+    {{name}},
+{{/values}}
+};
+
+{{/enums}}
+{{#declarations}}
+struct {{name}} {
+{{#fields}}
+    {{{cpp_type}}} {{name}};
+{{/fields}}
+};
+
+{{/declarations}}

@@ -43,7 +43,10 @@ public:
         uint32_t max_consumers = 4;
     };
 
-    explicit PriorityDisruptor(Config const& config = Config{}) {
+    PriorityDisruptor()
+        : PriorityDisruptor(Config{}) {}
+
+    explicit PriorityDisruptor(Config const& config) {
         if (!bucket_priority_queue_mpmc_init(&queue_, config.capacity_per_priority, config.max_consumers)) {
             throw std::runtime_error("Failed to initialize bucket_priority_queue_mpmc");
         }

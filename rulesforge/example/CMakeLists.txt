@@ -3,7 +3,7 @@ foreach(example_source ${SOURCES})
     get_filename_component(source_name ${example_source} NAME_WE)
     set(EXAMPLE_NAME ${source_name})
     add_executable(${EXAMPLE_NAME} ${example_source})
-    target_link_libraries(${EXAMPLE_NAME} PRIVATE ${TARGET_NAME})
+    target_link_libraries(${EXAMPLE_NAME} PRIVATE rfl_parser ${TARGET_NAME})
     target_include_directories(${EXAMPLE_NAME} PRIVATE ../include)
 
     set_target_properties(

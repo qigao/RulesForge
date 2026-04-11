@@ -14,12 +14,13 @@ find_package(jsoncons CONFIG REQUIRED)
 
 target_link_libraries(
     ${TARGET_NAME}
-    PUBLIC xxHash::xxhash TurboNet::Utils rfl_parser
+    PUBLIC xxHash::xxhash TurboNet::Utils Threads::Threads
     PRIVATE jsoncons::jsoncons data_bind
 )
 target_include_directories(
     ${TARGET_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                           $<INSTALL_INTERFACE:include/rulesforge>
+                   PRIVATE ${CMAKE_SOURCE_DIR}/parser/include
 )
 if(MSVC)
     target_compile_options(${TARGET_NAME} PUBLIC /bigobj)
@@ -40,16 +41,6 @@ if(WIN32)
         ${TARGET_NAME} PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN
     )
 endif()
-
-# --- Install rules ---
-
-install(
-    DIRECTORY include/
-    DESTINATION include/rulesforge
-    FILES_MATCHING
-    PATTERN "*.hpp"
-    PATTERN "*.h"
-)
 
 # Tests
 add_subdirectory(test)

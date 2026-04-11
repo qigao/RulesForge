@@ -45,7 +45,7 @@ public:
     }
 
     size_t memory_usage() const {
-        return t_atomic_load_size_relaxed((t_atomic_size_t*)&arena_.total_used);
+        return arena_.total_used.load(std::memory_order_relaxed);
     }
 
 private:

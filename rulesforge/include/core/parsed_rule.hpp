@@ -47,6 +47,13 @@ struct ParsedForall {
   std::vector<ParsedPattern> patterns;
 };
 
+enum class WindowType { TIME, LENGTH };
+
+struct ParsedWindow {
+  WindowType type;
+  int64_t size; // represents elements count for LENGTH, or milliseconds for TIME
+};
+
 using PatternSource = std::variant<std::monostate, ParsedAccumulate, ParsedUnnest, ParsedQueryCall,
                                    std::string>;
 
@@ -59,6 +66,7 @@ struct ParsedPattern {
   std::vector<ParsedPattern> nested_patterns;
   std::optional<std::string> eval_expression;
   std::optional<ParsedForall> forall_info;
+  std::optional<ParsedWindow> window_info;
   PatternSource source;
   ParsedPattern();
   ParsedPattern(ParsedPattern const &other);

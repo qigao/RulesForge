@@ -19,17 +19,6 @@
             "binaryDir": "${sourceDir}/build/Msvc"
         },
         {
-            "name": "base-developer-windows-asan",
-            "hidden": true,
-            "inherits": [
-                "ISWindows",
-                "developer-mode-asan",
-                "Msvc",
-                "flags-msvc"
-            ],
-            "binaryDir": "${sourceDir}/build/Msvc-ASan"
-        },
-        {
             "name": "base-release-windows",
             "hidden": true,
             "inherits": [
@@ -47,7 +36,7 @@
                 "ISLinux",
                 "release-mode",
                 "Gcc",
-                "flags-gnu"
+                "flags-gcc"
             ],
             "binaryDir": "${sourceDir}/build/linux-gcc-release"
         },
@@ -58,7 +47,7 @@
                 "ISLinux",
                 "developer-mode",
                 "Gcc",
-                "flags-gnu"
+                "flags-gcc"
             ],
             "binaryDir": "${sourceDir}/build/linux-gcc-debug"
         },
@@ -69,7 +58,7 @@
                 "ISMac",
                 "release-mode",
                 "Clang",
-                "flags-gnu"
+                "flags-appleclang"
             ],
             "binaryDir": "${sourceDir}/build/mac-clang-release"
         }

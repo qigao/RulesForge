@@ -53,7 +53,7 @@ private:
     ConstraintValue invoke_native_function(std::string const& function_name,
                                            std::vector<FieldAssignment> const& args);
     ConstraintValue parse_native_result(char const* out_result) const;
-    double resolve_variable(std::string const& var_name);
+    ConstraintValue resolve_variable(std::string const& var_name);
     ::Fact* get_bound_fact(std::string const& var_name);
     std::optional<ConstraintValue> get_global_value(std::string const& name) const;
 

@@ -12,7 +12,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 #include <sstream>
+
+#include <jsoncons/json.hpp>
+#include <jsoncons_ext/jmespath/jmespath.hpp>
 
 using namespace rulesforge;
 
@@ -38,6 +42,63 @@ namespace {
         if (normalized == "set" || ends_with(normalized, ".set")) return make_value_set();
         if (normalized == "map" || ends_with(normalized, ".map")) return make_value_map();
         return NilValue{};
+    }
+
+    std::string read_text_file_or_throw(std::string const& path) {
+        std::ifstream file(path, std::ios::binary);
+        if (!file) {
+            throw std::runtime_error("Failed to open file: " + path);
+        }
+        return std::string((std::istreambuf_iterator<char>(file)),
+                           std::istreambuf_iterator<char>());
+    }
+
+    std::vector<std::string> extract_json_documents_or_throw(std::string const& json_content,
+                                                             std::string const& jmespath_expr) {
+        if (jmespath_expr.empty()) {
+            return {json_content};
+        }
+
+        auto document = jsoncons::json::parse(json_content);
+        auto selected = jsoncons::jmespath::search(document, jmespath_expr);
+
+        std::vector<std::string> extracted;
+        if (selected.is_null()) {
+            return extracted;
+        }
+
+        if (selected.is_array()) {
+            extracted.reserve(selected.size());
+            for (auto const& item : selected.array_range()) {
+                extracted.push_back(item.to_string());
+            }
+            return extracted;
+        }
+
+        extracted.push_back(selected.to_string());
+        return extracted;
+    }
+
+    std::string resolve_codec_type_name_or_throw(StatefulSession const& session,
+                                                 char const* source_kind) {
+        auto const& declarations = session.get_knowledge_base()->get_parser_state().parsed_declarations;
+        if (declarations.empty()) {
+            throw std::runtime_error(std::string("Cannot infer type for ") + source_kind
+                                     + " data source: no declarations loaded");
+        }
+
+        for (auto const& decl : declarations) {
+            if (decl.type_name == "Row") {
+                return decl.type_name;
+            }
+        }
+
+        if (declarations.size() == 1) {
+            return declarations.front().type_name;
+        }
+
+        throw std::runtime_error(std::string("Cannot infer type for ") + source_kind
+                                 + " data source: multiple declarations loaded");
     }
 
     // Zero-allocation version: walk token chain directly
@@ -136,6 +197,7 @@ void StatefulSession::validate_fact_for_insert(Fact const& fact) const {
 void StatefulSession::add_fact(Fact* fact) {
     if (!fact) return;
     ensure_consistent_for_mutation("adding facts");
+    fact->type = canonicalize_fact_type_name(fact->type);
     validate_fact_for_insert(*fact);
 
     if (fact->id == 0) { fact->id = working_memory_.reserve_next_id(); }
@@ -159,6 +221,12 @@ void StatefulSession::add_fact(Fact* fact) {
     }
 }
 
+void StatefulSession::add_fact(std::shared_ptr<Fact> const& fact) {
+    if (!fact) return;
+    add_fact(fact.get());
+    retain_shared_fact(fact);
+}
+
 void StatefulSession::add_facts(std::vector<Fact*> const& facts) {
     if (facts.empty()) return;
     ensure_consistent_for_mutation("adding facts");
@@ -167,6 +235,7 @@ void StatefulSession::add_facts(std::vector<Fact*> const& facts) {
     validated_facts.reserve(facts.size());
     for (auto* fact : facts) {
         if (!fact) continue;
+        fact->type = canonicalize_fact_type_name(fact->type);
         validate_fact_for_insert(*fact);
         validated_facts.push_back(fact);
     }
@@ -210,9 +279,26 @@ void StatefulSession::add_facts(std::vector<Fact*> const& facts) {
         }
     }
 }
+
+void StatefulSession::add_facts(std::vector<std::shared_ptr<Fact>> const& facts) {
+    if (facts.empty()) return;
+
+    std::vector<Fact*> raw;
+    raw.reserve(facts.size());
+    for (auto const& fact : facts) {
+        if (fact) raw.push_back(fact.get());
+    }
+
+    add_facts(raw);
+
+    for (auto const& fact : facts) {
+        retain_shared_fact(fact);
+    }
+}
 void StatefulSession::insert_into(std::string const& stream_name, Fact* fact) {
     if (!fact) return;
     ensure_consistent_for_mutation("adding facts");
+    fact->type = canonicalize_fact_type_name(fact->type);
     validate_fact_for_insert(*fact);
     if (fact->id == 0) { fact->id = working_memory_.reserve_next_id(); }
     working_memory_.assign_nested_ids(*fact);
@@ -267,6 +353,10 @@ void StatefulSession::retract_facts(std::vector<Fact*> const& facts) {
             it->second->right_activate_batch(*this, type_facts, PropagationType::RETRACT);
         }
     }
+
+    for (auto* fact : facts) {
+        if (fact) release_retained_fact(fact->id);
+    }
 }
 
 void StatefulSession::_internal_add_fact(Fact* fact) {
@@ -282,6 +372,7 @@ void StatefulSession::_internal_add_facts_batch(std::vector<Fact*> const& facts)
 void StatefulSession::_internal_remove_fact(int64_t fact_id) {
 
     working_memory_.remove(fact_id);
+    release_retained_fact(fact_id);
 }
 
 int StatefulSession::fire_all_rules(int max_rules) {
@@ -524,6 +615,8 @@ void StatefulSession::retract_fact(Fact* fact) {
             ++it;
         }
     }
+
+    release_retained_fact(fact_to_retract->id);
 }
 
 void StatefulSession::update_fact(Fact* fact, std::function<void(Fact&)> modifier) {
@@ -632,6 +725,19 @@ bool StatefulSession::has_type_declaration(std::string const& type_name) const {
     return schema_validator_ && schema_validator_->has_declaration(type_name);
 }
 
+std::string StatefulSession::canonicalize_fact_type_name(std::string const& type_name) const {
+    if (!schema_validator_) {
+        return type_name;
+    }
+    return schema_validator_->canonicalize_type_name(type_name);
+}
+
+Fact* StatefulSession::create_fact(std::string const& type) {
+    Fact* fact = fact_arena_.create_fact();
+    fact->type = canonicalize_fact_type_name(type);
+    return fact;
+}
+
 bool StatefulSession::execute_eval(std::string const& code, Token const& token,
                                    std::map<std::string, int> const& bindings) {
     if (code.empty()) return true;
@@ -652,7 +758,7 @@ bool StatefulSession::execute_eval(rulesforge::ExpressionEvaluator const& expr,
                                    std::map<std::string, int> const& bindings) {
 
     // Create variable resolver
-    auto resolver = [this, &token, &bindings](std::string const& var_name) -> double {
+    auto resolver = [this, &token, &bindings](std::string const& var_name) -> ConstraintValue {
         // Handle $var.field format
         size_t dot_pos = var_name.find('.');
         std::string base_var = (dot_pos != std::string::npos) ? var_name.substr(0, dot_pos) : var_name;
@@ -680,20 +786,16 @@ bool StatefulSession::execute_eval(rulesforge::ExpressionEvaluator const& expr,
             return 0.0;
         }
 
-        return std::visit([](auto&& arg) -> double {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, int64_t>) {
-                return static_cast<double>(arg);
-            } else if constexpr (std::is_same_v<T, double>) {
-                return arg;
-            } else if constexpr (std::is_same_v<T, std::string>) {
-                try { return std::stod(arg); } catch (...) { return 0.0; }
-            }
-            return 0.0;
-        }, *field_val);
+        return *field_val;
     };
 
-    double result = expr.evaluate(resolver);
+    ConstraintValue cv_result = expr.evaluate(resolver);
+    double result = 0.0;
+    if (std::holds_alternative<double>(cv_result)) {
+        result = std::get<double>(cv_result);
+    } else if (std::holds_alternative<int64_t>(cv_result)) {
+        result = static_cast<double>(std::get<int64_t>(cv_result));
+    }
     return result != 0.0;
 }
 
@@ -835,6 +937,8 @@ void StatefulSession::end_rhs_transaction(bool commit) {
                     ++it;
                 }
             }
+
+            release_retained_fact(fact->id);
         }
 
         return;
@@ -1117,6 +1221,7 @@ void StatefulSession::reset() {
     agenda_ = Agenda{};
     wme_cache_.clear();
     working_memory_.clear();
+    retained_shared_facts_.clear();
     if (tms_) {
         tms_->clear();
     }
@@ -1138,6 +1243,16 @@ void StatefulSession::reset() {
     prime_network_state();
 }
 
+void StatefulSession::retain_shared_fact(std::shared_ptr<Fact> const& fact) {
+    if (!fact || fact->id <= 0) return;
+    retained_shared_facts_[fact->id] = fact;
+}
+
+void StatefulSession::release_retained_fact(int64_t fact_id) {
+    if (fact_id <= 0) return;
+    retained_shared_facts_.erase(fact_id);
+}
+
 Fact* StatefulSession::add_fact_from_binary(std::string const& type_name, uint8_t const* buf, size_t len) {
     ensure_consistent_for_mutation("adding fact from binary");
 
@@ -1146,7 +1261,8 @@ Fact* StatefulSession::add_fact_from_binary(std::string const& type_name, uint8_
         throw std::runtime_error("CodecRegistry not initialized");
     }
 
-    Fact* fact = codec_registry->parse_binary(fact_arena_, type_name, buf, len);
+    std::string const canonical_type = canonicalize_fact_type_name(type_name);
+    Fact* fact = codec_registry->parse_binary(fact_arena_, canonical_type, buf, len);
     if (!fact) {
         throw std::runtime_error("Failed to parse binary: " + codec_registry->get_last_error());
     }
@@ -1163,7 +1279,8 @@ Fact* StatefulSession::add_fact_from_json(std::string const& type_name, std::str
         throw std::runtime_error("CodecRegistry not initialized");
     }
 
-    Fact* fact = codec_registry->parse_json(fact_arena_, type_name, json_str);
+    std::string const canonical_type = canonicalize_fact_type_name(type_name);
+    Fact* fact = codec_registry->parse_json(fact_arena_, canonical_type, json_str);
     if (!fact) {
         throw std::runtime_error("Failed to parse JSON: " + codec_registry->get_last_error());
     }
@@ -1180,7 +1297,8 @@ std::vector<Fact*> StatefulSession::add_facts_from_csv(std::string const& type_n
         throw std::runtime_error("CodecRegistry not initialized");
     }
 
-    std::vector<Fact*> facts = codec_registry->parse_csv(fact_arena_, type_name, csv_str);
+    std::string const canonical_type = canonicalize_fact_type_name(type_name);
+    std::vector<Fact*> facts = codec_registry->parse_csv(fact_arena_, canonical_type, csv_str);
     if (facts.empty()) {
         throw std::runtime_error("Failed to parse CSV: " + codec_registry->get_last_error());
     }
@@ -1203,19 +1321,34 @@ void StatefulSession::add_data(rulesforge::DataSource const& source) {
             break;
 
         case rulesforge::DataSourceType::JSON: {
-            // TODO: Extract type_name from JSON or require explicit type
-            // For now, parse as generic Row type
-            Fact* fact = codec_registry->parse_json(fact_arena_, "Row", source.get_content());
-            if (!fact) {
-                throw std::runtime_error("Failed to parse JSON: " + codec_registry->get_last_error());
+            std::string type_name = resolve_codec_type_name_or_throw(*this, "JSON");
+            auto payloads = extract_json_documents_or_throw(source.get_content(), source.get_path_or_filter());
+            if (payloads.empty()) {
+                break;
             }
-            add_fact(fact);
+
+            std::vector<Fact*> facts;
+            facts.reserve(payloads.size());
+            for (auto const& payload : payloads) {
+                Fact* fact = codec_registry->parse_json(fact_arena_, type_name, payload);
+                if (!fact) {
+                    throw std::runtime_error("Failed to parse JSON: " + codec_registry->get_last_error());
+                }
+                facts.push_back(fact);
+            }
+
+            if (facts.size() == 1) {
+                add_fact(facts.front());
+            } else {
+                add_facts(facts);
+            }
             break;
         }
 
         case rulesforge::DataSourceType::CSV: {
-            // TODO: Extract type_name from CSV header or require explicit type
-            std::vector<Fact*> facts = codec_registry->parse_csv(fact_arena_, "Row", source.get_content());
+            std::string type_name = resolve_codec_type_name_or_throw(*this, "CSV");
+            std::string csv_content = read_text_file_or_throw(source.get_content());
+            std::vector<Fact*> facts = codec_registry->parse_csv(fact_arena_, type_name, csv_content);
             if (facts.empty()) {
                 throw std::runtime_error("Failed to parse CSV: " + codec_registry->get_last_error());
             }
@@ -1229,9 +1362,14 @@ void StatefulSession::add_data(rulesforge::DataSource const& source) {
         }
 
         case rulesforge::DataSourceType::BINARY: {
-            // TODO: Implement binary parsing
-            throw std::runtime_error("Binary data source not yet implemented");
+            std::string type_name = resolve_codec_type_name_or_throw(*this, "binary");
+            auto const& binary = source.get_binary();
+            Fact* fact = codec_registry->parse_binary(fact_arena_, type_name, binary.data(), binary.size());
+            if (!fact) {
+                throw std::runtime_error("Failed to parse binary: " + codec_registry->get_last_error());
+            }
+            add_fact(fact);
+            break;
         }
     }
 }
-

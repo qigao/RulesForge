@@ -136,70 +136,35 @@ OrderStatus (derived)
 
 ### Quick Run with capi_demo
 
+This example is runnable after one preprocessing step.
+
+Flatten the nested scenario file:
+
 ```bash
-capi_demo \
-  -d docs/examples/order-fulfillment/order-fulfillment.rfl \
-  -j docs/examples/order-fulfillment/order-test-data.json \
+python tools/flatten_example_data.py \
+  order \
+  docs/examples/order-fulfillment/order-test-data.json \
+  docs/examples/order-fulfillment/order-flat.json
+```
+
+Then run:
+
+```bash
+./build/bin/capi_demo \
+  -r docs/examples/order-fulfillment/order-fulfillment.rfl \
+  -j docs/examples/order-fulfillment/order-flat.json \
   -m warehouses:com.ecommerce.Warehouse \
   -m inventory:com.ecommerce.Inventory \
-  -m products:com.ecommerce.Product \
+  -m promotions:com.ecommerce.Promotion \
+  -m orders:com.ecommerce.Order \
+  -m orderItems:com.ecommerce.OrderItem \
   -q FulfillmentPlans \
   -b plan \
-  -f orderId,warehouseId,carrier,shippingMethod,shippingCost
+  -f orderId,itemId,warehouseId,carrier,shippingMethod,shippingCost
 ```
 
-### C++ Integration
+Why preprocessing is required:
 
-```cpp
-#include "knowledge_base.hpp"
-
-int main() {
-    ParseResult result;
-    auto kb = build_knowledge_base_from_file("order-fulfillment.rfl", result);
-    auto session = kb->create_session();
-
-    // Load warehouse data
-    auto warehouse = std::make_shared<Fact>();
-    warehouse->type = "com.ecommerce.Warehouse";
-    warehouse->fields["warehouseId"] = "WH-WEST";
-    warehouse->fields["name"] = "West Coast Distribution";
-    warehouse->fields["state"] = "CA";
-    warehouse->fields["zipCode"] = "90001";
-    session->add_fact(warehouse);
-
-    // Load inventory
-    auto inventory = std::make_shared<Fact>();
-    inventory->type = "com.ecommerce.Inventory";
-    inventory->fields["warehouseId"] = "WH-WEST";
-    inventory->fields["productId"] = "PROD-001";
-    inventory->fields["quantityAvailable"] = static_cast<int64_t>(100);
-    session->add_fact(inventory);
-
-    // Create order
-    auto order = std::make_shared<Fact>();
-    order->type = "com.ecommerce.Order";
-    order->fields["orderId"] = "ORD-2024-001";
-    order->fields["customerId"] = "CUST-001";
-    order->fields["customerTier"] = "gold";
-    order->fields["expressShipping"] = static_cast<int64_t>(0);
-    session->add_fact(order);
-
-    // Add order item
-    auto item = std::make_shared<Fact>();
-    item->type = "com.ecommerce.OrderItem";
-    item->fields["itemId"] = "ITEM-001";
-    item->fields["orderId"] = "ORD-2024-001";
-    item->fields["productId"] = "PROD-001";
-    item->fields["quantity"] = static_cast<int64_t>(2);
-    item->fields["unitPrice"] = 49.99;
-    session->add_fact(item);
-
-    session->fire_all_rules();
-
-    // Query fulfillment plan
-    auto plans = session->execute_query("FulfillmentPlans");
-    // Process results...
-
-    return 0;
-}
-```
+- the rules expect flat `Order`, `OrderItem`, `Inventory`, `Warehouse`, and `Promotion` facts
+- the sample data nests `order` and `items` under `testOrders[]`
+- there is no declared `Product` fact in the `.rfl`, so the old command that mapped `products` was wrong

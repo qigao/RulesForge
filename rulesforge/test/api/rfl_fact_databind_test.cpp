@@ -32,13 +32,18 @@ public:
         (void)obj; (void)name; (void)data; (void)len;
     }
 
+    static void destroy_value(Fact* obj) {
+        delete obj;
+    }
+
     static DataBindValueApi get_api() {
-        DataBindValueApi api;
+        DataBindValueApi api{};
         api.create_object = reinterpret_cast<Value* (*)()>(create_object);
         api.set_field_int = reinterpret_cast<void (*)(Value*, const char*, int32_t)>(set_field_int);
         api.set_field_double = reinterpret_cast<void (*)(Value*, const char*, double)>(set_field_double);
         api.set_field_string = reinterpret_cast<void (*)(Value*, const char*, const char*)>(set_field_string);
         api.set_field_bytes = reinterpret_cast<void (*)(Value*, const char*, const uint8_t*, size_t)>(set_field_bytes);
+        api.destroy_value = reinterpret_cast<void (*)(Value*)>(destroy_value);
         return api;
     }
 };

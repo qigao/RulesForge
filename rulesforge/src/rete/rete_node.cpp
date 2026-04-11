@@ -12,6 +12,7 @@
 #include <fstream>
 #include <iosfwd>
 #include <list>
+#include <chrono>
 
 #include <regex>
 #include <sstream>
@@ -55,7 +56,6 @@ namespace {
         return changed_fields_contains(changed_fields, root);
     }
 
-    // P1 FIX: Helper for contains check on FactList
     bool fact_list_contains(FactList const& list, ConstraintValue const& value) {
         for (auto const& fact : list.facts) {
             if (!fact) continue;
@@ -72,7 +72,6 @@ namespace {
         return false;
     }
 
-    // PROD-006: Enhanced regex cache with LRU eviction
     // Thread-safe for read operations, limited to MAX_CACHE_SIZE entries
     class RegexCache {
     public:
@@ -151,7 +150,7 @@ namespace {
     VariableResolver make_join_resolver(Token const& token,
                                         Fact const& current_fact,
                                         std::map<std::string, int> const& bindings) {
-        return [&token, &current_fact, &bindings](std::string const& var_name) -> double {
+        return [&token, &current_fact, &bindings](std::string const& var_name) -> ConstraintValue {
             if (var_name.empty()) return 0.0;
 
             if (var_name[0] == '$') {
@@ -188,7 +187,7 @@ namespace {
     // Create a variable resolver for accumulate expressions (fact + inline bindings)
     VariableResolver make_accumulate_resolver(Fact const& fact,
                                               std::map<std::string, std::string> const& inline_bindings) {
-        return [&fact, &inline_bindings](std::string const& var_name) -> double {
+        return [&fact, &inline_bindings](std::string const& var_name) -> ConstraintValue {
             if (var_name.empty()) return 0.0;
 
             std::string field_name = var_name;
@@ -491,8 +490,7 @@ namespace {
                 // Evaluate compiled expression using token bindings
                 auto resolver = make_join_resolver(token, fact, bindings);
                 g_compiled_expr_evals.fetch_add(1, std::memory_order_relaxed);
-                double result = join.compiled_expr->evaluate(resolver);
-                rhs_val_opt = result;
+                rhs_val_opt = join.compiled_expr->evaluate(resolver);
             } else if (join.right_literal) {
                 rhs_val_opt = join.right_literal;
             } else {
@@ -884,8 +882,7 @@ bool AlphaNode::check_constraint(Fact const& fact) const {
         static std::map<std::string, std::string> empty_bindings;
         auto resolver = make_accumulate_resolver(fact, empty_bindings);
         g_compiled_expr_evals.fetch_add(1, std::memory_order_relaxed);
-        double result = constraint.compiled_expr->evaluate(resolver);
-        ConstraintValue rhs = result;
+        ConstraintValue rhs = constraint.compiled_expr->evaluate(resolver);
         return compare_values(lhs, constraint.op, rhs);
     }
 
@@ -1274,11 +1271,13 @@ namespace {
         ParsedAccumulate const& info,
         Fact const& fact)
     {
+        if (info.function == "count" && !info.compiled_expr && info.accumulate_field_name.empty()) {
+            return ConstraintValue{int64_t{1}};
+        }
         // If we have a compiled expression, evaluate it
         if (info.compiled_expr) {
             auto resolver = make_accumulate_resolver(fact, info.inline_binding_to_field);
-            double result = info.compiled_expr->evaluate(resolver);
-            return ConstraintValue{result};
+            return info.compiled_expr->evaluate(resolver);
         }
         // Otherwise use simple field lookup
         if (!info.accumulate_field_name.empty()) {
@@ -1289,6 +1288,87 @@ namespace {
 }
 
 #include "rete_node_accumulate.inc"
+
+// =========================================================================
+// === WINDOW NODE =========================================================
+// =========================================================================
+
+WindowNode::WindowNode(ParsedWindow const& window_info)
+    : ReteNode(NodeKind::Window), info(window_info) {}
+
+void WindowNode::right_activate(StatefulSession& session, Fact* fact, PropagationType p_type) {
+    if (mem_slot < 0 || static_cast<size_t>(mem_slot) >= session.net_mem().window.size()) {
+        throw std::runtime_error("WindowNode memory slot is not initialized");
+    }
+    auto& mem = session.net_mem().window[mem_slot];
+
+    if (p_type == PropagationType::RETRACT) {
+        remove_from_vector(mem.facts, fact);
+        for (auto* child : children_raw) {
+            child->right_activate(session, fact, p_type);
+        }
+        return;
+    }
+
+    if (p_type == PropagationType::ASSERT) {
+        mem.facts.push_back(fact);
+        evaluate_expiration(session);
+        for (auto* child : children_raw) {
+            child->right_activate(session, fact, p_type);
+        }
+    } else if (p_type == PropagationType::MODIFY) {
+        evaluate_expiration(session);
+        for (auto* child : children_raw) {
+            child->right_activate(session, fact, p_type);
+        }
+    }
+}
+
+void WindowNode::evaluate_expiration(StatefulSession& session) {
+    if (mem_slot < 0 || static_cast<size_t>(mem_slot) >= session.net_mem().window.size()) {
+        throw std::runtime_error("WindowNode memory slot is not initialized");
+    }
+    auto& mem = session.net_mem().window[mem_slot];
+
+    if (info.type == WindowType::LENGTH) {
+        while (mem.facts.size() > static_cast<size_t>(info.size)) {
+            Fact* expired_fact = mem.facts.front();
+            mem.facts.erase(mem.facts.begin());
+            for (auto* child : children_raw) {
+                child->right_activate(session, expired_fact, PropagationType::RETRACT);
+            }
+        }
+    } else if (info.type == WindowType::TIME) {
+        int64_t current_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        auto it = mem.facts.begin();
+        while (it != mem.facts.end()) {
+            Fact* f = *it;
+            // Eager eviction relying on an implicit "timestamp" field.
+            auto ts_opt = f->get_field("timestamp");
+            int64_t fact_ts = current_time;
+            if (ts_opt && std::holds_alternative<int64_t>(*ts_opt)) {
+                fact_ts = std::get<int64_t>(*ts_opt);
+            }
+
+            if (current_time - fact_ts > info.size) {
+                for (auto* child : children_raw) {
+                    child->right_activate(session, f, PropagationType::RETRACT);
+                }
+                it = mem.facts.erase(it);
+            } else {
+                break;
+            }
+        }
+    }
+}
+
+void WindowNode::print_node(std::ostream& os) const {
+    os << "  \"" << id << "\" [label=\"WindowNode (" << id << ")\\n"
+       << (info.type == WindowType::TIME ? "TIME " : "LENGTH ") << info.size
+       << "\", shape=box3d, style=filled, fillcolor=lightblue];";
+}
 
 #include "rete_node_unnest.inc"
 

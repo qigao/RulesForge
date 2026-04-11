@@ -2,6 +2,7 @@
 #define RFL_TOKEN_HPP
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -73,6 +74,12 @@ enum class TokenType : uint8_t {
     TK_OF,
     TK_COINCIDES,
     TK_DURING,
+
+    // --- Window Keywords ---
+    TK_OVER,
+    TK_WINDOW,
+    TK_TIME,
+    TK_LENGTH,
 
     // --- Symbolic operators ---
     TK_EQ,          // ==
@@ -178,6 +185,8 @@ inline char const* token_type_name(TokenType t) {
         case TokenType::TK_ENABLED:          return "ENABLED";
         case TokenType::TK_DURATION_KW:      return "DURATION_KW";
         case TokenType::TK_AUTO_FOCUS:       return "AUTO_FOCUS";
+        case TokenType::TK_BINARY:           return "BINARY";
+        case TokenType::TK_CODEC:            return "CODEC";
         case TokenType::TK_STARTS_WITH:      return "STARTS_WITH";
         case TokenType::TK_ENDS_WITH:        return "ENDS_WITH";
         case TokenType::TK_LENGTH_IS:        return "LENGTH_IS";
@@ -191,6 +200,10 @@ inline char const* token_type_name(TokenType t) {
         case TokenType::TK_OF:               return "OF";
         case TokenType::TK_COINCIDES:        return "COINCIDES";
         case TokenType::TK_DURING:           return "DURING";
+        case TokenType::TK_OVER:             return "OVER";
+        case TokenType::TK_WINDOW:           return "WINDOW";
+        case TokenType::TK_TIME:             return "TIME";
+        case TokenType::TK_LENGTH:           return "LENGTH";
         case TokenType::TK_EQ:              return "==";
         case TokenType::TK_NE:              return "!=";
         case TokenType::TK_LT:              return "<";

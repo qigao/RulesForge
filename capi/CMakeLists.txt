@@ -20,7 +20,7 @@ target_compile_definitions(${CAPI_TARGET_NAME} PRIVATE SHARED_CXX)
 # consumers need
 target_include_directories(
     ${CAPI_TARGET_NAME}
-    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
            $<INSTALL_INTERFACE:include>
 )
@@ -31,8 +31,8 @@ target_include_directories(
 
 target_link_libraries(
     ${CAPI_TARGET_NAME}
-    PRIVATE RulesForge rfl_parser
-    PUBLIC TurboNet::Utils
+    PRIVATE rfl_parser RulesForge ${CMAKE_DL_LIBS}
+    PUBLIC TurboNet::Utils TurboScript::TurboScript
 )
 set_target_properties(${CAPI_TARGET_NAME} PROPERTIES FOLDER capi/)
 
@@ -54,7 +54,9 @@ elseif(ANDROID)
     # Link against Android specific libraries if needed, e.g., log for logging
     # target_link_libraries(${CAPI_TARGET_NAME} PUBLIC log android)
 endif()
-add_subdirectory(tests)
+if(ENABLE_TESTS)
+    add_subdirectory(tests)
+endif()
 add_subdirectory(examples)
 # Set output directory for the shared library
 set_target_properties(
@@ -73,7 +75,7 @@ install(
 )
 
 install(
-    DIRECTORY include/
+    DIRECTORY ${CMAKE_SOURCE_DIR}/include/
     DESTINATION include
     FILES_MATCHING
     PATTERN "*.h"

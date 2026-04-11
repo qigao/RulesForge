@@ -1,207 +1,101 @@
-# RulesForge - C++ Rete Rule Engine with JavaScript Integration
+# RulesForge
 
-[中文文档](./docs/zh-CN/README.md)
+RulesForge is a C/C++ rule engine built around a Rete-style matching network, an RFL domain language, and a small public C API for embedding, plugins, and runtime integration.
 
-This is a sophisticated, high-performance C++ rules engine implementing the **Rete algorithm** with **JavaScript (QuickJS) scripting** for rule consequences, inspired by Java RulesForge but designed specifically for C++ environments.
+English: `README.md`
+简体中文: `docs/zh-CN/README.md`
 
-## Core Architecture
+## What Is In This Repo
 
-**Rete Algorithm Implementation**:
+- `rulesforge/`: core C++ engine library
+- `parser/`: standalone RFL parser library
+- `capi/`: public shared library and C API in [`include/rule_forge.h`](/C:/projects/cpp/rulesforge/include/rule_forge.h)
+- `plugins/`: source/sink plugin ABI and sample plugins
+- `router/`: route engine built on the plugin ABI
+- `docs/`: product docs, DSL reference, deployment notes, and examples
+- `tools/rulesforge_schema_compiler/`: schema/code generation tool
 
-- Full Rete network with alpha/beta nodes (`rulesforge/include/rete/rete_node.hpp:15175 lines`)
-- Immutable `KnowledgeBase` containing compiled rules (`rulesforge/include/knowledge_base.hpp:74`)
-- Mutable `StatefulSession` managing working memory (`rulesforge/include/stateful_session.hpp:141`)
+## Stable Entry Points
 
-**JavaScript Integration**:
+If you are new to the project, start from the C API:
 
-- `JSScriptingManager` bridges C++ and JavaScript (`rulesforge/src/rfl_js_manager.cpp`)
-- Custom `rfl` API exposed to JavaScript for fact manipulation
+- Main API: [`include/rule_forge.h`](/C:/projects/cpp/rulesforge/include/rule_forge.h)
+- Plugin ABI: [`include/rule_forge_plugin.h`](/C:/projects/cpp/rulesforge/include/rule_forge_plugin.h)
+- Shared types: [`include/ruleforge_types.h`](/C:/projects/cpp/rulesforge/include/ruleforge_types.h)
 
-## Key Features
+The C++ engine API is available, but it is lower-level and spread across `rulesforge/include` and `parser/include`. For syntax details, use [`docs/dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md), which is already aligned with the current parser/runtime.
 
-1. **RFL Language**: RulesForge-like syntax with comprehensive grammar ([docs/dsl.md](./docs/dsl.md), [docs/USER_GUIDE.md](./docs/USER_GUIDE.md))
-2. **Advanced Conditional Logic**: Support for `not`, `exists`, `forall` patterns
-3. **Data Aggregation**: Built-in accumulators (`sum`, `count`, `average`, etc.)
-4. **Truth Maintenance System (TMS)**: Logical assertions with automatic dependency tracking
-5. **Complex Event Processing**: Temporal operators for CEP scenarios
-6. **Serializable Networks**: Fast startup through network serialization
+## Build
 
-## Technology Stack
+Prerequisites:
 
-- **C++20** standard with modern practices
-- **TinyTest** for testing
-- **jsoncons** for json path query
-- **CMake** build system with vcpkg dependency management
+- CMake 3.20+
+- A C17/C++20 toolchain
+- Ninja
+- `vcpkg`
+- local packages for `TurboNet`, `TurboScript`, and `TurboNet`
 
-## Project Structure
+The top-level CMake expects these package roots:
 
-```
-rulesforge/
-├── include/           # Headers (AST, parser, Rete nodes, JavaScript manager)
-├── src/              # Implementation files
-├── test/             # Comprehensive test suite
-docs/                 # Documentation
-├── dsl.md           # Grammar specification
-├── USER_GUIDE.md    # User guide
-└── README.md        # Quick start guide (Chinese)
-```
+- `TURBONET_ROOT`
+- `TURBOSCRIPT_ROOT`
+- `TURBO_UTILS`
 
-## WebAssembly Demo
-
-Run RulesForge in your browser via WebAssembly.
+Typical configure flow:
 
 ```bash
-cd wasm && ./build.sh
-cd build && python3 -m http.server 8000
-# Open http://localhost:8000
+cmake -S . -B build \
+  -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE=/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake \
+  -DTURBONET_ROOT=/path/to/TurboNet \
+  -DTURBOSCRIPT_ROOT=/path/to/TurboScript \
+  -DTURBO_UTILS=/path/to/TurboNet
+
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-## Quick Start
+This repository also ships platform presets under `presets/`. Run `cmake --list-presets` and use the preset set that exists in your environment.
 
-Here's a simple example to get you up and running.
+## 5-Minute Quickstart
 
-### 1. Write your rules in a RFL file
+The fastest real path is the bundled `capi_demo` executable.
 
-**`my_rules.rfl`**
+1. Build the project.
+2. Run the loan eligibility example:
 
-```rfl
-// Define the data model for our facts
-declare Person
-    name : String
-    age : int
-end
-
-declare CanVote
-    name : String
-end
-
-// A rule that finds adults and asserts they can vote
-rule "Identify Voters"
-when
-    // Match a Person fact where the age is 18 or greater
-    // and bind it to the variable $p
-    $p : Person( age >= 18 )
-
-    // Ensure we haven't already processed this person
-    not ( CanVote( name == $p.name ) )
-then
-    insert CanVote { name = $p.name }
-end
-
-// A query to find all people who can vote
-query "find_voters"
-    $cv : CanVote()
-end
+```bash
+./build/bin/capi_demo \
+  -r docs/examples/loan-eligibility/loan-eligibility.rfl \
+  -j docs/examples/loan-eligibility/loan-applications-sample.json \
+  -m applications:com.bank.loan.LoanApplication \
+  -q LoanDecisions \
+  -b decision \
+  -f applicationId,approved,approvedAmount,reason
 ```
 
-### 2. Use the engine in your C++ application
+You should see the rules compile, facts load, rules fire, and the query output printed from the `LoanDecisions` query.
 
-```cpp
-#include "rfl_parser.hpp"
-#include "knowledge_base.hpp"
-#include "stateful_session.hpp"
-#include "query_result.hpp"
-#include "errors.hpp"
-#include <iostream>
-#include <fstream>
-#include <sstream>
+## Documentation Map
 
-// Helper to read a file into a string
-std::string read_file(const std::string& path) {
-    std::ifstream file(path);
-    if (!file) return "";
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    return buffer.str();
-}
+- Quickstart: [`docs/QUICKSTART.md`](/C:/projects/cpp/rulesforge/docs/QUICKSTART.md)
+- Beginner guide: [`docs/BEGINNER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/BEGINNER_GUIDE.md)
+- User guide: [`docs/USER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/USER_GUIDE.md)
+- DSL reference: [`docs/dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md)
+- Deployment: [`docs/DEPLOYMENT.md`](/C:/projects/cpp/rulesforge/docs/DEPLOYMENT.md)
+- Production data loading notes: [`docs/PRODUCTION_DATABIND_BEST_PRACTICES.md`](/C:/projects/cpp/rulesforge/docs/PRODUCTION_DATABIND_BEST_PRACTICES.md)
+- Examples index: [`docs/examples/README.md`](/C:/projects/cpp/rulesforge/docs/examples/README.md)
+- Plugins: [`plugins/README.md`](/C:/projects/cpp/rulesforge/plugins/README.md)
+- Router: [`router/README.md`](/C:/projects/cpp/rulesforge/router/README.md)
 
-int main() {
-    // 1. Load and compile the RFL file into a KnowledgeBase
-    std::string rfl_content = read_file("my_rules.rfl");
-    ParsingResult result;
-    std::shared_ptr<KnowledgeBase> kb = build_knowledge_base(rfl_content, result);
+## Current Review Summary
 
-    if (!result.success) {
-        for (const auto& err : result.errors) {
-            std::cerr << err.to_string() << std::endl;
-        }
-        return 1;
-    }
+Before this doc pass, the repo had several product-facing documentation problems:
 
-    // 2. Create a stateful session from the KnowledgeBase
-    std::unique_ptr<StatefulSession> session = kb->create_session();
+- no root English README
+- stale examples that referenced missing headers or APIs such as `fact_builder.hpp` and `get_facts_of_type()`
+- build commands that did not match the actual CMake preset/layout
+- old product naming such as `Drills`
+- Chinese and English entry docs pointing at the wrong files
 
-    // 3. Add facts to the session's working memory
-    auto person1 = std::make_shared<Fact>();
-    person1->type = "Person";
-    person1->fields["name"] = "Alice";
-    person1->fields["age"] = (int64_t)30;
-    session->add_fact(person1);
-
-    auto person2 = std::make_shared<Fact>();
-    person2->type = "Person";
-    person2->fields["name"] = "Bob";
-    person2->fields["age"] = (int64_t)16;
-    session->add_fact(person2);
-
-    // 4. Fire the rules
-    int fired_count = session->fire_all_rules();
-    std::cout << "\nFired " << fired_count << " rule(s).\n";
-
-    // 5. Query the results
-    QueryResult query_results = session->execute_query("find_voters");
-    std::cout << "Found " << query_results.size() << " person/people who can vote.\n";
-    for (const auto& row : query_results) {
-        auto name = row.getFieldAs<std::string>("$cv", "name");
-        if (name) {
-            std::cout << " - " << *name << std::endl;
-        }
-    }
-
-    // Expected Output:
-    // Granting voting rights to: Alice
-    //
-    // Fired 1 rule(s).
-    // Found 1 person/people who can vote.
-    //  - Alice
-
-    return 0;
-}
-```
-
-## Data Ingestion
-
-RulesForge provides a unified `add_data()` API for loading data from multiple sources:
-
-```cpp
-#include "engine/data_source.hpp"
-
-// Add fact objects
-session->add_data(person);
-
-// Load from JSON
-std::string json = read_file("orders.json");
-session->add_data(DataSource::json(json, "orders[*]"));
-
-// Load from CSV
-session->add_data(DataSource::csv("customers.csv", "age > 18"));
-
-// Load from DSV
-session->add_data(DataSource::dsv(dsv_content, "amount > 100"));
-```
-
-This replaces the deprecated `from json/csv` syntax in rules, providing better performance and control.
-
-## Strengths
-
-- Performance-oriented Rete algorithm
-- Immutable knowledge base, mutable sessions
-- Comprehensive feature set (TMS, CEP, aggregations)
-- Modern C++20 with thorough test coverage
-
-## Documentation
-
-For a complete reference on the RFL syntax, features, and advanced design patterns, please see the
-
-- [RFL Language Guide](./docs/USER_GUIDE.md)
-- [RFL Grammar Guide](./docs/dsl.md)
+Those entry-point docs have now been rewritten around the current code and public ABI.

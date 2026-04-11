@@ -1910,7 +1910,6 @@ int main(int argc, char **argv){
   exitcode = ((lem.errorcnt > 0) || (lem.nconflict > 0)) ? 1 : 0;
   lemon_free_all();
   exit(exitcode);
-  return (exitcode);
 }
 /******************** From the file "msort.c" *******************************/
 /*

@@ -1,4 +1,5 @@
 set(CMAKE_COLOR_DIAGNOSTICS ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # building the tests
 option(ENABLE_TESTS "Enable the tests" OFF)

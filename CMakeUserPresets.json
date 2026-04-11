@@ -8,7 +8,8 @@
             "name": "win-paths",
             "hidden": true,
             "cacheVariables": {
-                "EXTERNAL_ROOT": "C:/projects/cpp/external/pkgs",
+                "TURBONET_ROOT": "c:/projects/cpp/external/pkgs/turbonet",
+                "TURBOSCRIPT_ROOT": "c:/projects/cpp/external/pkgs/turbo_script",
                 "CMAKE_MAKE_PROGRAM": "C:/Users/lockg/scoop/shims/ninja.exe",
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
                 "VCPKG_MANIFEST_MODE": "ON"
@@ -25,20 +26,25 @@
                 "strategy": "external"
             }
         },
-        {
+         {
             "name": "linux-paths",
             "hidden": true,
             "cacheVariables": {
                 "VCPKG_TARGET_TRIPLET": "x64-linux",
+                "TURBONET_ROOT": "/opt/turbonet",
+                "TURBOSCRIPT_ROOT": "/opt/turboscript",
                 "CMAKE_MAKE_PROGRAM": "/usr/bin/ninja"
             },
             "environment": {
-                "VCPKG_ROOT": "/vcpkg"
+                "VCPKG_ROOT": "/opt/vcpkg"
             }
         },
         {
             "name": "win-dev-user",
             "displayName": "Developer Build (Windows, User)",
+            "cacheVariables": {
+                "ENABLE_SANITIZER_ADDRESS": "ON"
+            },
             "inherits": [
                 "base-win-dev-user",
                 "win-paths"
@@ -53,18 +59,21 @@
             ]
         },
         {
-            "name": "win-dev-user-ASan",
-            "displayName": "Developer Build (Windows, ASAN, User)",
+            "name": "linux-dev-user",
+            "displayName": "Developer Build (Linux, User)",
+            "cacheVariables": {
+                "ENABLE_SANITIZER_ADDRESS": "OFF"
+            },
             "inherits": [
-                "base-win-dev-user-ASan",
-                "win-paths"
+                "base-linux-dev-user",
+                "linux-paths"
             ]
         },
         {
-            "name": "linux-dev-user",
-            "displayName": "Developer Build (Linux, User)",
+            "name": "linux-release-user",
+            "displayName": "Release Build (Linux, User)",
             "inherits": [
-                "base-linux-dev-user",
+                "base-linux-release-user",
                 "linux-paths"
             ]
         }
@@ -79,8 +88,58 @@
             "configurePreset": "win-release-user"
         },
         {
-            "name": "win-dev-user-ASan",
-            "configurePreset": "win-dev-user-ASan"
+            "name": "linux-dev-user",
+            "configurePreset": "linux-dev-user"
+        },
+        {
+            "name": "linux-release-user",
+            "configurePreset": "linux-release-user"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "win-dev-user",
+            "configurePreset": "win-dev-user",
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": false
+            },
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "win-release-user",
+            "configurePreset": "win-release-user",
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": false
+            },
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "linux-dev-user",
+            "configurePreset": "linux-dev-user",
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": false
+            },
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "linux-release-user",
+            "configurePreset": "linux-release-user",
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": false
+            },
+            "output": {
+                "outputOnFailure": true
+            }
         }
     ]
 }

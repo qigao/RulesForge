@@ -111,19 +111,19 @@ end
 
             auto facts = create_facts(10000);
 
-            benchmark("fire 10K simple rule", 5) {
+            benchmark("fire 10K simple rule", 5, 1.0) {
                 auto s = kb_simple->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
             }
 
-            benchmark("fire 10K medium rule", 5) {
+            benchmark("fire 10K medium rule", 5, 1.0) {
                 auto s = kb_medium->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
             }
 
-            benchmark("fire 10K complex rule", 5) {
+            benchmark("fire 10K complex rule", 5, 1.0) {
                 auto s = kb_complex->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
@@ -138,7 +138,7 @@ end
             check(result.success);
             auto facts = create_facts(1000);
 
-            benchmark("fire 1K facts / 10 rules", 10) {
+            benchmark("fire 1K facts / 10 rules", 10, 1.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
@@ -151,7 +151,7 @@ end
             check(result.success);
             auto facts = create_facts(1000);
 
-            benchmark("fire 1K facts / 50 rules", 10) {
+            benchmark("fire 1K facts / 50 rules", 10, 1.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
@@ -164,7 +164,7 @@ end
             check(result.success);
             auto facts = create_facts(1000);
 
-            benchmark("fire 1K facts / 100 rules", 5) {
+            benchmark("fire 1K facts / 100 rules", 5, 1.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
@@ -177,7 +177,7 @@ end
             check(result.success);
             auto facts = create_facts(200);
 
-            benchmark("fire 200 facts / 500 rules", 3) {
+            benchmark("fire 200 facts / 500 rules", 3, 1.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
@@ -190,7 +190,7 @@ end
             check(result.success);
             auto facts = create_facts(100);
 
-            benchmark("fire 100 facts / 1000 rules", 2) {
+            benchmark("fire 100 facts / 1000 rules", 2, 1.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
@@ -203,7 +203,7 @@ end
             auto kb = build_simple_kb();
             auto facts = create_facts(10000);
 
-            benchmark("stream 1K insert+fire", 5) {
+            benchmark("stream 1K insert+fire", 5, 1.0) {
                 auto s = kb->create_session();
                 for (int i = 0; i < 1000; ++i) {
                     s->add_fact(facts[i]);
@@ -211,7 +211,7 @@ end
                 }
             }
 
-            benchmark("stream 10K insert+fire", 2) {
+            benchmark("stream 10K insert+fire", 2, 1.0) {
                 auto s = kb->create_session();
                 for (int i = 0; i < 10000; ++i) {
                     s->add_fact(facts[i]);
@@ -272,7 +272,7 @@ end
             auto facts_1k = create_facts(1000);
             auto facts_10k = create_facts(10000);
 
-            benchmark("retract 1K facts", 10) {
+            benchmark("retract 1K facts", 10, 1.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts_1k);
                 s->fire_all_rules();
@@ -282,7 +282,7 @@ end
                 s->fire_all_rules();
             }
 
-            benchmark("retract 10K facts", 3) {
+            benchmark("retract 10K facts", 3, 1.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts_10k);
                 s->fire_all_rules();

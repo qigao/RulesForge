@@ -1,227 +1,83 @@
-# RulesForge Rules Engine - Quick Start Guide
+# RulesForge Quickstart
 
-*Get up and running in 15 minutes*
+This guide uses the public C API and the bundled `capi_demo` tool because that path matches the current install surface and examples in this repository.
 
-## What is RulesForge?
+## 1. Build
 
-RulesForge is a high-performance C++ rules engine implementing the **Rete algorithm** with a **Native RHS** action language. Think "business logic as code" - write your complex conditions in a declarative language, execute actions in a clean native syntax.
-
-## 5-Minute Example
-
-### 1. Write Your Business Rules
-
-Create `my_rules.rfl`:
-
-```rfl
-// Define your data model
-declare Customer
-    id: int
-    name: String
-    age: int
-    balance: double
-    status: String
-end
-
-declare VipCustomer
-    customerId: int
-    reason: String
-end
-
-// Business rule: High-value customers become VIP
-rule "Promote to VIP"
-salience 10
-when
-    $c: Customer(balance > 10000, status == "Active")
-    not VipCustomer(customerId == $c.id)
-then
-    insert VipCustomer {
-        customerId = $c.id,
-        reason = "high_balance"
-    }
-end
-
-// Query to find all VIP customers
-query "find_vip_customers"
-    $vip: VipCustomer()
-    $customer: Customer(id == $vip.customerId)
-end
-```
-
-### 2. Use in Your C++ Application
-
-```cpp
-#include "knowledge_base.hpp"
-#include "stateful_session.hpp"
-#include "fact_builder.hpp"
-
-int main() {
-    // Load and compile rules
-    std::string rfl = read_file("my_rules.rfl");
-    ParsingResult result;
-    auto kb = build_knowledge_base(rfl, result);
-
-    if (!result.success) {
-        for (auto& err : result.errors) {
-            std::cerr << err.to_string() << std::endl;
-        }
-        return 1;
-    }
-
-    // Create session and add facts
-    auto session = kb->create_session();
-
-    // Add customer data using type-safe builder
-    auto customer = CUSTOMER()
-        .id(1001)
-        .name("Alice Johnson")
-        .age(35)
-        .balance(15000.0)
-        .status("Active")
-        .build();
-
-    session->add_fact(customer);
-
-    // Fire rules and see the magic happen
-    int rules_fired = session->fire_all_rules();
-    std::cout << "Fired " << rules_fired << " rules\n";
-
-    // Query results
-    auto vips = session->execute_query("find_vip_customers");
-    std::cout << "Found " << vips.size() << " VIP customers\n";
-
-    return 0;
-}
-```
-
-### 3. Expected Output
-
-```
-Fired 1 rules
-Found 1 VIP customers
-```
-
-## Key Concepts in 2 Minutes
-
-### Facts = Your Data
-
-```cpp
-// Traditional approach - manual fact creation
-auto fact = std::make_shared<Fact>();
-fact->type = "Customer";
-fact->fields["name"] = "John";
-fact->fields["balance"] = 5000.0;
-
-// RulesForge approach - type-safe builders
-auto customer = CUSTOMER()
-    .name("John")
-    .balance(5000.0)
-    .build();
-```
-
-### Rules = Your Business Logic
-
-```rfl
-rule "Rule Name"
-when
-    // Conditions - what data pattern to match?
-    $customer: Customer(balance > 1000, status == "Active")
-then
-    // Actions - what to do when matched?
-    insert HighValueCustomer { customerId = $customer.id }
-end
-```
-
-### Sessions = Your Working Memory
-
-```cpp
-auto session = kb->create_session();
-session->add_fact(customer_data);      // Add data
-int fired = session->fire_all_rules(); // Process rules
-auto results = session->execute_query("my_query"); // Query results
-```
-
-## Common Patterns
-
-### Pattern 1: Data Validation
-
-```rfl
-rule "Validate Customer"
-when
-    $c: Customer(age < 18)
-then
-    insert ValidationError { message = "Customer must be 18+" }
-end
-```
-
-### Pattern 2: Data Transformation
-
-```rfl
-rule "Calculate Credit Score"
-when
-    $c: Customer(balance > 0)
-    not CreditScore(customerId == $c.id)
-then
-    insert CreditScore {
-        customerId = $c.id,
-        score = min(850, max(300, $c.balance / 100 + 600))
-    }
-end
-```
-
-### Pattern 3: Complex Conditions
-
-```rfl
-rule "Loyal Customer Reward"
-when
-    $c: Customer(status == "Active")
-    $orders: Number() from accumulate(
-        Order(customerId == $c.id, amount > 100),
-        count()
-    )
-    eval($orders >= 5)
-then
-    insert Reward { customerId = $c.id, points = 1000 }
-end
-```
-
-## Build and Run
-
-### Prerequisites
+Requirements:
 
 - CMake 3.20+
-- C++20 compiler (MSVC 2022, GCC 11+, Clang 13+)
-- vcpkg (for dependencies)
+- C17/C++20 compiler
+- Ninja
+- `vcpkg`
+- local package roots for `TurboNet`, `TurboScript`, and `TurboNet`
 
-### Quick Build
+Generic configure command:
 
 ```bash
-git clone <your-repo>
-cd rulesforge
-cmake --preset=default
+cmake -S . -B build \
+  -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE=/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake \
+  -DTURBONET_ROOT=/path/to/TurboNet \
+  -DTURBOSCRIPT_ROOT=/path/to/TurboScript \
+  -DTURBO_UTILS=/path/to/TurboNet
+
 cmake --build build
 ```
 
-### Run Examples
+If your machine already has repo-specific presets, `cmake --list-presets` will show them.
+
+## 2. Run A Real Example
+
+Use the bundled loan example:
 
 ```bash
-# Basic example
-./build/bin/ruleforge_engine examples/basic.rfl
-
-# Performance demo
-./build/bin/memory_optimization_demo
+./build/bin/capi_demo \
+  -r docs/examples/loan-eligibility/loan-eligibility.rfl \
+  -j docs/examples/loan-eligibility/loan-applications-sample.json \
+  -m applications:com.bank.loan.LoanApplication \
+  -q LoanDecisions \
+  -b decision \
+  -f applicationId,approved,approvedAmount,reason
 ```
 
-## What's Next?
+What each flag means:
 
-- **Simple rules?** → Continue with the [User Guide](USER_GUIDE.md)
-- **Production deployment?** → See [Deployment Guide](DEPLOYMENT.md)
+- `-r`: RFL rules file
+- `-j`: JSON data file
+- `-m`: map one JSON array to one fact type as `array:type`
+- `-q`: query to execute after firing rules
+- `-b`: query binding name to print
+- `-f`: comma-separated fields to print
 
-## Need Help?
+## 3. What Happens At Runtime
 
-- 📖 **Documentation**: All guides are in `/docs/`
-- 🐛 **Issues**: GitHub Issues for bug reports
-- 💡 **Examples**: Check `/rulesforge/example/` directory
-- ⚡ **Performance**: See memory optimization examples
+The demo does this:
 
----
-*Built with ❤️ using modern C++20 and the Rete algorithm*
+1. `ruleforge_init()`
+2. `ruleforge_kb_create()`
+3. `ruleforge_kb_load_drl()`
+4. `ruleforge_session_create()`
+5. load facts from JSON or CSV
+6. `ruleforge_session_fire_all_rules()`
+7. `ruleforge_session_query()`
+
+Those APIs are declared in [`include/rule_forge.h`](/C:/projects/cpp/rulesforge/include/rule_forge.h).
+
+## 4. Try CSV Instead
+
+```bash
+./build/bin/capi_demo \
+  -r capi/examples/payments.rfl \
+  -c capi/examples/payments_test_data.csv \
+  -T com.example.pricing.Order \
+  -q OrdersWithDiscount \
+  -f quantity,unitPrice,finalPrice
+```
+
+## 5. Next Documents
+
+- Need plain-language onboarding: [`BEGINNER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/BEGINNER_GUIDE.md)
+- Need runtime model and integration choices: [`USER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/USER_GUIDE.md)
+- Need exact language support: [`dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md)
+- Need production advice: [`DEPLOYMENT.md`](/C:/projects/cpp/rulesforge/docs/DEPLOYMENT.md)

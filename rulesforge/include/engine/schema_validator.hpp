@@ -6,6 +6,7 @@
 #include "core/rfl_parser_state.hpp"
 
 #include <stdexcept>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -67,9 +68,7 @@ public:
     explicit SchemaValidator(std::vector<ParsedDeclaration> const& declarations) {
         for (auto const& decl : declarations) {
             declarations_[decl.type_name] = &decl;
-            if (!decl.source_package.empty()) {
-                declarations_[decl.source_package + "." + decl.type_name] = &decl;
-            }
+            short_name_declarations_[short_type_name(decl.type_name)].push_back(&decl);
         }
     }
 
@@ -81,7 +80,13 @@ public:
     std::vector<ValidationError> validate(Fact const& fact) const {
         std::vector<ValidationError> errors;
 
-        ParsedDeclaration const* decl = find_declaration(fact.type);
+        auto resolution = resolve_declaration(fact.type);
+        if (resolution.is_ambiguous()) {
+            errors.push_back({fact.type, "", build_ambiguous_type_message(fact.type, resolution.ambiguous_matches)});
+            return errors;
+        }
+
+        ParsedDeclaration const* decl = resolution.declaration;
         if (!decl) {
             errors.push_back({fact.type, "", "Unknown fact type - no declaration found"});
             return errors;
@@ -107,26 +112,81 @@ public:
     }
 
     bool has_declaration(std::string const& type_name) const {
-        return find_declaration(type_name) != nullptr;
+        auto resolution = resolve_declaration(type_name);
+        return resolution.declaration != nullptr && !resolution.is_ambiguous();
+    }
+
+    std::string canonicalize_type_name(std::string const& type_name) const {
+        auto resolution = resolve_declaration(type_name);
+        if (resolution.is_ambiguous()) {
+            throw std::runtime_error(build_ambiguous_type_message(type_name, resolution.ambiguous_matches));
+        }
+        if (resolution.declaration) {
+            return resolution.declaration->type_name;
+        }
+        return type_name;
     }
 
 private:
+    struct DeclarationResolution {
+        ParsedDeclaration const* declaration = nullptr;
+        std::vector<ParsedDeclaration const*> ambiguous_matches;
+
+        bool is_ambiguous() const { return !ambiguous_matches.empty(); }
+    };
+
     ParsedDeclaration const* find_declaration(std::string const& type_name) const {
+        auto resolution = resolve_declaration(type_name);
+        return resolution.is_ambiguous() ? nullptr : resolution.declaration;
+    }
+
+    DeclarationResolution resolve_declaration(std::string const& type_name) const {
         auto it = declarations_.find(type_name);
         if (it != declarations_.end()) {
-            return it->second;
+            return {it->second, {}};
         }
 
+        if (type_name.find('.') != std::string::npos) {
+            return {};
+        }
+
+        auto short_it = short_name_declarations_.find(type_name);
+        if (short_it == short_name_declarations_.end()) {
+            return {};
+        }
+        if (short_it->second.size() == 1) {
+            return {short_it->second.front(), {}};
+        }
+        return {nullptr, short_it->second};
+    }
+
+    static std::string short_type_name(std::string const& type_name) {
         size_t dot_pos = type_name.rfind('.');
-        if (dot_pos != std::string::npos) {
-            std::string short_name = type_name.substr(dot_pos + 1);
-            it = declarations_.find(short_name);
-            if (it != declarations_.end()) {
-                return it->second;
-            }
+        if (dot_pos == std::string::npos) {
+            return type_name;
         }
+        return type_name.substr(dot_pos + 1);
+    }
 
-        return nullptr;
+    static std::string build_ambiguous_type_message(
+        std::string const& type_name,
+        std::vector<ParsedDeclaration const*> const& matches)
+    {
+        std::string msg = "Ambiguous fact type - matches ";
+        for (size_t i = 0; i < matches.size(); ++i) {
+            if (i > 0) {
+                msg += ", ";
+            }
+            msg += "'";
+            msg += matches[i]->type_name;
+            msg += "'";
+        }
+        if (!type_name.empty()) {
+            msg += " for input '";
+            msg += type_name;
+            msg += "'";
+        }
+        return msg;
     }
 
     /**
@@ -152,8 +212,9 @@ private:
                 return (FT_SET_COMPAT & expected) != 0;
             } else if constexpr (std::is_same_v<T, std::shared_ptr<ValueMap>>) {
                 return (FT_MAP_COMPAT & expected) != 0;
+            } else {
+                return false;
             }
-            return false;
         }, value);
     }
 
@@ -168,7 +229,7 @@ private:
             else if constexpr (std::is_same_v<T, std::shared_ptr<TypedList>>) return "List";
             else if constexpr (std::is_same_v<T, std::shared_ptr<ValueSet>>) return "Set";
             else if constexpr (std::is_same_v<T, std::shared_ptr<ValueMap>>) return "Map";
-            return "unknown";
+            else return "unknown";
         }, value);
     }
 
@@ -190,6 +251,7 @@ private:
     }
 
     std::map<std::string, ParsedDeclaration const*> declarations_;
+    std::map<std::string, std::vector<ParsedDeclaration const*>> short_name_declarations_;
 };
 
 #endif // SCHEMA_VALIDATOR_HPP

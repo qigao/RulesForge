@@ -2,6 +2,7 @@
 #include "engine/knowledge_base.hpp"
 #include "engine/stateful_session.hpp"
 #include "core/exceptions.hpp"
+#include "test_helpers.hpp"
 #include "tinytest.h"
 
 struct TestFixture {
@@ -10,12 +11,7 @@ struct TestFixture {
     void build_session(std::string const& drl) {
         ParsingResult result;
         auto kb = build_knowledge_base(drl, result);
-        if (!result.success) {
-            for (auto const& err : result.errors) {
-                throw std::runtime_error("RFL parsing failed: " + err.to_string());
-            }
-            throw std::runtime_error("RFL parsing failed: Unknown error");
-        }
+        if (!result.success) throw_parse_failure(result);
         if (!kb) { throw std::runtime_error("KnowledgeBase is null"); }
         session = kb->create_session();
         if (!session) { throw std::runtime_error("Session is null"); }
@@ -51,12 +47,7 @@ static std::shared_ptr<KnowledgeBase> create_test_kb() {
 
     ParsingResult result;
     auto kb = build_knowledge_base(drl, result);
-    if (!result.success) {
-        for (auto const& err : result.errors) {
-            throw std::runtime_error("RFL parsing failed: " + err.to_string());
-        }
-        throw std::runtime_error("RFL parsing failed: Unknown error");
-    }
+    if (!result.success) throw_parse_failure(result);
     if (!kb) { throw std::runtime_error("KnowledgeBase is null"); }
     return kb;
 }

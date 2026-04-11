@@ -15,44 +15,11 @@ class FactArena {
 public:
     explicit FactArena(size_t size = 64 * 1024 * 1024) { // 64MB default
         mem_init(&arena_, size);
+        extra_facts_.reserve(4);
     }
 
     ~FactArena() {
-        // We do NOT call Fact destructors.
-        // Fact contains InternedKeyMap which uses string_view (trivial destructor relative to data)
-        // BUT it might contain other things.
-        // If Fact has non-trivial destructor that manages EXTERNAL resources, this is a leak.
-        // RulesForge Facts usually contain string_views, numbers, or shared_ptrs to other facts (FactList).
-        // If Fact contains shared_ptr, we MUST call destructor or we leak the control block and the object it points to.
-
-        // Current Fact definition:
-        // struct Fact {
-        //     int64_t id;
-        //     std::string type; // std::string has destructor!
-        //     InternedKeyMap<ConstraintValue> fields; // destructors needed for values
-        // };
-
-        // Since we use turbo_pool which is linear and doesn't support individual delete,
-        // we MUST iterate and destroy if we want to be clean, OR we rely on the fact that
-        // pure arena usage implies we use arena-aware types (e.g. ArenaString).
-        // BUT current Fact uses std::string.
-        // So we MUST call destructors.
-
-        // This linear arena doesn't track objects.
-        // Optimally, we should change Fact to use Arena-allocated strings/maps.
-        // For now, to solve "lot of shared_ptr", we might just accept that we need to track facts to destroy them
-        // or change Fact members to be trivially destructible (or arena managed).
-
-        // However, standard arena pattern in C++ with non-trivial types:
-        // maintain a list of destructors to call, or use a "frame" system.
-
-        // For this task, strict performance is key.
-        // If we just free the arena, std::string buf pointers leak.
-
-        // To properly support this without leaks, we need a list of allocated facts.
-        for (auto* fact : facts_) {
-            fact->~Fact();
-        }
+        destroy_tracked_facts();
         mem_destroy(&arena_);
     }
 
@@ -61,7 +28,11 @@ public:
         void* p = mem_alloc(&arena_, sizeof(Fact));
         if (!p) throw std::bad_alloc();
         Fact* fact = new (p) Fact(std::forward<Args>(args)...);
-        facts_.push_back(fact);
+        if (first_fact_ == nullptr) {
+            first_fact_ = fact;
+        } else {
+            extra_facts_.push_back(fact);
+        }
         return fact;
     }
 
@@ -71,20 +42,32 @@ public:
     }
 
     void reset() {
-        for (auto* fact : facts_) {
-            fact->~Fact();
-        }
-        facts_.clear();
+        destroy_tracked_facts();
         mem_reset(&arena_);
     }
 
+    Fact* get_first_fact() const { return first_fact_; }
+    std::vector<Fact*> const& get_extra_facts() const { return extra_facts_; }
+
     size_t memory_usage() const {
-        return t_atomic_load_size_relaxed((t_atomic_size_t*)&arena_.total_used);
+        return arena_.total_used.load(std::memory_order_relaxed);
     }
 
 private:
+    void destroy_tracked_facts() {
+        if (first_fact_ != nullptr) {
+            first_fact_->~Fact();
+            first_fact_ = nullptr;
+        }
+        for (auto* fact : extra_facts_) {
+            fact->~Fact();
+        }
+        extra_facts_.clear();
+    }
+
     mem_pool_t arena_;
-    std::vector<Fact*> facts_; // To track for destruction
+    Fact* first_fact_ = nullptr;
+    std::vector<Fact*> extra_facts_;
 };
 
 } // namespace rulesforge

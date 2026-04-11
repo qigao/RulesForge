@@ -4,6 +4,7 @@
 #include <string>
 #include <cstdio>
 #include <fstream>
+#include <cstring>
 
 suite("CAPI") {
     group("Initialization and Cleanup") {
@@ -24,7 +25,6 @@ suite("CAPI") {
     group("Error Handling") {
         it("reports errors correctly") {
             ruleforge_init();
-            ruleforge_knowledge_base_t kb = nullptr;
             ruleforge_status_t status = ruleforge_kb_create(nullptr);
             check_int_ne(status, RULES_FORGE_OK);
             check_str_contains(ruleforge_get_last_error_message(), "NULL");
@@ -138,6 +138,151 @@ end
             ruleforge_cleanup();
         }
 
+        it("adds fact from JSON and returns stable fact handle") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            ruleforge_fact_t fact = nullptr;
+            check_int_eq(
+                ruleforge_session_add_fact_json_ex(
+                    session,
+                    "MyFact",
+                    R"({"name": "Alice", "age": 30})",
+                    &fact),
+                RULES_FORGE_OK);
+            check_not_null(fact);
+
+            char name_buffer[32] = {0};
+            size_t actual_length = 0;
+            check_int_eq(
+                ruleforge_fact_get_field_as_string(
+                    fact, "name", name_buffer, sizeof(name_buffer), &actual_length),
+                RULES_FORGE_OK);
+            check_str_eq(name_buffer, "Alice");
+
+            int64_t age = 0;
+            check_int_eq(ruleforge_fact_get_field_as_int(fact, "age", &age), RULES_FORGE_OK);
+            check_int_eq((int)age, 30);
+
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
+
+        it("resolves short fact names against packaged declarations") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            const char* packaged_drl = R"(
+package mqtt.broker.rules
+
+declare MqttSubscribeTask
+    client_id: String
+    username: String
+end
+
+query "FindSubscribeTask"
+    $task : MqttSubscribeTask(client_id == "rules-client")
+end
+)";
+            check_int_eq(ruleforge_kb_load_drl(kb, packaged_drl), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            check_int_eq(
+                ruleforge_session_add_fact_json(
+                    session,
+                    "MqttSubscribeTask",
+                    R"({"client_id":"rules-client","username":"alice"})"),
+                RULES_FORGE_OK);
+
+            ruleforge_query_result_t query_result = nullptr;
+            check_int_eq(ruleforge_session_query(session, "FindSubscribeTask", &query_result), RULES_FORGE_OK);
+            check_not_null(query_result);
+            check_int_eq(ruleforge_query_result_get_size(query_result), 1);
+
+            ruleforge_fact_t fact = nullptr;
+            check_int_eq(ruleforge_query_result_get_fact_at_index(query_result, 0, "task", &fact), RULES_FORGE_OK);
+            check_not_null(fact);
+
+            char username[32] = {0};
+            size_t actual_length = 0;
+            check_int_eq(
+                ruleforge_fact_get_field_as_string(
+                    fact, "username", username, sizeof(username), &actual_length),
+                RULES_FORGE_OK);
+            check_str_eq(username, "alice");
+
+            check_int_eq(ruleforge_query_result_destroy(query_result), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
+
+        it("adds fact from binary and returns stable fact handle") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            const char* binary_drl = R"(
+declare BinaryFact
+    a: int
+    b: int
+    c: long
+end
+
+query "AllBinaryFacts"
+    $f : BinaryFact()
+end
+)";
+            check_int_eq(ruleforge_kb_load_drl(kb, binary_drl), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            uint8_t payload[16] = {0};
+            int32_t a = 100;
+            int32_t b = 200;
+            int64_t c = 300000LL;
+            std::memcpy(payload + 0, &a, sizeof(a));
+            std::memcpy(payload + 4, &b, sizeof(b));
+            std::memcpy(payload + 8, &c, sizeof(c));
+
+            ruleforge_fact_t fact = nullptr;
+            check_int_eq(
+                ruleforge_session_add_fact_binary_ex(
+                    session, "BinaryFact", payload, sizeof(payload), &fact),
+                RULES_FORGE_OK);
+            check_not_null(fact);
+
+            int64_t value = 0;
+            check_int_eq(ruleforge_fact_get_field_as_int(fact, "a", &value), RULES_FORGE_OK);
+            check_int_eq((int)value, 100);
+            check_int_eq(ruleforge_fact_get_field_as_int(fact, "b", &value), RULES_FORGE_OK);
+            check_int_eq((int)value, 200);
+            check_int_eq(ruleforge_fact_get_field_as_int(fact, "c", &value), RULES_FORGE_OK);
+            check_long_eq(value, 300000LL);
+
+            ruleforge_query_result_t query_result = nullptr;
+            check_int_eq(ruleforge_session_query(session, "AllBinaryFacts", &query_result), RULES_FORGE_OK);
+            check_not_null(query_result);
+            check_int_eq(ruleforge_query_result_get_size(query_result), 1);
+            check_int_eq(ruleforge_query_result_destroy(query_result), RULES_FORGE_OK);
+
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
+
         it("adds facts from CSV string") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;
@@ -156,6 +301,45 @@ end
             check_int_eq(loaded, 2);
             check_size_eq(ruleforge_session_get_fact_count(session), 2);
 
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
+
+        it("adds facts from CSV string and returns fact handles") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            const char* csv = "name,age\nAlice,30\nBob,17\n";
+            ruleforge_fact_t* facts = nullptr;
+            int loaded = 0;
+            check_int_eq(
+                ruleforge_session_add_facts_csv_ex(session, "Person", csv, &facts, &loaded),
+                RULES_FORGE_OK
+            );
+            check_int_eq(loaded, 2);
+            check_not_null(facts);
+            check_not_null(facts[0]);
+            check_not_null(facts[1]);
+
+            char name_buffer[32] = {0};
+            size_t actual_length = 0;
+            check_int_eq(
+                ruleforge_fact_get_field_as_string(
+                    facts[0], "name", name_buffer, sizeof(name_buffer), &actual_length),
+                RULES_FORGE_OK);
+            check_str_eq(name_buffer, "Alice");
+
+            int64_t age = 0;
+            check_int_eq(ruleforge_fact_get_field_as_int(facts[1], "age", &age), RULES_FORGE_OK);
+            check_int_eq((int)age, 17);
+
+            ruleforge_fact_array_free(facts);
             check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
             check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
             ruleforge_cleanup();
@@ -184,6 +368,47 @@ end
             check_int_eq(loaded, 2);
             check_size_eq(ruleforge_session_get_fact_count(session), 2);
 
+            std::remove(temp_csv_path);
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
+
+        it("adds facts from CSV file and returns fact handles") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            const char* temp_csv_path = "capi_test_temp_handles.csv";
+            {
+                std::ofstream out(temp_csv_path, std::ios::binary);
+                out << "name,age\nCharlie,21\nDiana,42\n";
+            }
+
+            ruleforge_fact_t* facts = nullptr;
+            int loaded = 0;
+            check_int_eq(
+                ruleforge_session_add_facts_csv_file_ex(session, "Person", temp_csv_path, &facts, &loaded),
+                RULES_FORGE_OK
+            );
+            check_int_eq(loaded, 2);
+            check_not_null(facts);
+            check_not_null(facts[0]);
+            check_not_null(facts[1]);
+
+            char name_buffer[32] = {0};
+            size_t actual_length = 0;
+            check_int_eq(
+                ruleforge_fact_get_field_as_string(
+                    facts[1], "name", name_buffer, sizeof(name_buffer), &actual_length),
+                RULES_FORGE_OK);
+            check_str_eq(name_buffer, "Diana");
+
+            ruleforge_fact_array_free(facts);
             std::remove(temp_csv_path);
             check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
             check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);

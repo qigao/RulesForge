@@ -1,0 +1,19 @@
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any
+
+{{#enums}}
+class {{name}}(Enum):
+{{#values}}
+    {{name}} = "{{name}}"
+{{/values}}
+
+{{/enums}}
+{{#declarations}}
+@dataclass
+class {{py_name}}:
+{{#fields}}
+    {{name}}: {{py_type}}
+{{/fields}}
+
+{{/declarations}}

@@ -7,6 +7,7 @@
 
 #include <optional>
 #include <stdexcept>
+#include <vector>
 
 /**
  * @brief High-performance priority queue using TurboNet bucket_priority_queue_spsc
@@ -43,7 +44,10 @@ public:
         size_t capacity_per_priority = 4096;  // Must be power of 2
     };
 
-    explicit PriorityRingBuffer(Config const& config = Config{}) {
+    PriorityRingBuffer()
+        : PriorityRingBuffer(Config{}) {}
+
+    explicit PriorityRingBuffer(Config const& config) {
         if (!bucket_priority_queue_spsc_init(&queue_, config.capacity_per_priority)) {
             throw std::runtime_error("Failed to initialize bucket_priority_queue_spsc");
         }
@@ -115,6 +119,10 @@ public:
      * @return Vector of activation hashes (may be less than max_items)
      */
     std::vector<size_t> try_dequeue_batch(size_t max_items) {
+        if (max_items == 0) {
+            return {};
+        }
+
         std::vector<size_t> result;
         result.resize(max_items);
 

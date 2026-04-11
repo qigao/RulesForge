@@ -21,6 +21,18 @@ target_include_directories(
 set_target_properties(test_json_codec PROPERTIES FOLDER tbe/data_bind)
 add_test(NAME test_json_codec COMMAND test_json_codec)
 
+add_executable(test_csv_codec test_csv_codec.cpp)
+target_link_libraries(
+    test_csv_codec PRIVATE data_bind TurboNet::TinyTest rfl_parser TurboNet::Parser
+)
+target_include_directories(
+    test_csv_codec PRIVATE
+    ${CMAKE_SOURCE_DIR}/rulesforge/include
+    ${CMAKE_SOURCE_DIR}/rulesforge/src
+)
+set_target_properties(test_csv_codec PROPERTIES FOLDER tbe/data_bind)
+add_test(NAME test_csv_codec COMMAND test_csv_codec)
+
 add_executable(test_binary_codec test_binary_codec.cpp)
 target_link_libraries(
     test_binary_codec PRIVATE data_bind TurboNet::TinyTest rfl_parser

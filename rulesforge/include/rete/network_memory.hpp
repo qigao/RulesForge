@@ -22,6 +22,7 @@ struct MemSlotCounts {
     int query_terminal = 0;
     int eval = 0;
     int unnest = 0;
+    int window = 0;
 };
 
 struct NetworkMemory {
@@ -139,6 +140,12 @@ struct NetworkMemory {
                       std::vector<TokenWME const*>>> parent_to_children;
     };
 
+    // --- WindowNode state ---
+    struct WindowMem {
+        std::vector<Fact*> facts; // Used as a simple deque/buffer for sliding windows
+    };
+
+
     // Flat arrays — one entry per node of that kind, indexed by mem_slot
     std::vector<AlphaMem> alpha;
     std::vector<SegmentMem> segment;
@@ -151,6 +158,7 @@ struct NetworkMemory {
     std::vector<QueryTerminalMem> query_terminal;
     std::vector<EvalMem> eval;
     std::vector<UnnestMem> unnest;
+    std::vector<WindowMem> window;
 
     void allocate(MemSlotCounts const& counts) {
         alpha.resize(counts.alpha);
@@ -164,6 +172,7 @@ struct NetworkMemory {
         query_terminal.resize(counts.query_terminal);
         eval.resize(counts.eval);
         unnest.resize(counts.unnest);
+        window.resize(counts.window);
     }
 };
 

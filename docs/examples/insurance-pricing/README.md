@@ -101,8 +101,8 @@ Discounts:
 ### Quick Run with capi_demo
 
 ```bash
-capi_demo \
-  -d docs/examples/insurance-pricing/insurance-pricing.rfl \
+./build/bin/capi_demo \
+  -r docs/examples/insurance-pricing/insurance-pricing.rfl \
   -j docs/examples/insurance-pricing/insurance-applications-sample.json \
   -m applications:com.insurance.auto.InsuranceApplication \
   -q PolicyDecisions \
@@ -110,47 +110,7 @@ capi_demo \
   -f applicationId,approved,annualPremium,coverageLevel,reason
 ```
 
-### C++ Integration
-
-```cpp
-#include "knowledge_base.hpp"
-
-int main() {
-    ParseResult result;
-    auto kb = build_knowledge_base_from_file("insurance-pricing.rfl", result);
-    auto session = kb->create_session();
-
-    auto application = std::make_shared<Fact>();
-    application->type = "com.insurance.auto.InsuranceApplication";
-    application->fields["applicationId"] = "INS-2024-001";
-    application->fields["applicantName"] = "John Smith";
-    application->fields["dateOfBirth"] = "1985-03-15";
-    application->fields["licenseYears"] = static_cast<int64_t>(12);
-    application->fields["accidentCount"] = static_cast<int64_t>(0);
-    application->fields["violationCount"] = static_cast<int64_t>(1);
-    application->fields["dui"] = static_cast<int64_t>(0);
-    application->fields["vehicleYear"] = static_cast<int64_t>(2022);
-    application->fields["vehicleMake"] = "Toyota";
-    application->fields["vehicleModel"] = "Camry";
-    application->fields["vehicleType"] = "sedan";
-    application->fields["antiTheft"] = static_cast<int64_t>(1);
-    application->fields["airbags"] = static_cast<int64_t>(1);
-    application->fields["absSystem"] = static_cast<int64_t>(1);
-    application->fields["zipCode"] = "94105";
-    application->fields["annualMileage"] = static_cast<int64_t>(12000);
-    application->fields["garageParked"] = static_cast<int64_t>(1);
-    application->fields["multiPolicy"] = static_cast<int64_t>(1);
-    application->fields["existingCustomer"] = static_cast<int64_t>(0);
-
-    session->add_fact(application);
-    session->fire_all_rules();
-
-    auto decisions = session->execute_query("PolicyDecisions");
-    // Process results...
-
-    return 0;
-}
-```
+The bundled sample JSON is directly runnable because `applications` is a top-level array that maps cleanly to `InsuranceApplication`.
 
 ## Expected Results
 

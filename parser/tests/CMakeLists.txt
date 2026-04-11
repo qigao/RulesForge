@@ -22,5 +22,9 @@ foreach(test_source ${PARSER_TEST_SOURCES})
         # Public parser API headers (rfl_parser.hpp, rfl_lexer.hpp, …)
         ${CMAKE_SOURCE_DIR}/parser/include
     )
-    set_target_properties(${executable_name} PROPERTIES FOLDER ${folder_name})
+    set_target_properties(${executable_name} PROPERTIES
+        FOLDER ${folder_name}
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+    )
 endforeach()

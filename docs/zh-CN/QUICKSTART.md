@@ -1,228 +1,83 @@
-# RulesForge 规则引擎 - 快速入门指南
+# RulesForge 快速上手
 
-*15 分钟内即可上手*
+此指南以公開 C API 與隨倉附帶之 `capi_demo` 為主，蓋此路徑最符合當前安裝面與示例檔。
 
-## 什么是 RulesForge？
+## 1. 構建
 
-RulesForge 是一个高性能的 C++ 规则引擎，实现了 **Rete 算法** 并使用 **Native RHS** 动作语法。可以将其理解为"业务逻辑即代码"——用声明性语言编写复杂的条件，用简洁的原生语法执行动作。
-
-## 5 分钟示例
-
-### 1. 编写您的业务规则
-
-创建 `my_rules.rfl`：
-
-```rfl
-// 定义您的数据模型
-declare Customer
-    id: int
-    name: String
-    age: int
-    balance: double
-    status: String
-end
-
-declare VipCustomer
-    customerId: int
-    reason: String
-end
-
-// 业务规则：高价值客户成为 VIP
-rule "Promote to VIP"
-salience 10
-when
-    $c: Customer(balance > 10000, status == "Active")
-    not VipCustomer(customerId == $c.id)
-then
-    insert VipCustomer {
-        customerId = $c.id,
-        reason = "high_balance"
-    }
-end
-
-// 查询所有 VIP 客户
-query "find_vip_customers"
-    $vip: VipCustomer()
-    $customer: Customer(id == $vip.customerId)
-end
-```
-
-### 2. 在您的 C++ 应用程序中使用
-
-```cpp
-#include "knowledge_base.hpp"
-#include "stateful_session.hpp"
-#include "fact_builder.hpp"
-
-int main() {
-    // 加载并编译规则
-    std::string rfl = read_file("my_rules.rfl");
-    ParsingResult result;
-    auto kb = build_knowledge_base(rfl, result);
-
-    if (!result.success) {
-        for (auto& err : result.errors) {
-            std::cerr << err.to_string() << std::endl;
-        }
-        return 1;
-    }
-
-    // 创建会话并添加事实
-    auto session = kb->create_session();
-
-    // 使用类型安全构建器添加客户数据
-    auto customer = CUSTOMER()
-        .id(1001)
-        .name("Alice Johnson")
-        .age(35)
-        .balance(15000.0)
-        .status("Active")
-        .build();
-
-    session->add_fact(customer);
-
-    // 触发规则
-    int rules_fired = session->fire_all_rules();
-    std::cout << "触发了 " << rules_fired << " 条规则\n";
-
-    // 查询结果
-    auto vips = session->execute_query("find_vip_customers");
-    std::cout << "找到了 " << vips.size() << " 位 VIP 客户\n";
-
-    return 0;
-}
-```
-
-### 3. 预期输出
-
-```
-触发了 1 条规则
-找到了 1 位 VIP 客户
-```
-
-## 2 分钟内掌握关键概念
-
-### 事实 = 您的数据
-
-```cpp
-// 传统方法 - 手动创建事实
-auto fact = std::make_shared<Fact>();
-fact->type = "Customer";
-fact->fields["name"] = "John";
-fact->fields["balance"] = 5000.0;
-
-// RulesForge 方法 - 类型安全构建器
-auto customer = CUSTOMER()
-    .name("John")
-    .balance(5000.0)
-    .build();
-```
-
-### 规则 = 您的业务逻辑
-
-```rfl
-rule "规则名称"
-when
-    // 条件 - 匹配什么数据模式？
-    $customer: Customer(balance > 1000, status == "Active")
-then
-    // 动作 - 匹配后做什么？
-    insert HighValueCustomer { customerId = $customer.id }
-end
-```
-
-### 会话 = 您的工作内存
-
-```cpp
-auto session = kb->create_session();
-session->add_fact(customer_data);      // 添加数据
-int fired = session->fire_all_rules(); // 处理规则
-auto results = session->execute_query("my_query"); // 查询结果
-```
-
-## 常见模式
-
-### 模式 1: 数据验证
-
-```rfl
-rule "验证客户"
-when
-    $c: Customer(age < 18)
-then
-    insert ValidationError { message = "客户必须年满 18 岁" }
-end
-```
-
-### 模式 2: 数据转换
-
-```rfl
-rule "计算信用评分"
-when
-    $c: Customer(balance > 0)
-    not CreditScore(customerId == $c.id)
-then
-    insert CreditScore {
-        customerId = $c.id,
-        score = min(850, max(300, $c.balance / 100 + 600))
-    }
-end
-```
-
-### 模式 3: 复杂条件
-
-```rfl
-rule "忠诚客户奖励"
-when
-    $c: Customer(status == "Active")
-    $orders: Number() from accumulate(
-        Order(customerId == $c.id, amount > 100),
-        count()
-    )
-    eval($orders >= 5)
-then
-    insert Reward { customerId = $c.id, points = 1000 }
-end
-```
-
-## 构建和运行
-
-### 先决条件
+先備條件：
 
 - CMake 3.20+
-- C++20 编译器 (MSVC 2022, GCC 11+, Clang 13+)
-- vcpkg (用于依赖项)
+- 支援 C17/C++20 之編譯器
+- Ninja
+- `vcpkg`
+- 本地可用之 `TurboNet`、`TurboScript`、`TurboNet`
 
-### 快速构建
+通用配置命令：
 
 ```bash
-git clone <您的仓库>
-cd rulesforge
-cmake --preset=default
+cmake -S . -B build \
+  -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE=/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake \
+  -DTURBONET_ROOT=/path/to/TurboNet \
+  -DTURBOSCRIPT_ROOT=/path/to/TurboScript \
+  -DTURBO_UTILS=/path/to/TurboNet
+
 cmake --build build
 ```
 
-### 运行示例
+若汝機器已配置倉庫專用 preset，可先行 `cmake --list-presets` 檢之。
+
+## 2. 先跑一個真示例
+
+用內建之貸款審批示例：
 
 ```bash
-# 基本示例
-./build/bin/ruleforge_engine examples/basic.rfl
-
-# 性能演示
-./build/bin/memory_optimization_demo
+./build/bin/capi_demo \
+  -r docs/examples/loan-eligibility/loan-eligibility.rfl \
+  -j docs/examples/loan-eligibility/loan-applications-sample.json \
+  -m applications:com.bank.loan.LoanApplication \
+  -q LoanDecisions \
+  -b decision \
+  -f applicationId,approved,approvedAmount,reason
 ```
 
-## 下一步？
+各參數之義：
 
-- **简单规则？** → 继续阅读 [用户指南](USER_GUIDE.md)
-- **生产部署？** → 查看 [部署指南](DEPLOYMENT.md)
+- `-r`：RFL 規則檔
+- `-j`：JSON 數據檔
+- `-m`：將一個 JSON 陣列映射為一種事實型別，格式為 `array:type`
+- `-q`：規則觸發後要執行之查詢
+- `-b`：查詢結果中要取之 binding 名
+- `-f`：輸出欄位列表
 
-## 需要帮助？
+## 3. 執行時實際流程
 
-- 📖 **文档**：所有指南都在 `/docs/` 中
-- 🐛 **问题**：在 GitHub Issues 中报告错误
-- 💡 **示例**：查看 `/rulesforge/example/` 目录
-- ⚡ **性能**：查看内存优化示例
+`capi_demo` 會依次做此七步：
 
----
+1. `ruleforge_init()`
+2. `ruleforge_kb_create()`
+3. `ruleforge_kb_load_drl()`
+4. `ruleforge_session_create()`
+5. 從 JSON 或 CSV 載入事實
+6. `ruleforge_session_fire_all_rules()`
+7. `ruleforge_session_query()`
 
-*使用现代 C++20 和 Rete 算法构建，充满 ❤️*
+上述 API 皆定義於 [`include/rule_forge.h`](/C:/projects/cpp/rulesforge/include/rule_forge.h)。
+
+## 4. 再試 CSV
+
+```bash
+./build/bin/capi_demo \
+  -r capi/examples/payments.rfl \
+  -c capi/examples/payments_test_data.csv \
+  -T com.example.pricing.Order \
+  -q OrdersWithDiscount \
+  -f quantity,unitPrice,finalPrice
+```
+
+## 5. 接著讀什麼
+
+- 需更白話之入門：[`BEGINNER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/zh-CN/BEGINNER_GUIDE.md)
+- 需了解整合模型與 API 選型：[`USER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/zh-CN/USER_GUIDE.md)
+- 需精確語法：[`../dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md)
+- 需部署建議：[`DEPLOYMENT.md`](/C:/projects/cpp/rulesforge/docs/zh-CN/DEPLOYMENT.md)

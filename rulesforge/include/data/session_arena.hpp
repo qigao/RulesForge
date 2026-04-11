@@ -125,7 +125,7 @@ public:
 
   // Statistics
   size_t memory_used() const {
-    return t_atomic_load_size_relaxed((t_atomic_size_t*)&arena_.total_used);
+    return arena_.total_used.load(std::memory_order_relaxed);
   }
   size_t memory_available() const {
     size_t used = memory_used();

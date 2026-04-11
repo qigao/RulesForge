@@ -1,6 +1,6 @@
 # Loan Eligibility Rules Example
 
-A complete loan approval system demonstrating credit scoring, risk assessment, and automated decision-making using the Drills rule engine.
+A complete loan approval system demonstrating credit scoring, risk assessment, and automated decision-making with RulesForge.
 
 ## Business Scenario
 
@@ -77,60 +77,16 @@ Ensure all regulatory requirements are met.
 ### Quick Run with capi_demo
 
 ```bash
-capi_demo \
-  -d docs/examples/loan-eligibility/loan-eligibility.rfl \
+./build/bin/capi_demo \
+  -r docs/examples/loan-eligibility/loan-eligibility.rfl \
   -j docs/examples/loan-eligibility/loan-applications-sample.json \
   -m applications:com.bank.loan.LoanApplication \
   -q LoanDecisions \
   -b decision \
-  -f applicationId,approved,approvedAmount,interestRate,reason
+  -f applicantId,approved,approvedAmount,interestRate,reason
 ```
 
-### C++ Integration
-
-```cpp
-#include "knowledge_base.hpp"
-
-int main() {
-    // Load rules
-    ParseResult result;
-    auto kb = build_knowledge_base_from_file("loan-eligibility.rfl", result);
-
-    // Create session
-    auto session = kb->create_session();
-
-    // Insert loan application
-    auto application = std::make_shared<Fact>();
-    application->type = "com.bank.loan.LoanApplication";
-    application->fields["applicantId"] = "APP-2024-001";
-    application->fields["applicantName"] = "John Smith";
-    application->fields["requestedAmount"] = 250000.0;
-    application->fields["requestedTermMonths"] = static_cast<int64_t>(360);
-    application->fields["purpose"] = "home";
-    application->fields["creditScore"] = static_cast<int64_t>(720);
-    application->fields["annualIncome"] = 95000.0;
-    application->fields["monthlyDebt"] = 1200.0;
-    application->fields["employmentYears"] = 5.5;
-    application->fields["employmentType"] = "full-time";
-    application->fields["hasCollateral"] = static_cast<int64_t>(1);
-    application->fields["collateralValue"] = 300000.0;
-    application->fields["existingCustomer"] = static_cast<int64_t>(1);
-
-    session->add_fact(application);
-    session->fire_all_rules();
-
-    // Query decision
-    auto decisions = session->execute_query("LoanDecisions");
-    for (auto& row : decisions) {
-        if (auto decision = row.get("$decision")) {
-            std::cout << "Approved: " << decision->fields.at("approved") << std::endl;
-            std::cout << "Rate: " << decision->fields.at("interestRate") << "%" << std::endl;
-        }
-    }
-
-    return 0;
-}
-```
+The sample JSON is already shaped for direct CLI loading because `applications` is a top-level array of `LoanApplication` facts.
 
 ## Expected Behavior
 

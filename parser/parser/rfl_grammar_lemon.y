@@ -5,6 +5,7 @@
 %name RflParse
 %token_prefix TOK_
 %extra_context { RflParserContext* ctx }
+%default_destructor { (void)ctx; }
 
 %include {
 #include "rfl_parser_impl.hpp"
@@ -24,32 +25,6 @@ static std::string strip_quotes(std::string_view sv) {
         return std::string(sv.substr(1, sv.size() - 2));
     }
     return std::string(sv);
-}
-
-// Helper: unescape common backslash escapes in a quoted literal payload.
-static std::string unescape_string_literal(std::string_view sv) {
-    std::string out;
-    out.reserve(sv.size());
-    for (size_t i = 0; i < sv.size(); ++i) {
-        char c = sv[i];
-        if (c == '\\' && i + 1 < sv.size()) {
-            char n = sv[++i];
-            switch (n) {
-                case 'n': out.push_back('\n'); break;
-                case 'r': out.push_back('\r'); break;
-                case 't': out.push_back('\t'); break;
-                case '\\': out.push_back('\\'); break;
-                case '"': out.push_back('"'); break;
-                case '\'': out.push_back('\''); break;
-                default:
-                    out.push_back(n);
-                    break;
-            }
-        } else {
-            out.push_back(c);
-        }
-    }
-    return out;
 }
 
 // Helper struct for generic type parsing (e.g., List<String>, Map<String, int>)
@@ -190,6 +165,7 @@ static void set_rhs_value(ParsedConstraint& c, ConstraintValue const& v) {
 
 // Non-terminal types
 %type qualified_name     { std::string* }
+%type qualified_name_part { std::string* }
 %type pattern            { ParsedPattern* }
 %type pattern_list       { std::vector<ParsedPattern>* }
 %type and_block          { std::vector<ParsedPattern>* }
@@ -206,6 +182,7 @@ static void set_rhs_value(ParsedConstraint& c, ConstraintValue const& v) {
 
 // Destructors for heap-allocated non-terminals
 %destructor qualified_name     { delete $$; }
+%destructor qualified_name_part { delete $$; }
 %destructor pattern            { delete $$; }
 %destructor pattern_list       { delete $$; }
 %destructor and_block          { delete $$; }
@@ -297,14 +274,20 @@ global_stmt ::= GLOBAL qualified_name(T) IDENTIFIER(N) opt_semi. {
 }
 
 // --- Qualified name ---
-qualified_name(A) ::= IDENTIFIER(N). {
-    A = new std::string(N.as_string());
+qualified_name(A) ::= qualified_name_part(N). {
+    A = N;
 }
-qualified_name(A) ::= qualified_name(B) DOT IDENTIFIER(N). {
+qualified_name(A) ::= qualified_name(B) DOT qualified_name_part(N). {
     A = B;
     A->append(".");
-    A->append(N.as_sv());
+    A->append(*N);
+    delete N;
 }
+
+qualified_name_part(A) ::= IDENTIFIER(N). { A = new std::string(N.as_string()); }
+qualified_name_part(A) ::= TIME(T). { A = new std::string(T.as_string()); }
+qualified_name_part(A) ::= LENGTH(T). { A = new std::string(T.as_string()); }
+qualified_name_part(A) ::= WINDOW(T). { A = new std::string(T.as_string()); }
 
 // --- Declare ---
 declare_stmt ::= DECLARE IDENTIFIER(N) decl_opt_annotations decl_body END. {
@@ -351,6 +334,13 @@ generic_type(A) ::= IDENTIFIER(N) LT generic_type(K) COMMA generic_type(V) GT. {
 // --- Enum ---
 enum_stmt ::= ENUM IDENTIFIER(N) enum_body END. {
     ctx->current_enum.enum_name = N.as_string();
+    ctx->current_enum.source_package = ctx->state.package_name;
+    ctx->state.parsed_enums.push_back(std::move(ctx->current_enum));
+    ctx->current_enum = ParsedEnum{};
+}
+enum_stmt ::= ENUM IDENTIFIER(N) LT IDENTIFIER(T) GT enum_body END. {
+    ctx->current_enum.enum_name = N.as_string();
+    ctx->current_enum.underlying_type = T.as_string();
     ctx->current_enum.source_package = ctx->state.package_name;
     ctx->state.parsed_enums.push_back(std::move(ctx->current_enum));
     ctx->current_enum = ParsedEnum{};
@@ -641,17 +631,33 @@ pattern_body(A) ::= forall_pattern(P). { A = P; }
 pattern_body(A) ::= eval_pattern(P). { A = P; }
 pattern_body(A) ::= query_call_pattern(P). { A = P; }
 
-// --- Standard pattern: FactType(constraints) opt_from ---
+// --- Standard pattern: FactType(constraints) opt_window opt_from ---
 %type standard_pattern { ParsedPattern* }
 %destructor standard_pattern { delete $$; }
 
-standard_pattern(A) ::= qualified_name(N) opt_pattern_constraints(C) opt_from_clause(F). {
+standard_pattern(A) ::= qualified_name(N) opt_pattern_constraints(C) opt_window_decl(W) opt_from_clause(F). {
     A = new ParsedPattern();
     A->type = PatternType::STANDARD;
     A->fact_type = *N;
     if (C) { A->constraint_root.reset(C); }
+    if (W) { A->window_info = *W; delete W; }
     if (F) { A->source = std::move(*F); delete F; }
     delete N;
+}
+
+// --- Optional Sliding Window ---
+%type opt_window_decl { ParsedWindow* }
+%destructor opt_window_decl { delete $$; }
+
+opt_window_decl(A) ::= . { A = nullptr; }
+opt_window_decl(A) ::= OVER WINDOW COLON TIME LPAREN DURATION(D) RPAREN. {
+    A = new ParsedWindow{WindowType::TIME, parse_duration_ms(D.as_sv())};
+}
+opt_window_decl(A) ::= OVER WINDOW COLON TIME LPAREN INTEGER(I) RPAREN. {
+    A = new ParsedWindow{WindowType::TIME, parse_int(I.as_sv())};
+}
+opt_window_decl(A) ::= OVER WINDOW COLON LENGTH LPAREN INTEGER(L) RPAREN. {
+    A = new ParsedWindow{WindowType::LENGTH, parse_int(L.as_sv())};
 }
 
 // --- Optional pattern constraints ---
@@ -1081,12 +1087,13 @@ from_clause(A) ::= FROM ENTRY_POINT STRING(N). {
 }
 
 // --- Accumulate source pattern ---
-accumulate_src_pat(A) ::= opt_binding(B) qualified_name(N) opt_pattern_constraints(C) opt_accum_source_clause(S). {
+accumulate_src_pat(A) ::= opt_binding(B) qualified_name(N) opt_pattern_constraints(C) opt_window_decl(W) opt_accum_source_clause(S). {
     A = new ParsedPattern();
     A->type = PatternType::STANDARD;
     A->fact_type = *N;
     if (B) { A->binding = *B; delete B; }
     if (C) { A->constraint_root.reset(C); }
+    if (W) { A->window_info = *W; delete W; }
     if (S) { A->source = std::move(*S); delete S; }
     delete N;
 }

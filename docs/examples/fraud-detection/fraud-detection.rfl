@@ -73,12 +73,12 @@ rule "Signal - Large Transaction Amount"
         not FraudSignal(transactionId == $id, signalType == "LARGE_AMOUNT")
     then
         insert FraudSignal {
-            transactionId: $txn.transactionId,
-            signalType: "LARGE_AMOUNT",
-            severity: "Medium",
-            score: 20,
-            description: "Transaction significantly larger than average",
-            timestamp: $txn.timestamp
+            transactionId = $txn.transactionId,
+            signalType = "LARGE_AMOUNT",
+            severity = "Medium",
+            score = 20,
+            description = "Transaction significantly larger than average",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -89,12 +89,12 @@ rule "Signal - Very Large Transaction"
         not FraudSignal(transactionId == $id, signalType == "VERY_LARGE_AMOUNT")
     then
         insert FraudSignal {
-            transactionId: $txn.transactionId,
-            signalType: "VERY_LARGE_AMOUNT",
-            severity: "High",
-            score: 35,
-            description: "Transaction exceeds $5,000 threshold",
-            timestamp: $txn.timestamp
+            transactionId = $txn.transactionId,
+            signalType = "VERY_LARGE_AMOUNT",
+            severity = "High",
+            score = 35,
+            description = "Transaction exceeds $5,000 threshold",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -102,16 +102,16 @@ rule "Signal - Round Amount Suspicious"
     salience 100
     when
         $txn: Transaction($id: transactionId, $amt: amount) from entry-point "transaction-stream"
-        eval($amt >= 100 && $amt == floor($amt) && fmod($amt, 100) == 0)
+        eval($amt >= 100 && $amt == floor($amt) && ($amt / 100) == floor($amt / 100))
         not FraudSignal(transactionId == $id, signalType == "ROUND_AMOUNT")
     then
         insert FraudSignal {
-            transactionId: $txn.transactionId,
-            signalType: "ROUND_AMOUNT",
-            severity: "Low",
-            score: 15,
-            description: "Large round amount often indicates card testing",
-            timestamp: $txn.timestamp
+            transactionId = $txn.transactionId,
+            signalType = "ROUND_AMOUNT",
+            severity = "Low",
+            score = 15,
+            description = "Large round amount often indicates card testing",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -122,12 +122,12 @@ rule "Signal - Just Under Reporting Threshold"
         not FraudSignal(transactionId == $id, signalType == "STRUCTURING")
     then
         insert FraudSignal {
-            transactionId: $txn.transactionId,
-            signalType: "STRUCTURING",
-            severity: "High",
-            score: 30,
-            description: "Amount just below reporting threshold - possible structuring",
-            timestamp: $txn.timestamp
+            transactionId = $txn.transactionId,
+            signalType = "STRUCTURING",
+            severity = "High",
+            score = 30,
+            description = "Amount just below reporting threshold - possible structuring",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -143,12 +143,12 @@ rule "Signal - High Risk Country"
         not FraudSignal(transactionId == $id, signalType == "HIGH_RISK_COUNTRY")
     then
         insert FraudSignal {
-            transactionId: $txn.transactionId,
-            signalType: "HIGH_RISK_COUNTRY",
-            severity: "High",
-            score: 45,
-            description: "Transaction from high-risk country",
-            timestamp: $txn.timestamp
+            transactionId = $txn.transactionId,
+            signalType = "HIGH_RISK_COUNTRY",
+            severity = "High",
+            score = 45,
+            description = "Transaction from high-risk country",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -160,12 +160,48 @@ rule "Signal - New Country"
         not FraudSignal(transactionId == $id, signalType == "NEW_COUNTRY")
     then
         insert FraudSignal {
-            transactionId: $txn.transactionId,
-            signalType: "NEW_COUNTRY",
-            severity: "Medium",
-            score: 25,
-            description: "First transaction in new country",
-            timestamp: $txn.timestamp
+            transactionId = $txn.transactionId,
+            signalType = "NEW_COUNTRY",
+            severity = "Medium",
+            score = 25,
+            description = "First transaction in new country",
+            timestamp = $txn.timestamp
+        }
+end
+
+rule "Signal - Impossible Travel"
+    salience 95
+    when
+        $txn: Transaction($id: transactionId,
+                          $acct: accountId,
+                          $ts: timestamp,
+                          $lat: latitude,
+                          $lon: longitude) from entry-point "transaction-stream"
+        AccountProfile(accountId == $acct,
+                       $prevTs: lastTransactionTime,
+                       $prevLat: lastKnownLatitude,
+                       $prevLon: lastKnownLongitude)
+        eval($ts >= $prevTs && ($ts - $prevTs) <= 3600000)
+        eval(3959 * acos(
+            min(
+                max(
+                    sin($prevLat * pi / 180) * sin($lat * pi / 180) +
+                    cos($prevLat * pi / 180) * cos($lat * pi / 180) *
+                    cos(($lon - $prevLon) * pi / 180),
+                    -1
+                ),
+                1
+            )
+        ) > 500)
+        not FraudSignal(transactionId == $id, signalType == "IMPOSSIBLE_TRAVEL")
+    then
+        insert FraudSignal {
+            transactionId = $txn.transactionId,
+            signalType = "IMPOSSIBLE_TRAVEL",
+            severity = "High",
+            score = 50,
+            description = "Transaction location is impossible given the prior location and time",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -178,7 +214,7 @@ rule "Signal - Rapid Fire Transactions"
     salience 90
     when
         $txn: Transaction($id: transactionId, $acct: accountId, $ts: timestamp) from entry-point "transaction-stream"
-        $count: Number(intValue > 5) from accumulate(
+        $count: Number(intValue >= 5) from accumulate(
             Transaction(
                 accountId == $acct,
                 transactionId != $id,
@@ -190,12 +226,12 @@ rule "Signal - Rapid Fire Transactions"
         not FraudSignal(transactionId == $id, signalType == "RAPID_FIRE")
     then
         insert FraudSignal {
-            transactionId: $txn.transactionId,
-            signalType: "RAPID_FIRE",
-            severity: "High",
-            score: 40,
-            description: "Multiple transactions in the last minute",
-            timestamp: $txn.timestamp
+            transactionId = $txn.transactionId,
+            signalType = "RAPID_FIRE",
+            severity = "High",
+            score = 40,
+            description = "Multiple transactions in the last minute",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -203,7 +239,7 @@ rule "Signal - High Frequency"
     salience 90
     when
         $txn: Transaction($id: transactionId, $acct: accountId, $ts: timestamp) from entry-point "transaction-stream"
-        $count: Number(intValue > 10) from accumulate(
+        $count: Number(intValue >= 10) from accumulate(
             Transaction(
                 accountId == $acct,
                 transactionId != $id,
@@ -215,12 +251,12 @@ rule "Signal - High Frequency"
         not FraudSignal(transactionId == $id, signalType == "HIGH_FREQUENCY")
     then
         insert FraudSignal {
-            transactionId: $txn.transactionId,
-            signalType: "HIGH_FREQUENCY",
-            severity: "Medium",
-            score: 30,
-            description: "Many transactions in the last 10 minutes",
-            timestamp: $txn.timestamp
+            transactionId = $txn.transactionId,
+            signalType = "HIGH_FREQUENCY",
+            severity = "Medium",
+            score = 30,
+            description = "Many transactions in the last 10 minutes",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -228,7 +264,7 @@ rule "Signal - ATM Hammering"
     salience 90
     when
         $txn: Transaction($id: transactionId, $acct: accountId, $ts: timestamp, channel == "atm") from entry-point "transaction-stream"
-        $count: Number(intValue > 3) from accumulate(
+        $count: Number(intValue >= 3) from accumulate(
             Transaction(
                 accountId == $acct,
                 transactionId != $id,
@@ -241,12 +277,12 @@ rule "Signal - ATM Hammering"
         not FraudSignal(transactionId == $id, signalType == "ATM_HAMMERING")
     then
         insert FraudSignal {
-            transactionId: $txn.transactionId,
-            signalType: "ATM_HAMMERING",
-            severity: "High",
-            score: 35,
-            description: "Multiple ATM withdrawals in the last 30 minutes",
-            timestamp: $txn.timestamp
+            transactionId = $txn.transactionId,
+            signalType = "ATM_HAMMERING",
+            severity = "High",
+            score = 35,
+            description = "Multiple ATM withdrawals in the last 30 minutes",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -265,13 +301,13 @@ rule "Create Alert - Critical Risk"
         not FraudAlert(transactionId == $id)
     then
         insert FraudAlert {
-            alertId: "ALERT-" + $txn.transactionId,
-            transactionId: $txn.transactionId,
-            accountId: $txn.accountId,
-            totalScore: $totalScore.intValue(),
-            riskLevel: "Critical",
-            action: "block_and_freeze",
-            timestamp: $txn.timestamp
+            alertId = $txn.transactionId,
+            transactionId = $txn.transactionId,
+            accountId = $txn.accountId,
+            totalScore = 0,
+            riskLevel = "Critical",
+            action = "block_and_freeze",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -286,13 +322,13 @@ rule "Create Alert - Very High Risk"
         not FraudAlert(transactionId == $id)
     then
         insert FraudAlert {
-            alertId: "ALERT-" + $txn.transactionId,
-            transactionId: $txn.transactionId,
-            accountId: $txn.accountId,
-            totalScore: $totalScore.intValue(),
-            riskLevel: "Very High",
-            action: "block",
-            timestamp: $txn.timestamp
+            alertId = $txn.transactionId,
+            transactionId = $txn.transactionId,
+            accountId = $txn.accountId,
+            totalScore = 0,
+            riskLevel = "Very High",
+            action = "block",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -307,13 +343,13 @@ rule "Create Alert - High Risk"
         not FraudAlert(transactionId == $id)
     then
         insert FraudAlert {
-            alertId: "ALERT-" + $txn.transactionId,
-            transactionId: $txn.transactionId,
-            accountId: $txn.accountId,
-            totalScore: $totalScore.intValue(),
-            riskLevel: "High",
-            action: "review",
-            timestamp: $txn.timestamp
+            alertId = $txn.transactionId,
+            transactionId = $txn.transactionId,
+            accountId = $txn.accountId,
+            totalScore = 0,
+            riskLevel = "High",
+            action = "review",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -328,13 +364,13 @@ rule "Create Alert - Medium Risk"
         not FraudAlert(transactionId == $id)
     then
         insert FraudAlert {
-            alertId: "ALERT-" + $txn.transactionId,
-            transactionId: $txn.transactionId,
-            accountId: $txn.accountId,
-            totalScore: $totalScore.intValue(),
-            riskLevel: "Medium",
-            action: "allow_and_log",
-            timestamp: $txn.timestamp
+            alertId = $txn.transactionId,
+            transactionId = $txn.transactionId,
+            accountId = $txn.accountId,
+            totalScore = 0,
+            riskLevel = "Medium",
+            action = "allow_and_log",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -349,13 +385,13 @@ rule "Create Alert - Low Risk"
         not FraudAlert(transactionId == $id)
     then
         insert FraudAlert {
-            alertId: "ALERT-" + $txn.transactionId,
-            transactionId: $txn.transactionId,
-            accountId: $txn.accountId,
-            totalScore: $totalScore.intValue(),
-            riskLevel: "Low",
-            action: "allow",
-            timestamp: $txn.timestamp
+            alertId = $txn.transactionId,
+            transactionId = $txn.transactionId,
+            accountId = $txn.accountId,
+            totalScore = 0,
+            riskLevel = "Low",
+            action = "allow",
+            timestamp = $txn.timestamp
         }
 end
 
@@ -365,6 +401,10 @@ end
 
 query "ActiveAlerts"
     $alert: FraudAlert()
+end
+
+query "AllSignals"
+    $signal: FraudSignal()
 end
 
 query "HighRiskAlerts"

@@ -5,10 +5,11 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "core/value_types.hpp"
 
 namespace rulesforge {
 
-using VariableResolver = std::function<double(std::string const&)>;
+using VariableResolver = std::function<ConstraintValue(std::string const&)>;
 
 class ExpressionEvaluator {
 public:
@@ -16,7 +17,7 @@ public:
         std::string const& expr,
         std::string* error_out = nullptr);
 
-    double evaluate(VariableResolver const& resolver) const;
+    ConstraintValue evaluate(VariableResolver const& resolver) const;
     std::vector<std::string> const& variables() const;
     std::string const& expression_string() const;
 

@@ -41,6 +41,7 @@ static int token_type_to_lemon_id(TokenType t) {
         case TokenType::TK_IN:              return TOK_IN;
         case TokenType::TK_FUNCTION:         return TOK_FUNCTION;
         case TokenType::TK_DECLARE:          return TOK_DECLARE;
+        case TokenType::TK_ENUM:             return TOK_ENUM;
         case TokenType::TK_QUERY:            return TOK_QUERY;
         case TokenType::TK_GLOBAL:           return TOK_GLOBAL;
         case TokenType::TK_PACKAGE:          return TOK_PACKAGE;
@@ -69,6 +70,10 @@ static int token_type_to_lemon_id(TokenType t) {
         case TokenType::TK_OF:               return TOK_OF;
         case TokenType::TK_COINCIDES:        return TOK_COINCIDES;
         case TokenType::TK_DURING:           return TOK_DURING;
+        case TokenType::TK_OVER:             return TOK_OVER;
+        case TokenType::TK_WINDOW:           return TOK_WINDOW;
+        case TokenType::TK_TIME:             return TOK_TIME;
+        case TokenType::TK_LENGTH:           return TOK_LENGTH;
         case TokenType::TK_EQ:              return TOK_EQ;
         case TokenType::TK_NE:              return TOK_NE;
         case TokenType::TK_LT:              return TOK_LT;
@@ -99,6 +104,9 @@ static int token_type_to_lemon_id(TokenType t) {
         case TokenType::TK_DOLLAR:           return TOK_VARIABLE; // not used directly in grammar
         case TokenType::TK_HASH:             return TOK_IDENTIFIER; // not used directly in grammar
         case TokenType::TK_CODE_CHUNK:       return TOK_CODE_CHUNK;
+        case TokenType::TK_BINARY:           return TOK_IDENTIFIER;
+        case TokenType::TK_CODEC:            return TOK_IDENTIFIER;
+        case TokenType::TK_CONTAINS_KEY:     return TOK_IDENTIFIER;
         case TokenType::TK_EOF:              return 0; // Lemon uses 0 for EOF
         case TokenType::TK_ERROR:            return 0;
     }

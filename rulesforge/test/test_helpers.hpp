@@ -5,6 +5,8 @@
 #include "engine/knowledge_base.hpp"
 #include "engine/stateful_session.hpp"
 
+#include <stdexcept>
+
 // Helper that returns session without assertions - caller must check result
 inline std::unique_ptr<StatefulSession> try_build_session(std::string const& drl, ParsingResult& out_result) {
     auto kb = build_knowledge_base(drl, out_result);
@@ -17,6 +19,13 @@ inline std::optional<parser_state> try_parse_drl(std::string const& drl, Parsing
     auto kb = build_knowledge_base(drl, out_result);
     if (!out_result.success || !kb) return std::nullopt;
     return kb->get_parser_state();
+}
+
+[[noreturn]] inline void throw_parse_failure(ParsingResult const& result) {
+    if (!result.errors.empty()) {
+        throw std::runtime_error("RFL parsing failed: " + result.errors.front().to_string());
+    }
+    throw std::runtime_error("RFL parsing failed with no structured errors");
 }
 
 // Macro to check parsing result and session creation inside test blocks

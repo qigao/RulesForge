@@ -64,11 +64,11 @@ DecisionTable DecisionTableParser::parse_string(std::string const& csv_content, 
     if (rc != 0 || !doc) {
         result.success = false;
         result.errors.push_back({source_name, 0, 0, "CSV parse error"});
-        if (doc) turbo_free_csv(doc);
+        if (doc) turbo_free_csv(&doc);
         return {};
     }
 
     DecisionTable table = build_table_from_csv(doc);
-    turbo_free_csv(doc);
+    turbo_free_csv(&doc);
     return table;
 }

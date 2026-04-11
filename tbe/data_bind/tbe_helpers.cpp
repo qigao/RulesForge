@@ -6,12 +6,11 @@ extern "C" {
 
 /**
  * @brief Helper used by JIT-compiled MIR code to extract a variable-length string.
- * This implementation assumes a 2-byte little-endian length prefix.
+ * This implementation uses explicit little-endian decoding (portable across architectures).
  */
 char* tbe_read_varstring(const uint8_t* buf, size_t offset) {
-    uint16_t len;
-    // We assume little-endian for now as per mir_codec.c's hardcoded logic
-    memcpy(&len, buf + offset, 2);
+    // Explicit little-endian: LSB first
+    uint16_t len = (uint16_t)buf[offset] | ((uint16_t)buf[offset + 1] << 8);
     
     char* s = (char*)malloc(len + 1);
     if (!s) return NULL;

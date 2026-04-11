@@ -107,66 +107,42 @@ This example showcases:
 
 ### Quick Run with capi_demo
 
+This example needs stream insertion, so the repo now provides a dedicated C++ runner.
+
+First flatten the sample data:
+
 ```bash
-capi_demo \
-  -d docs/examples/fraud-detection/fraud-detection.rfl \
-  -j docs/examples/fraud-detection/fraud-test-data.json \
-  -m accountProfiles:com.bank.fraud.AccountProfile \
-  -q ActiveAlerts \
-  -b alert \
-  -f transactionId,accountId,totalScore,riskLevel,action
+python tools/flatten_example_data.py \
+  fraud \
+  docs/examples/fraud-detection/fraud-test-data.json \
+  docs/examples/fraud-detection/fraud-flat.json
 ```
 
-### C++ Integration
+Then run the dedicated example runner:
 
-```cpp
-#include "knowledge_base.hpp"
-
-int main() {
-    ParseResult result;
-    auto kb = build_knowledge_base_from_file("fraud-detection.rfl", result);
-    auto session = kb->create_session();
-
-    // Load account profile
-    auto profile = std::make_shared<Fact>();
-    profile->type = "com.bank.fraud.AccountProfile";
-    profile->fields["accountId"] = "ACC-001";
-    profile->fields["avgTransactionAmount"] = 150.0;
-    profile->fields["avgMonthlySpend"] = 3000.0;
-    profile->fields["primaryCountry"] = "US";
-    profile->fields["lastKnownLatitude"] = 37.7749;
-    profile->fields["lastKnownLongitude"] = -122.4194;
-    profile->fields["lastTransactionTime"] = static_cast<int64_t>(1704067200000);
-
-    session->add_fact(profile);
-
-    // Process transaction stream
-    auto txn = std::make_shared<Fact>();
-    txn->type = "com.bank.fraud.Transaction";
-    txn->fields["transactionId"] = "TXN-001";
-    txn->fields["accountId"] = "ACC-001";
-    txn->fields["amount"] = 2500.0;
-    txn->fields["merchantCountry"] = "RO";  // Different country
-    txn->fields["timestamp"] = static_cast<int64_t>(1704067500000);  // 5 mins later
-    txn->fields["latitude"] = 44.4268;  // Bucharest
-    txn->fields["longitude"] = 26.1025;
-
-    // Insert via entry point for CEP
-    session->insert_into("transaction-stream", txn);
-    session->fire_all_rules();
-
-    // Check for alerts
-    auto alerts = session->execute_query("ActiveAlerts");
-    for (auto& row : alerts) {
-        if (auto alert = row.get("$alert")) {
-            std::cout << "FRAUD ALERT: " << alert->fields.at("riskLevel")
-                      << " - Score: " << alert->fields.at("totalScore") << std::endl;
-        }
-    }
-
-    return 0;
-}
+```bash
+./build/bin/fraud_stream_runner \
+  docs/examples/fraud-detection/fraud-detection.rfl \
+  docs/examples/fraud-detection/fraud-flat.json
 ```
+
+The runner outputs a final alert view rather than the raw working-memory rows:
+
+- it consolidates duplicate `FraudAlert` facts by transaction and keeps the highest-severity outcome
+- it computes the displayed `totalScore` from the emitted `FraudSignal` facts
+- it prints one line per transaction in the form `transactionId | accountId | totalScore | riskLevel | action`
+
+Why it still cannot use `capi_demo`:
+
+- transactions must be inserted into `entry-point "transaction-stream"`
+- the current public C API in `include/rule_forge.h` does not expose entry-point insertion
+
+So a real runner must do two things:
+
+1. flatten or extract scenario transactions from the sample JSON
+2. insert those `Transaction` facts into the `transaction-stream` entry point via C++
+
+Treat this example as a CEP reference rule set with a dedicated runner until the C API gains entry-point support.
 
 ## Sample Fraud Scenarios
 

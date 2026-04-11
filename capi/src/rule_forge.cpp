@@ -6,6 +6,7 @@
 #include <charconv>
 #include <cstdlib>
 #include <cstring>
+#include <fmt.h>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -27,6 +28,11 @@
 #else
   #include <dlfcn.h>
 #endif
+
+// Forward declarations for TurboScript/exprtk interoperability
+#include "exprtk_module.h"
+#include "ts_plugin.h"
+#include <jsoncons/json.hpp>
 
 using namespace rulesforge;
 
@@ -62,11 +68,10 @@ static void close_library(void *handle) {
 }
 #endif
 
-// Safe error setter - prevents buffer overflow
-static void set_error(const char *msg) { snprintf(last_error, sizeof(last_error), "%s", msg); }
+static void set_error(const char *msg) { fmt(last_error, sizeof(last_error), "{}", msg); }
 
 static void set_error_fmt(const char *prefix, const char *detail) {
-  snprintf(last_error, sizeof(last_error), "%s%s", prefix, detail);
+  fmt(last_error, sizeof(last_error), "{}{}", prefix, detail);
 }
 
 static ruleforge_status_t map_session_inconsistent(SessionInconsistentException const &e) {
@@ -139,12 +144,16 @@ static void set_fact_field_from_csv(Fact &fact, std::string const &field_name,
 
 static ruleforge_status_t load_csv_facts_into_session(StatefulSession *session_ptr,
                                                       const char *fact_type, const char *csv_source,
-                                                      int *out_loaded_count) {
+                                                      int *out_loaded_count,
+                                                      ruleforge_fact_t **out_facts) {
   if (!session_ptr || !fact_type || !csv_source) {
     set_error("Session handle, fact type, or CSV source is NULL");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
 
+  if (out_facts) {
+    *out_facts = nullptr;
+  }
   if (out_loaded_count)
     *out_loaded_count = 0;
 
@@ -153,14 +162,14 @@ static ruleforge_status_t load_csv_facts_into_session(StatefulSession *session_p
       turbo_parse_csv(reinterpret_cast<const uint8_t *>(csv_source), std::strlen(csv_source), &doc);
   if (rc != 0 || !doc) {
     if (doc)
-      turbo_free_csv(doc);
+      turbo_free_csv(&doc);
     set_error("CSV parsing failed");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
 
   size_t row_count = turbo_csv_row_count(doc);
   if (row_count == 0) {
-    turbo_free_csv(doc);
+    turbo_free_csv(&doc);
     return RULES_FORGE_OK;
   }
 
@@ -173,12 +182,13 @@ static ruleforge_status_t load_csv_facts_into_session(StatefulSession *session_p
   }
 
   if (headers.empty()) {
-    turbo_free_csv(doc);
+    turbo_free_csv(&doc);
     set_error("CSV header row is empty");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
 
   int loaded = 0;
+  std::vector<ruleforge_fact_t> inserted_facts;
   for (size_t r = 1; r < row_count; ++r) {
     Fact *fact = session_ptr->create_fact(fact_type);
     bool has_field = false;
@@ -201,12 +211,28 @@ static ruleforge_status_t load_csv_facts_into_session(StatefulSession *session_p
     }
 
     session_ptr->add_fact(fact);
+    if (out_facts) {
+      inserted_facts.push_back(reinterpret_cast<ruleforge_fact_t>(fact));
+    }
     ++loaded;
+  }
+
+  if (out_facts && !inserted_facts.empty()) {
+    auto *fact_array = static_cast<ruleforge_fact_t *>(
+        std::calloc(inserted_facts.size(), sizeof(ruleforge_fact_t)));
+    if (!fact_array) {
+      turbo_free_csv(&doc);
+      set_error("Failed to allocate fact handle array");
+      return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
+    }
+    std::memcpy(fact_array, inserted_facts.data(),
+                inserted_facts.size() * sizeof(ruleforge_fact_t));
+    *out_facts = fact_array;
   }
 
   if (out_loaded_count)
     *out_loaded_count = loaded;
-  turbo_free_csv(doc);
+  turbo_free_csv(&doc);
   return RULES_FORGE_OK;
 }
 } // namespace
@@ -242,7 +268,7 @@ ruleforge_status_t ruleforge_kb_create(ruleforge_knowledge_base_t *out_kb) {
     parser_state empty_state;
     auto kb_wrapper = new KnowledgeBaseWrapper();
     kb_wrapper->kb = KnowledgeBase::create(std::move(empty_state));
-    *out_kb = static_cast<ruleforge_knowledge_base_t>(kb_wrapper);
+    *out_kb = reinterpret_cast<ruleforge_knowledge_base_t>(kb_wrapper);
     last_error[0] = '\0';
     return RULES_FORGE_OK;
   } catch (const std::exception &e) {
@@ -262,7 +288,7 @@ ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const ch
   }
   try {
     ParsingResult result;
-    auto kb_wrapper = static_cast<KnowledgeBaseWrapper *>(kb);
+    auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
 
     // Save the native functions before rebuilding
     auto saved_native_functions = kb_wrapper->kb->get_native_functions();
@@ -278,7 +304,7 @@ ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const ch
       if (result.errors.empty()) {
         error_msg += "Unknown compilation error.";
       }
-      snprintf(last_error, sizeof(last_error), "%s", error_msg.c_str());
+      fmt(last_error, sizeof(last_error), "{}", error_msg);
       return RULES_FORGE_ERROR_COMPILATION_FAILED;
     }
 
@@ -296,6 +322,100 @@ ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const ch
   }
 }
 
+ruleforge_status_t ruleforge_kb_load_drl_file(ruleforge_knowledge_base_t kb, const char *file_path,
+                                              const char **base_dirs, int base_dir_count) {
+  if (!kb || !file_path) {
+    set_error("Knowledge Base handle or file_path is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
+    auto saved_native_functions = kb_wrapper->kb->get_native_functions();
+
+    std::vector<std::string> dirs;
+    for (int i = 0; i < base_dir_count; i++) {
+      if (base_dirs[i])
+        dirs.emplace_back(base_dirs[i]);
+    }
+
+    ParsingResult result;
+    std::shared_ptr<KnowledgeBase> compiled_kb;
+    if (dirs.empty()) {
+      compiled_kb = build_knowledge_base(result, std::string(file_path));
+    } else {
+      compiled_kb = build_knowledge_base(std::string(file_path), dirs, result);
+    }
+
+    if (!result.success || !compiled_kb) {
+      std::string error_msg = "RFL compilation failed: ";
+      for (const auto &err : result.errors)
+        error_msg += err.to_string() + "; ";
+      if (result.errors.empty())
+        error_msg += "Unknown compilation error.";
+      fmt(last_error, sizeof(last_error), "{}", error_msg);
+      return RULES_FORGE_ERROR_COMPILATION_FAILED;
+    }
+
+    for (auto const &[name, func] : saved_native_functions)
+      compiled_kb->register_native_function(name, func.callback, func.user_data);
+    kb_wrapper->kb = std::move(compiled_kb);
+
+    last_error[0] = '\0';
+    return RULES_FORGE_OK;
+  } catch (const std::exception &e) {
+    set_error_fmt("Failed to load RFL file: ", e.what());
+    return RULES_FORGE_ERROR_GENERIC;
+  }
+}
+
+ruleforge_status_t ruleforge_kb_load_drl_files(ruleforge_knowledge_base_t kb,
+                                               const char **file_paths, int file_count,
+                                               const char **base_dirs, int base_dir_count) {
+  if (!kb || !file_paths || file_count <= 0) {
+    set_error("Invalid arguments");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
+    auto saved_native_functions = kb_wrapper->kb->get_native_functions();
+
+    std::vector<std::string> files;
+    for (int i = 0; i < file_count; i++) {
+      if (file_paths[i])
+        files.emplace_back(file_paths[i]);
+    }
+
+    std::vector<std::string> dirs;
+    for (int i = 0; i < base_dir_count; i++) {
+      if (base_dirs[i])
+        dirs.emplace_back(base_dirs[i]);
+    }
+
+    ParsingResult result;
+    auto compiled_kb = build_knowledge_base(files, dirs, result);
+
+    if (!result.success || !compiled_kb) {
+      std::string error_msg = "RFL compilation failed: ";
+      for (const auto &err : result.errors)
+        error_msg += err.to_string() + "; ";
+      if (result.errors.empty())
+        error_msg += "Unknown compilation error.";
+      fmt(last_error, sizeof(last_error), "{}", error_msg);
+      return RULES_FORGE_ERROR_COMPILATION_FAILED;
+    }
+
+    for (auto const &[name, func] : saved_native_functions)
+      compiled_kb->register_native_function(name, func.callback, func.user_data);
+    kb_wrapper->kb = std::move(compiled_kb);
+
+    last_error[0] = '\0';
+    return RULES_FORGE_OK;
+  } catch (const std::exception &e) {
+    set_error_fmt("Failed to load RFL files: ", e.what());
+    return RULES_FORGE_ERROR_GENERIC;
+  }
+}
+
 ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base_t kb,
                                                         const char *csv_source) {
   if (!kb) {
@@ -308,7 +428,7 @@ ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base
   }
   try {
     ParsingResult result;
-    auto kb_wrapper = static_cast<KnowledgeBaseWrapper *>(kb);
+    auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
 
     // Save the native functions before rebuilding
     auto saved_native_functions = kb_wrapper->kb->get_native_functions();
@@ -324,7 +444,7 @@ ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base
       if (result.errors.empty()) {
         error_msg += "Unknown compilation error.";
       }
-      snprintf(last_error, sizeof(last_error), "%s", error_msg.c_str());
+      fmt(last_error, sizeof(last_error), "{}", error_msg);
       return RULES_FORGE_ERROR_COMPILATION_FAILED;
     }
 
@@ -348,7 +468,7 @@ ruleforge_status_t ruleforge_kb_destroy(ruleforge_knowledge_base_t kb) {
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto kb_wrapper = static_cast<KnowledgeBaseWrapper *>(kb);
+    auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
     for (void *handle : kb_wrapper->plugin_handles) {
       close_library(handle);
     }
@@ -379,7 +499,7 @@ ruleforge_status_t ruleforge_kb_register_native_function(ruleforge_knowledge_bas
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto kb_wrapper = static_cast<KnowledgeBaseWrapper *>(kb);
+    auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
     kb_wrapper->kb->register_native_function(
         function_name, reinterpret_cast<NativeFunctionCallback>(callback), user_data);
     last_error[0] = '\0';
@@ -402,7 +522,7 @@ ruleforge_status_t ruleforge_kb_load_native_function_table(ruleforge_knowledge_b
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
 
-  auto kb_wrapper = static_cast<KnowledgeBaseWrapper *>(kb);
+  auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
   void *handle = open_library(library_path);
   if (!handle) {
     set_error("Failed to load plugin library");
@@ -458,6 +578,121 @@ ruleforge_status_t ruleforge_kb_load_native_function_table(ruleforge_knowledge_b
   return RULES_FORGE_OK;
 }
 
+namespace {
+// Bridge to call exprtk function from ruleforge native callback
+struct TsFuncBridge {
+  exprtk_builtin_fn fn;
+  void *env;
+};
+
+int ts_func_callback_bridge(void *ctx, int argc, const char **argv, char **out_result) {
+  auto *bridge = static_cast<TsFuncBridge *>(ctx);
+  if (!bridge || !bridge->fn)
+    return RULES_FORGE_ERROR_GENERIC;
+
+  std::vector<exprtk_value_t> expr_args;
+  expr_args.reserve(argc);
+
+  for (int i = 0; i < argc; ++i) {
+    try {
+      auto j = jsoncons::json::parse(argv[i]);
+      if (j.is_double() || j.is_int64()) {
+        expr_args.push_back(exprtk_val_num(j.as<double>()));
+      } else if (j.is_string()) {
+        std::string s = j.as<std::string>();
+        char *internal_s = strdup(s.c_str());
+        tstr_v tv;
+        tv.data = internal_s;
+        tv.len = s.length();
+        expr_args.push_back(exprtk_val_str(tv));
+      } else {
+        expr_args.push_back(exprtk_val_num(0.0));
+      }
+    } catch (...) {
+      expr_args.push_back(exprtk_val_num(0.0));
+    }
+  }
+
+  // Call the function
+  exprtk_value_t res =
+      bridge->fn(expr_args.size(), expr_args.data(), (exprtk_env_t *)bridge->env, nullptr);
+
+  // Convert back to JSON
+  jsoncons::json j_res;
+  if (res.type == EXPRTK_VAL_NUMBER)
+    j_res = res.data.number;
+  else if (res.type == EXPRTK_VAL_STRING) {
+    j_res = std::string(res.data.string.data, res.data.string.len);
+  } else {
+    j_res = 0.0;
+  }
+
+  *out_result = strdup(j_res.to_string().c_str());
+
+  for (auto &arg : expr_args) {
+    if (arg.type == EXPRTK_VAL_STRING)
+      free((void *)arg.data.string.data);
+  }
+
+  return RULES_FORGE_OK;
+}
+
+struct RuleForgeExprtkEnv {
+  KnowledgeBase *kb;
+  std::vector<TsFuncBridge *> bridges;
+};
+} // namespace
+
+extern "C" void exprtk_env_add_module(exprtk_env_t *env, const exprtk_module_t *mod) {
+  if (!env || !mod)
+    return;
+  auto *rfe = reinterpret_cast<RuleForgeExprtkEnv *>(env);
+
+  for (size_t i = 0; i < mod->count; ++i) {
+    auto &entry = mod->entries[i];
+    auto *bridge = new TsFuncBridge{entry.fn, env};
+    rfe->bridges.push_back(bridge);
+    rfe->kb->register_native_function(entry.name, ts_func_callback_bridge, bridge);
+  }
+}
+
+ruleforge_status_t ruleforge_kb_load_ts_plugin(ruleforge_knowledge_base_t kb,
+                                               const char *library_path) {
+  if (!kb || !library_path)
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
+
+  void *handle = open_library(library_path);
+  if (!handle) {
+    set_error("Failed to load TurboScript plugin library");
+    return RULES_FORGE_ERROR_GENERIC;
+  }
+
+  auto ts_api_create = reinterpret_cast<ts_api_create_fn>(load_symbol(handle, "ts_api_create"));
+  if (!ts_api_create) {
+    close_library(handle);
+    set_error("Not a TurboScript plugin (ts_api_create missing)");
+    return RULES_FORGE_ERROR_GENERIC;
+  }
+
+  const ts_plugin_t *plugin = ts_api_create();
+  if (!plugin) {
+    close_library(handle);
+    set_error("ts_api_create returned NULL");
+    return RULES_FORGE_ERROR_GENERIC;
+  }
+
+  auto *rfe = new RuleForgeExprtkEnv{kb_wrapper->kb.get()};
+  void *instance = plugin->load(rfe, nullptr);
+  if (!instance) {
+    // Plugin load failed or just stateless
+  }
+
+  kb_wrapper->plugin_handles.push_back(handle);
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
 // Session wrapper for safe C++/C interop
 struct StatefulSessionWrapper {
   std::unique_ptr<StatefulSession> session;
@@ -474,7 +709,7 @@ ruleforge_status_t ruleforge_session_create(ruleforge_knowledge_base_t kb,
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto kb_wrapper = static_cast<KnowledgeBaseWrapper *>(kb);
+    auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
     if (!kb_wrapper->kb) {
       set_error("Knowledge Base is not initialized");
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
@@ -486,7 +721,7 @@ ruleforge_status_t ruleforge_session_create(ruleforge_knowledge_base_t kb,
       set_error("Failed to create session from Knowledge Base");
       return RULES_FORGE_ERROR_SESSION_CREATION_FAILED;
     }
-    *out_session = static_cast<ruleforge_stateful_session_t>(session_wrapper);
+    *out_session = reinterpret_cast<ruleforge_stateful_session_t>(session_wrapper);
     last_error[0] = '\0';
     return RULES_FORGE_OK;
   } catch (const std::exception &e) {
@@ -500,14 +735,19 @@ struct QueryResultWrapper {
   std::unique_ptr<QueryResult> query_result;
 };
 
-ruleforge_status_t ruleforge_session_add_fact_json(ruleforge_stateful_session_t session,
-                                                   const char *fact_type, const char *fact_json) {
+static ruleforge_status_t ruleforge_session_add_fact_json_impl(ruleforge_stateful_session_t session,
+                                                               const char *fact_type,
+                                                               const char *fact_json,
+                                                               ruleforge_fact_t *out_fact) {
   if (!session || !fact_type || !fact_json) {
     set_error("Session handle, fact type, or fact JSON is NULL");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
+  if (out_fact) {
+    *out_fact = nullptr;
+  }
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
 
     // Parse JSON and create fact in session-owned arena.
     Fact *fact = session_wrapper->session->create_fact(fact_type);
@@ -530,6 +770,9 @@ ruleforge_status_t ruleforge_session_add_fact_json(ruleforge_stateful_session_t 
 
     // Add the fact to the session
     session_wrapper->session->add_fact(fact);
+    if (out_fact) {
+      *out_fact = reinterpret_cast<ruleforge_fact_t>(fact);
+    }
     last_error[0] = '\0';
     return RULES_FORGE_OK;
   } catch (const jsoncons::json_exception &e) {
@@ -543,6 +786,69 @@ ruleforge_status_t ruleforge_session_add_fact_json(ruleforge_stateful_session_t 
   }
 }
 
+static ruleforge_status_t
+ruleforge_session_add_fact_binary_impl(ruleforge_stateful_session_t session, const char *fact_type,
+                                       const uint8_t *fact_data, size_t fact_len,
+                                       ruleforge_fact_t *out_fact) {
+  if (!session || !fact_type || !fact_data || fact_len == 0) {
+    set_error("Session handle, fact type, or binary fact payload is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  if (out_fact) {
+    *out_fact = nullptr;
+  }
+  try {
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    Fact *fact = session_wrapper->session->add_fact_from_binary(fact_type, fact_data, fact_len);
+    if (!fact) {
+      set_error("Binary fact parsing returned NULL");
+      return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
+    }
+    if (out_fact) {
+      *out_fact = reinterpret_cast<ruleforge_fact_t>(fact);
+    }
+    last_error[0] = '\0';
+    return RULES_FORGE_OK;
+  } catch (SessionInconsistentException const &e) {
+    return map_session_inconsistent(e);
+  } catch (const std::exception &e) {
+    set_error_fmt("Failed to add binary fact: ", e.what());
+    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
+  }
+}
+
+ruleforge_status_t ruleforge_session_add_fact_json(ruleforge_stateful_session_t session,
+                                                   const char *fact_type, const char *fact_json) {
+  return ruleforge_session_add_fact_json_impl(session, fact_type, fact_json, nullptr);
+}
+
+ruleforge_status_t ruleforge_session_add_fact_json_ex(ruleforge_stateful_session_t session,
+                                                      const char *fact_type, const char *fact_json,
+                                                      ruleforge_fact_t *out_fact) {
+  if (!out_fact) {
+    set_error("Output Fact pointer is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return ruleforge_session_add_fact_json_impl(session, fact_type, fact_json, out_fact);
+}
+
+ruleforge_status_t ruleforge_session_add_fact_binary(ruleforge_stateful_session_t session,
+                                                     const char *fact_type,
+                                                     const uint8_t *fact_data, size_t fact_len) {
+  return ruleforge_session_add_fact_binary_impl(session, fact_type, fact_data, fact_len, nullptr);
+}
+
+ruleforge_status_t ruleforge_session_add_fact_binary_ex(ruleforge_stateful_session_t session,
+                                                        const char *fact_type,
+                                                        const uint8_t *fact_data, size_t fact_len,
+                                                        ruleforge_fact_t *out_fact) {
+  if (!out_fact) {
+    set_error("Output Fact pointer is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return ruleforge_session_add_fact_binary_impl(session, fact_type, fact_data, fact_len, out_fact);
+}
+
 ruleforge_status_t ruleforge_session_add_facts_csv(ruleforge_stateful_session_t session,
                                                    const char *fact_type, const char *csv_source,
                                                    int *out_loaded_count) {
@@ -551,9 +857,39 @@ ruleforge_status_t ruleforge_session_add_facts_csv(ruleforge_stateful_session_t 
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     auto status = load_csv_facts_into_session(session_wrapper->session.get(), fact_type, csv_source,
-                                              out_loaded_count);
+                                              out_loaded_count, nullptr);
+    if (status == RULES_FORGE_OK) {
+      last_error[0] = '\0';
+    }
+    return status;
+  } catch (SessionInconsistentException const &e) {
+    return map_session_inconsistent(e);
+  } catch (const std::exception &e) {
+    set_error_fmt("Failed to add CSV facts: ", e.what());
+    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
+  }
+}
+
+ruleforge_status_t ruleforge_session_add_facts_csv_ex(ruleforge_stateful_session_t session,
+                                                      const char *fact_type, const char *csv_source,
+                                                      ruleforge_fact_t **out_facts,
+                                                      int *out_loaded_count) {
+  if (!out_facts) {
+    set_error("Output Fact array pointer is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  *out_facts = nullptr;
+
+  if (!session || !fact_type || !csv_source) {
+    set_error("Session handle, fact type, or CSV source is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    auto status = load_csv_facts_into_session(session_wrapper->session.get(), fact_type, csv_source,
+                                              out_loaded_count, out_facts);
     if (status == RULES_FORGE_OK) {
       last_error[0] = '\0';
     }
@@ -584,9 +920,9 @@ ruleforge_status_t ruleforge_session_add_facts_csv_file(ruleforge_stateful_sessi
     std::string csv_content((std::istreambuf_iterator<char>(file)),
                             std::istreambuf_iterator<char>());
 
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     auto status = load_csv_facts_into_session(session_wrapper->session.get(), fact_type,
-                                              csv_content.c_str(), out_loaded_count);
+                                              csv_content.c_str(), out_loaded_count, nullptr);
     if (status == RULES_FORGE_OK) {
       last_error[0] = '\0';
     }
@@ -599,6 +935,48 @@ ruleforge_status_t ruleforge_session_add_facts_csv_file(ruleforge_stateful_sessi
   }
 }
 
+ruleforge_status_t ruleforge_session_add_facts_csv_file_ex(ruleforge_stateful_session_t session,
+                                                           const char *fact_type,
+                                                           const char *csv_file_path,
+                                                           ruleforge_fact_t **out_facts,
+                                                           int *out_loaded_count) {
+  if (!out_facts) {
+    set_error("Output Fact array pointer is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  *out_facts = nullptr;
+
+  if (!session || !fact_type || !csv_file_path) {
+    set_error("Session handle, fact type, or CSV file path is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+
+  try {
+    std::ifstream file(csv_file_path, std::ios::binary);
+    if (!file) {
+      set_error("Cannot open CSV file");
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+    std::string csv_content((std::istreambuf_iterator<char>(file)),
+                            std::istreambuf_iterator<char>());
+
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    auto status = load_csv_facts_into_session(session_wrapper->session.get(), fact_type,
+                                              csv_content.c_str(), out_loaded_count, out_facts);
+    if (status == RULES_FORGE_OK) {
+      last_error[0] = '\0';
+    }
+    return status;
+  } catch (SessionInconsistentException const &e) {
+    return map_session_inconsistent(e);
+  } catch (const std::exception &e) {
+    set_error_fmt("Failed to add CSV facts from file: ", e.what());
+    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
+  }
+}
+
+void ruleforge_fact_array_free(ruleforge_fact_t *facts) { std::free(facts); }
+
 ruleforge_status_t ruleforge_session_fire_all_rules(ruleforge_stateful_session_t session,
                                                     int max_rules, int *out_fired_count) {
   if (!session) {
@@ -606,9 +984,10 @@ ruleforge_status_t ruleforge_session_fire_all_rules(ruleforge_stateful_session_t
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     if (!session_wrapper->session->is_consistent()) {
-      set_error("Session is inconsistent due to a previous failed RHS transaction. Call reset() before firing again.");
+      set_error("Session is inconsistent due to a previous failed RHS transaction. Call reset() "
+                "before firing again.");
       return RULES_FORGE_ERROR_SESSION_INCONSISTENT;
     }
     int fired = session_wrapper->session->fire_all_rules(max_rules);
@@ -631,7 +1010,7 @@ ruleforge_status_t ruleforge_session_reset(ruleforge_stateful_session_t session)
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     session_wrapper->session->reset();
     last_error[0] = '\0';
     return RULES_FORGE_OK;
@@ -647,7 +1026,7 @@ int ruleforge_session_get_fact_count(ruleforge_stateful_session_t session) {
     return -1;
   }
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     last_error[0] = '\0';
     return static_cast<int>(session_wrapper->session->get_fact_count());
   } catch (const std::exception &e) {
@@ -673,7 +1052,7 @@ ruleforge_status_t ruleforge_session_query(ruleforge_stateful_session_t session,
   }
   *out_query_result = nullptr;
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
 
     // Execute query
     QueryResult query_result = session_wrapper->session->execute_query(query_name);
@@ -686,7 +1065,7 @@ ruleforge_status_t ruleforge_session_query(ruleforge_stateful_session_t session,
     auto result_wrapper = new QueryResultWrapper();
     result_wrapper->query_result = std::make_unique<QueryResult>(query_result);
 
-    *out_query_result = static_cast<ruleforge_query_result_t>(result_wrapper);
+    *out_query_result = reinterpret_cast<ruleforge_query_result_t>(result_wrapper);
     last_error[0] = '\0';
     return RULES_FORGE_OK;
   } catch (const std::exception &e) {
@@ -701,7 +1080,7 @@ ruleforge_status_t ruleforge_session_destroy(ruleforge_stateful_session_t sessio
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     delete session_wrapper;
     last_error[0] = '\0';
     return RULES_FORGE_OK;
@@ -711,9 +1090,8 @@ ruleforge_status_t ruleforge_session_destroy(ruleforge_stateful_session_t sessio
   }
 }
 
-ruleforge_status_t
-ruleforge_session_set_validation_mode(ruleforge_stateful_session_t session,
-                                      ruleforge_validation_mode_t mode) {
+ruleforge_status_t ruleforge_session_set_validation_mode(ruleforge_stateful_session_t session,
+                                                         ruleforge_validation_mode_t mode) {
   if (!session) {
     set_error("Session handle is NULL");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
@@ -721,22 +1099,22 @@ ruleforge_session_set_validation_mode(ruleforge_stateful_session_t session,
 
   ValidationMode cpp_mode = ValidationMode::None;
   switch (mode) {
-    case RULES_FORGE_VALIDATION_NONE:
-      cpp_mode = ValidationMode::None;
-      break;
-    case RULES_FORGE_VALIDATION_WARN:
-      cpp_mode = ValidationMode::Warn;
-      break;
-    case RULES_FORGE_VALIDATION_STRICT:
-      cpp_mode = ValidationMode::Strict;
-      break;
-    default:
-      set_error("Validation mode is invalid");
-      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  case RULES_FORGE_VALIDATION_NONE:
+    cpp_mode = ValidationMode::None;
+    break;
+  case RULES_FORGE_VALIDATION_WARN:
+    cpp_mode = ValidationMode::Warn;
+    break;
+  case RULES_FORGE_VALIDATION_STRICT:
+    cpp_mode = ValidationMode::Strict;
+    break;
+  default:
+    set_error("Validation mode is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
 
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     session_wrapper->session->set_validation_mode(cpp_mode);
     last_error[0] = '\0';
     return RULES_FORGE_OK;
@@ -755,7 +1133,7 @@ int ruleforge_query_result_get_size(ruleforge_query_result_t query_result) {
     return -1;
   }
   try {
-    auto result_wrapper = static_cast<QueryResultWrapper *>(query_result);
+    auto result_wrapper = reinterpret_cast<QueryResultWrapper *>(query_result);
     last_error[0] = '\0';
     return static_cast<int>(result_wrapper->query_result->size());
   } catch (const std::exception &e) {
@@ -776,7 +1154,7 @@ ruleforge_status_t ruleforge_query_result_get_fact_at_index(ruleforge_query_resu
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto result_wrapper = static_cast<QueryResultWrapper *>(query_result);
+    auto result_wrapper = reinterpret_cast<QueryResultWrapper *>(query_result);
 
     if (row_index >= static_cast<int>(result_wrapper->query_result->size())) {
       set_error("Row index out of bounds");
@@ -795,7 +1173,7 @@ ruleforge_status_t ruleforge_query_result_get_fact_at_index(ruleforge_query_resu
     }
 
     // Return the raw pointer - ownership remains with QueryResult
-    *out_fact = static_cast<ruleforge_fact_t>(*fact_opt);
+    *out_fact = reinterpret_cast<ruleforge_fact_t>(*fact_opt);
     last_error[0] = '\0';
     return RULES_FORGE_OK;
   } catch (const std::exception &e) {
@@ -810,7 +1188,7 @@ ruleforge_status_t ruleforge_query_result_destroy(ruleforge_query_result_t query
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto result_wrapper = static_cast<QueryResultWrapper *>(query_result);
+    auto result_wrapper = reinterpret_cast<QueryResultWrapper *>(query_result);
     delete result_wrapper;
     last_error[0] = '\0';
     return RULES_FORGE_OK;
@@ -829,7 +1207,7 @@ ruleforge_status_t ruleforge_fact_get_field_as_string(ruleforge_fact_t fact, con
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto f = static_cast<const Fact *>(fact);
+    auto f = reinterpret_cast<const Fact *>(fact);
     auto field_opt = f->get_field(field_name);
     if (!field_opt) {
       set_error("Field not found");
@@ -865,7 +1243,7 @@ ruleforge_status_t ruleforge_fact_get_field_as_double(ruleforge_fact_t fact, con
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto f = static_cast<const Fact *>(fact);
+    auto f = reinterpret_cast<const Fact *>(fact);
     auto field_opt = f->get_field(field_name);
     if (!field_opt) {
       set_error("Field not found");
@@ -899,7 +1277,7 @@ ruleforge_status_t ruleforge_fact_get_field_as_int(ruleforge_fact_t fact, const 
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto f = static_cast<const Fact *>(fact);
+    auto f = reinterpret_cast<const Fact *>(fact);
     auto field_opt = f->get_field(field_name);
     if (!field_opt) {
       set_error("Field not found");
@@ -927,7 +1305,7 @@ ruleforge_status_t ruleforge_fact_get_field_as_bool(ruleforge_fact_t fact, const
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto f = static_cast<const Fact *>(fact);
+    auto f = reinterpret_cast<const Fact *>(fact);
     auto field_opt = f->get_field(field_name);
     if (!field_opt) {
       set_error("Field not found");
@@ -957,7 +1335,7 @@ ruleforge_status_t ruleforge_session_enable_tracing(ruleforge_stateful_session_t
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     session_wrapper->session->enable_tracing(enabled != 0);
     last_error[0] = '\0';
     return RULES_FORGE_OK;
@@ -978,7 +1356,7 @@ ruleforge_status_t ruleforge_session_get_execution_trace(ruleforge_stateful_sess
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     std::string trace = session_wrapper->session->get_execution_trace(include_network != 0);
 
     *out_actual_length = trace.length();
@@ -1004,7 +1382,7 @@ ruleforge_session_get_rule_performance_summary(ruleforge_stateful_session_t sess
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     std::string summary = session_wrapper->session->get_rule_performance_summary();
 
     *out_actual_length = summary.length();
@@ -1028,7 +1406,7 @@ ruleforge_status_t ruleforge_session_clear_trace(ruleforge_stateful_session_t se
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     session_wrapper->session->get_tracer().clear_trace();
     last_error[0] = '\0';
     return RULES_FORGE_OK;
@@ -1046,7 +1424,7 @@ int64_t ruleforge_session_get_memory_used(ruleforge_stateful_session_t session) 
     return -1;
   }
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     last_error[0] = '\0';
     return static_cast<int64_t>(session_wrapper->session->get_arena().memory_used());
   } catch (const std::exception &e) {
@@ -1061,7 +1439,7 @@ int64_t ruleforge_session_get_memory_peak(ruleforge_stateful_session_t session) 
     return -1;
   }
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     last_error[0] = '\0';
     return static_cast<int64_t>(session_wrapper->session->get_arena().memory_peak());
   } catch (const std::exception &e) {
@@ -1078,7 +1456,7 @@ ruleforge_status_t ruleforge_session_get_memory_stats(ruleforge_stateful_session
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto session_wrapper = static_cast<StatefulSessionWrapper *>(session);
+    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
     std::string stats = session_wrapper->session->get_memory_stats();
 
     *out_actual_length = stats.length();

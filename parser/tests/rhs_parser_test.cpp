@@ -202,6 +202,48 @@ suite("RhsParser") {
             check(a.type == RhsValueType::NUMERIC);
             check(a.numeric_expr != nullptr);
         }
+
+        it("parses exprtk math functions") {
+            auto actions = RhsParser::parse(
+                R"(update $user {
+                    f = floor($item.price),
+                    a = abs($item.price),
+                    p = pow($item.price, 2),
+                    s = sqrt(100)
+                })", make_bindings());
+
+            check(actions[0].assignments.size() == 4);
+            for (auto const& a : actions[0].assignments) {
+                check(a.type == RhsValueType::NUMERIC);
+                check(a.numeric_expr != nullptr);
+            }
+        }
+
+        it("parses exprtk string functions") {
+            std::string err;
+            auto actions = RhsParser::parse(
+                R"(update $user {
+                    name = concat("Mr. ", $user.name),
+                    tag = to_upper("vip")
+                })", make_bindings(), &err);
+
+            check(err.empty());
+            check(actions.size() == 1);
+            check(actions[0].assignments.size() == 2);
+            check(actions[0].assignments[0].type == RhsValueType::NUMERIC);
+            check(actions[0].assignments[0].numeric_expr != nullptr);
+            check(actions[0].assignments[1].type == RhsValueType::NUMERIC);
+            check(actions[0].assignments[1].numeric_expr != nullptr);
+        }
+
+        it("parses complex nested functions") {
+            auto actions = RhsParser::parse(
+                R"(update $user { result = floor(abs(sin($item.price)) * 100) })",
+                make_bindings());
+
+            check(actions[0].assignments[0].type == RhsValueType::NUMERIC);
+            check(actions[0].assignments[0].numeric_expr != nullptr);
+        }
     }
 
     // ========================================================================
@@ -385,3 +427,4 @@ suite("RhsParser") {
         }
     }
 }
+

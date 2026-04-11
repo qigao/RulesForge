@@ -160,8 +160,63 @@ suite("Parser") {
             check(unnest_info.source_binding == "$order");
             check(unnest_info.source_field == "items");
         }
+        
+        it("parses accumulate pattern with window declarations") {
+            std::string drl = R"(
+                rule "Accumulate Window"
+                when
+                    $c : CountResult() from accumulate(
+                        Event() over window:length(5),
+                        count()
+                    )
+                    $d : CountResult() from accumulate(
+                        Event() over window:time(60s),
+                        count()
+                    )
+                then
+                end
+            )";
+            auto state = parse_success(drl);
+            check(state.parsed_rules.size() == 1);
+            auto const& conditions = state.parsed_rules[0].condition_groups[0];
+            check(conditions.size() == 2);
+            
+            auto const& acc1 = std::get<ParsedAccumulate>(conditions[0].source);
+            check(acc1.source_pattern != nullptr);
+            check(acc1.source_pattern->fact_type == "Event");
+            check(acc1.source_pattern->window_info.has_value());
+            check(acc1.source_pattern->window_info->type == WindowType::LENGTH);
+            check(acc1.source_pattern->window_info->size == 5);
+            
+            auto const& acc2 = std::get<ParsedAccumulate>(conditions[1].source);
+            check(acc2.source_pattern != nullptr);
+            check(acc2.source_pattern->fact_type == "Event");
+            check(acc2.source_pattern->window_info.has_value());
+            check(acc2.source_pattern->window_info->type == WindowType::TIME);
+            check(acc2.source_pattern->window_info->size == 60000);
+        }
 
-
+        it("parses time window with bare millisecond integer and keyword in package name") {
+            std::string drl = R"(
+                package test.sliding.time;
+                rule "Accumulate Time Window"
+                when
+                    $c : CountResult() from accumulate(
+                        Event() over window:time(50),
+                        count()
+                    )
+                then
+                end
+            )";
+            auto state = parse_success(drl);
+            check(state.package_name == "test.sliding.time");
+            check(state.parsed_rules.size() == 1);
+            auto const& acc = std::get<ParsedAccumulate>(state.parsed_rules[0].condition_groups[0][0].source);
+            check(acc.source_pattern != nullptr);
+            check(acc.source_pattern->window_info.has_value());
+            check(acc.source_pattern->window_info->type == WindowType::TIME);
+            check(acc.source_pattern->window_info->size == 50);
+        }
     }
 
 

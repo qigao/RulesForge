@@ -147,70 +147,37 @@ BookingDecision (derived)
 
 ### Quick Run with capi_demo
 
+This example is runnable after one preprocessing step.
+
+Flatten the nested scenario file:
+
 ```bash
-capi_demo \
-  -d docs/examples/travel-booking/travel-booking.rfl \
-  -j docs/examples/travel-booking/travel-test-data.json \
+python tools/flatten_example_data.py \
+  travel \
+  docs/examples/travel-booking/travel-test-data.json \
+  docs/examples/travel-booking/travel-flat.json
+```
+
+Then run:
+
+```bash
+./build/bin/capi_demo \
+  -r docs/examples/travel-booking/travel-booking.rfl \
+  -j docs/examples/travel-booking/travel-flat.json \
   -m visaRequirements:com.travel.VisaRequirement \
   -m flightOptions:com.travel.FlightOption \
   -m hotelOptions:com.travel.HotelOption \
+  -m travelRequests:com.travel.TravelRequest \
   -q PackageQuotes \
   -b quote \
-  -f requestId,totalPrice,totalPointsEarned,packageDiscount
+  -f requestId,grandTotal,totalPointsEarned
 ```
 
-### C++ Integration
+Why preprocessing is required:
 
-```cpp
-#include "knowledge_base.hpp"
-
-int main() {
-    ParseResult result;
-    auto kb = build_knowledge_base_from_file("travel-booking.rfl", result);
-    auto session = kb->create_session();
-
-    // Load visa requirements
-    auto visaUS_FR = std::make_shared<Fact>();
-    visaUS_FR->type = "com.travel.VisaRequirement";
-    visaUS_FR->fields["nationality"] = "US";
-    visaUS_FR->fields["destination"] = "FR";
-    visaUS_FR->fields["required"] = static_cast<int64_t>(0);
-    session->add_fact(visaUS_FR);
-
-    // Load flight options
-    auto flight = std::make_shared<Fact>();
-    flight->type = "com.travel.FlightOption";
-    flight->fields["flightId"] = "AA100";
-    flight->fields["airline"] = "American Airlines";
-    flight->fields["origin"] = "JFK";
-    flight->fields["destination"] = "CDG";
-    flight->fields["cabinClass"] = "business";
-    flight->fields["basePrice"] = 2500.0;
-    flight->fields["seatsAvailable"] = static_cast<int64_t>(12);
-    session->add_fact(flight);
-
-    // Create travel request
-    auto request = std::make_shared<Fact>();
-    request->type = "com.travel.TravelRequest";
-    request->fields["requestId"] = "REQ-001";
-    request->fields["customerId"] = "CUST-001";
-    request->fields["loyaltyTier"] = "gold";
-    request->fields["loyaltyPoints"] = static_cast<int64_t>(25000);
-    request->fields["origin"] = "JFK";
-    request->fields["destination"] = "CDG";
-    request->fields["travelers"] = static_cast<int64_t>(2);
-    request->fields["cabinClass"] = "business";
-    request->fields["nationality"] = "US";
-    session->add_fact(request);
-
-    session->fire_all_rules();
-
-    auto quotes = session->execute_query("PackageQuotes");
-    // Process results...
-
-    return 0;
-}
-```
+- the rules expect flat `TravelRequest`, `FlightOption`, `HotelOption`, and `VisaRequirement` facts
+- the sample JSON keeps the request nested inside `testScenarios[].request`
+- the old command omitted the request facts entirely, so it could never produce package quotes
 
 ## Sample Scenarios
 

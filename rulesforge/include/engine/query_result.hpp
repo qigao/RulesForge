@@ -5,6 +5,8 @@
 #include "engine/knowledge_base.hpp"
 
 #include <memory>
+#include <cmath>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -180,6 +182,18 @@ std::optional<T> QueryResultRow::getFieldAs(std::string const& binding, std::str
         if (int64_t* p_int = std::get_if<int64_t>(&*field_val_opt)) { return static_cast<double>(*p_int); }
     }
 
+    // Allow conversion from integral double -> int64_t
+    if constexpr (std::is_same_v<T, int64_t>) {
+        if (double* p_dbl = std::get_if<double>(&*field_val_opt)) {
+            if (std::isfinite(*p_dbl)
+                && std::trunc(*p_dbl) == *p_dbl
+                && *p_dbl >= static_cast<double>(std::numeric_limits<int64_t>::min())
+                && *p_dbl <= static_cast<double>(std::numeric_limits<int64_t>::max())) {
+                return static_cast<int64_t>(*p_dbl);
+            }
+        }
+    }
+
     // Allow conversion from int64_t (0 or 1) -> bool
     if constexpr (std::is_same_v<T, bool>) {
         if (int64_t* p_int = std::get_if<int64_t>(&*field_val_opt)) { return (*p_int != 0); }
@@ -203,4 +217,3 @@ std::vector<T> QueryResult::getColumnFieldAs(std::string const& binding, std::st
 }
 
 #endif   // QUERY_RESULT_HPP
-

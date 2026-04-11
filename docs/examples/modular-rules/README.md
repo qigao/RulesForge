@@ -73,6 +73,8 @@ if (result.success) {
 }
 ```
 
+This example is about parser/import structure, not a turnkey `capi_demo` scenario. Use it when you need multi-file rulesets with shared declarations.
+
 ## Key Concepts
 
 1. **Shared Types**: Define types once in `common/types.rfl`, use everywhere

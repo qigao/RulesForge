@@ -9,8 +9,6 @@ AccumulateNode::AccumulateNode(IAccumulator const* prototype, ParsedAccumulate&&
 void AccumulateNode::left_activate(StatefulSession& session, Token const& token) {
     auto& mem = session.net_mem().accumulate[mem_slot];
     auto const& wme = token.wme;
-    logi("[AccumulateNode::left_activate] node={} p_type={} wme={} mem.left.size={} mem.right.size={}",
-         id, (int)token.type, (void*)wme, mem.left.size(), mem.right.size());
     if (token.type == PropagationType::RETRACT) {
         auto it = mem.left.find(wme);
         if (it != mem.left.end()) {
@@ -24,7 +22,6 @@ void AccumulateNode::left_activate(StatefulSession& session, Token const& token)
     new_item.wme = wme;
     new_item.accumulator = accumulator_prototype->clone();
     new_item.result_fact = session.create_fact(result_fact_type);
-    logi("[AccumulateNode::left_activate] created result_fact ptr={} type={}", (void*)new_item.result_fact, result_fact_type);
     bool is_collect_list = (info.function == "collect" || info.function == "collectList");
     bool is_collect_set = (info.function == "collectSet");
     for (auto const& [fact_id, fact_ptr] : mem.right) {
@@ -41,21 +38,15 @@ void AccumulateNode::left_activate(StatefulSession& session, Token const& token)
         }
     }
     mem.left[wme] = std::move(new_item);
-    logi("[AccumulateNode::left_activate] stored item in mem.left, calling update_and_propagate_result");
     update_and_propagate_result(session, mem.left[wme]);
-    logi("[AccumulateNode::left_activate] done");
 }
 
 void AccumulateNode::right_activate(StatefulSession& session, Fact* fact, PropagationType p_type) {
     auto& mem = session.net_mem().accumulate[mem_slot];
-    logi("[AccumulateNode::right_activate] node={} fact_ptr={} fact_type={} fact_id={} p_type={} mem.left.size={} mem.right.size={}",
-         id, (void*)fact, fact->type, fact->id, (int)p_type, mem.left.size(), mem.right.size());
 
     // Skip our own result facts to prevent self-referential infinite loop
     for (auto const& [wme_ptr, item] : mem.left) {
-        logi("[AccumulateNode::right_activate] checking guard: item.result_fact={} vs fact={}", (void*)item.result_fact, (void*)fact);
         if (item.result_fact == fact) {
-            logi("[AccumulateNode::right_activate] GUARD HIT - skipping result fact");
             return;
         }
     }
@@ -200,8 +191,6 @@ bool AccumulateNode::flush_pending(StatefulSession& session) {
 
 void AccumulateNode::update_and_propagate_result(StatefulSession& session, NetworkMemory::AccumulateMem::LeftMemoryItem& item) {
     bool is_new_fact = (item.result_fact->id == 0);
-    logi("[AccumulateNode::update_and_propagate_result] node={} result_fact_ptr={} result_fact_id={} is_new={}",
-         id, (void*)item.result_fact, item.result_fact->id, is_new_fact);
     auto modifier = [&](Fact& f) {
         bool is_collect = (info.function == "collect" || info.function == "collectList");
         bool is_collect_set = (info.function == "collectSet");
@@ -234,16 +223,17 @@ void AccumulateNode::update_and_propagate_result(StatefulSession& session, Netwo
     };
     if (is_new_fact) {
         modifier(*item.result_fact);
-        logi("[AccumulateNode::update_and_propagate_result] calling session.add_fact for NEW result_fact ptr={}", (void*)item.result_fact);
         session.add_fact(item.result_fact);
-        logi("[AccumulateNode::update_and_propagate_result] add_fact returned, result_fact id={}", item.result_fact->id);
         auto result_wme = session.get_or_create_wme(item.wme, item.result_fact);
         Token assert_token{result_wme, PropagationType::ASSERT};
         for (auto* c : children_raw) { c->left_activate(session, assert_token); }
     } else {
-        logi("[AccumulateNode::update_and_propagate_result] calling session.update_fact for EXISTING result_fact ptr={} id={}", (void*)item.result_fact, item.result_fact->id);
+        auto result_wme = session.get_or_create_wme(item.wme, item.result_fact);
+        Token retract_token{result_wme, PropagationType::RETRACT};
+        for (auto* c : children_raw) { c->left_activate(session, retract_token); }
         session.update_fact(item.result_fact, modifier);
-        logi("[AccumulateNode::update_and_propagate_result] update_fact returned");
+        Token assert_token{result_wme, PropagationType::ASSERT};
+        for (auto* c : children_raw) { c->left_activate(session, assert_token); }
     }
 }
 

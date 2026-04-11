@@ -138,6 +138,12 @@ RflToken RflLexer::scan_normal() {
         "coincides"  / [^a-zA-Z0-9_] { return make_token(TokenType::TK_COINCIDES, tok_); }
         "during"     / [^a-zA-Z0-9_] { return make_token(TokenType::TK_DURING, tok_); }
 
+        // --- Window Keywords ---
+        "over"       / [^a-zA-Z0-9_] { return make_token(TokenType::TK_OVER, tok_); }
+        "window"     / [^a-zA-Z0-9_] { return make_token(TokenType::TK_WINDOW, tok_); }
+        "time"       / [^a-zA-Z0-9_] { return make_token(TokenType::TK_TIME, tok_); }
+        "length"     / [^a-zA-Z0-9_] { return make_token(TokenType::TK_LENGTH, tok_); }
+
         // --- Duration literals (before integers: longest match) ---
         [0-9]+ "ms" { return make_token(TokenType::TK_DURATION, tok_); }
         [0-9]+ "s"  { return make_token(TokenType::TK_DURATION, tok_); }

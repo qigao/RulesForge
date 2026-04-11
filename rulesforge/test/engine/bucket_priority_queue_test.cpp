@@ -302,7 +302,7 @@ suite("BucketPriorityQueue") {
     }
 
     bench("Performance") {
-        benchmark("push 10k items", 1) {
+        benchmark("push 10k items", 1, 1.0) {
             BucketPriorityQueue queue;
             queue.reserve(10000);
 
@@ -312,7 +312,7 @@ suite("BucketPriorityQueue") {
             }
         }
 
-        benchmark("pop 10k items", 1) {
+        benchmark("pop 10k items", 1, 1.0) {
             BucketPriorityQueue queue;
             for (size_t i = 0; i < 10000; ++i) {
                 Priority p = static_cast<Priority>(i % 4);
@@ -324,7 +324,7 @@ suite("BucketPriorityQueue") {
             }
         }
 
-        benchmark("batch pop 10k items", 1) {
+        benchmark("batch pop 10k items", 1, 1.0) {
             BucketPriorityQueue queue;
             for (size_t i = 0; i < 10000; ++i) {
                 Priority p = static_cast<Priority>(i % 4);
@@ -336,7 +336,7 @@ suite("BucketPriorityQueue") {
             }
         }
 
-        benchmark("mixed operations", 1) {
+        benchmark("mixed operations", 1, 1.0) {
             BucketPriorityQueue queue;
 
             for (int i = 0; i < 1000; ++i) {

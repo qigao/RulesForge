@@ -1,87 +1,36 @@
 #include "codec/codec_registry.hpp"
 #include <data_bind.h>
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
 
 namespace rulesforge {
 
 CodecRegistry::CodecRegistry() {
-    adapter_ = std::make_unique<FactValueAdapter>(temp_arena_);
+    adapter_ = std::make_unique<FactValueAdapter>();
 }
 
 CodecRegistry::~CodecRegistry() {
-    for (auto& [type_name, codec] : codecs_) {
-        if (codec) {
-            data_bind_free(codec);
-        }
-    }
-    if (json_codec_) {
-        data_bind_free(json_codec_);
-    }
-
-    // Cleanup DLL handles
-    for (auto& [type_name, dll_handle] : dll_codecs_) {
-        if (dll_handle && dll_handle->handle) {
-#ifdef _WIN32
-            FreeLibrary(static_cast<HMODULE>(dll_handle->handle));
-#else
-            dlclose(dll_handle->handle);
-#endif
-        }
-    }
+    reset_codecs();
 }
 
 void CodecRegistry::load_declarations(std::vector<ParsedDeclaration> const& declarations) {
-    declarations_ = declarations;
+    load_declarations(declarations, {});
 }
 
-DataBind* CodecRegistry::get_codec(std::string const& type_name) {
-    auto it = codecs_.find(type_name);
-    if (it != codecs_.end()) {
-        return it->second;
-    }
-
-    if (declarations_.empty()) {
-        last_error_ = "No declarations loaded";
-        return nullptr;
-    }
-
-    // Prepare declaration pointers for C API
-    std::vector<const void*> decl_ptrs;
-    decl_ptrs.reserve(declarations_.size());
-    for (auto const& decl : declarations_) {
-        decl_ptrs.push_back(&decl);
-    }
-
-    // Use new API: create directly from memory
-    DataBind* codec = data_bind_create_from_declarations(
-        decl_ptrs.data(),
-        decl_ptrs.size(),
-        DATA_BIND_FORMAT_BINARY,
-        adapter_->get_api()
-    );
-
-    if (!codec) {
-        last_error_ = "Failed to create codec for type: " + type_name;
-        return nullptr;
-    }
-
-    codecs_[type_name] = codec;
-    return codec;
+void CodecRegistry::load_declarations(std::vector<ParsedDeclaration> const& declarations,
+                                      std::vector<ParsedEnum> const& enums) {
+    reset_codecs();
+    declarations_ = declarations;
+    enums_ = enums;
+    last_error_.clear();
 }
 
 Fact* CodecRegistry::parse_binary(rulesforge::FactArena& arena, std::string const& type_name, uint8_t const* buf, size_t len) {
-    DataBind* codec = get_codec(type_name);
+    DataBind* codec = get_or_create_binary_codec();
     if (!codec) {
         return nullptr;
     }
 
-    // Temporarily switch adapter to use the provided arena
-    adapter_ = std::make_unique<FactValueAdapter>(arena);
+    FactValueAdapter::ScopedParse scoped_parse(*adapter_, arena);
 
     Value* value = data_bind_parse(codec, type_name.c_str(), buf, len);
     if (!value) {
@@ -94,9 +43,6 @@ Fact* CodecRegistry::parse_binary(rulesforge::FactArena& arena, std::string cons
         fact->type = type_name;
     }
 
-    // Restore adapter to temp arena
-    adapter_ = std::make_unique<FactValueAdapter>(temp_arena_);
-
     return fact;
 }
 
@@ -107,13 +53,11 @@ Fact* CodecRegistry::parse_json(rulesforge::FactArena& arena, std::string const&
         return nullptr;
     }
 
-    // Temporarily switch adapter to use the provided arena
-    adapter_ = std::make_unique<FactValueAdapter>(arena);
+    FactValueAdapter::ScopedParse scoped_parse(*adapter_, arena);
 
     Value* value = data_bind_parse_string(codec, type_name.c_str(), json_str.c_str());
     if (!value) {
         last_error_ = std::string(data_bind_get_error(codec));
-        adapter_ = std::make_unique<FactValueAdapter>(temp_arena_);
         return nullptr;
     }
 
@@ -123,98 +67,125 @@ Fact* CodecRegistry::parse_json(rulesforge::FactArena& arena, std::string const&
         fact->type = type_name;
     }
 
-    // Clean up maps after parsing
-    adapter_->clear_maps();
-
-    // Restore adapter to temp arena
-    adapter_ = std::make_unique<FactValueAdapter>(temp_arena_);
-
     return fact;
 }
 
 std::vector<Fact*> CodecRegistry::parse_csv(rulesforge::FactArena& arena, std::string const& type_name, std::string const& csv_str) {
-    std::vector<Fact*> facts = CsvFactParser::parse(arena, type_name, csv_str, declarations_);
-    if (facts.empty()) {
-        last_error_ = CsvFactParser::get_last_error();
+    if (!adapter_) {
+        last_error_ = "DataBind adapter not initialized";
+        return {};
     }
+
+    DataBind* codec = get_or_create_csv_codec();
+    if (!codec) {
+        return {};
+    }
+
+    size_t pre_extra_size = arena.get_extra_facts().size();
+    bool had_first = (arena.get_first_fact() != nullptr);
+
+    FactValueAdapter::ScopedParse scoped_parse(*adapter_, arena);
+
+    Value* value = data_bind_parse_string(codec, type_name.c_str(), csv_str.c_str());
+    if (!value) {
+        last_error_ = std::string(data_bind_get_error(codec));
+        return {};
+    }
+
+    std::vector<Fact*> facts;
+    
+    if (!had_first && arena.get_first_fact() != nullptr) {
+        facts.push_back(arena.get_first_fact());
+    }
+    
+    const auto& extras = arena.get_extra_facts();
+    for (size_t i = pre_extra_size; i < extras.size(); ++i) {
+        facts.push_back(extras[i]);
+    }
+
+    for (auto* fact : facts) {
+        if (fact) fact->type = type_name;
+    }
+
     return facts;
 }
 
-DataBind* CodecRegistry::get_or_create_json_codec() {
-    if (json_codec_) {
-        return json_codec_;
-    }
+namespace {
 
-    if (declarations_.empty()) {
-        last_error_ = "No declarations loaded";
+DataBind* create_codec_impl(
+    std::vector<ParsedDeclaration> const& declarations,
+    std::vector<ParsedEnum> const& enums,
+    DataBindFormat format,
+    DataBindValueApi const* api,
+    std::string& last_error
+) {
+    if (declarations.empty()) {
+        last_error = "No declarations loaded";
         return nullptr;
     }
 
-    // Prepare declaration pointers for C API
     std::vector<const void*> decl_ptrs;
-    decl_ptrs.reserve(declarations_.size());
-    for (auto const& decl : declarations_) {
+    decl_ptrs.reserve(declarations.size());
+    for (auto const& decl : declarations) {
         decl_ptrs.push_back(&decl);
     }
 
-    // Create JSON codec from declarations
-    json_codec_ = data_bind_create_from_declarations(
+    std::vector<const void*> enum_ptrs;
+    enum_ptrs.reserve(enums.size());
+    for (auto const& enum_decl : enums) {
+        enum_ptrs.push_back(&enum_decl);
+    }
+
+    DataBind* codec = data_bind_create_from_declarations_and_enums(
         decl_ptrs.data(),
         decl_ptrs.size(),
-        DATA_BIND_FORMAT_JSON,
-        adapter_->get_api()
+        enum_ptrs.empty() ? nullptr : enum_ptrs.data(),
+        enum_ptrs.size(),
+        format,
+        api
     );
 
-    if (!json_codec_) {
-        last_error_ = "Failed to create JSON codec";
+    if (!codec) {
+        last_error = std::string(data_bind_get_error(nullptr));
         return nullptr;
     }
 
+    return codec;
+}
+
+} // namespace
+
+void CodecRegistry::reset_codecs() {
+    DataBind* codecs[] = {binary_codec_, json_codec_, csv_codec_};
+    for (auto* codec : codecs) {
+        if (codec) {
+            data_bind_free(codec);
+        }
+    }
+    binary_codec_ = nullptr;
+    json_codec_ = nullptr;
+    csv_codec_ = nullptr;
+}
+
+DataBind* CodecRegistry::get_or_create_binary_codec() {
+    if (!binary_codec_) {
+        binary_codec_ = create_codec_impl(declarations_, enums_, DATA_BIND_FORMAT_BINARY, adapter_->get_api(), last_error_);
+    }
+    return binary_codec_;
+}
+
+DataBind* CodecRegistry::get_or_create_json_codec() {
+    if (!json_codec_) {
+        json_codec_ = create_codec_impl(declarations_, enums_, DATA_BIND_FORMAT_JSON, adapter_->get_api(), last_error_);
+    }
     return json_codec_;
 }
 
-bool CodecRegistry::load_codec_from_dll(std::string const& type_name, std::string const& dll_path) {
-#ifdef _WIN32
-    HMODULE handle = LoadLibraryA(dll_path.c_str());
-    if (!handle) {
-        last_error_ = "Failed to load DLL: " + dll_path;
-        return false;
+DataBind* CodecRegistry::get_or_create_csv_codec() {
+    if (!csv_codec_) {
+        csv_codec_ = create_codec_impl(declarations_, enums_, DATA_BIND_FORMAT_CSV, adapter_->get_api(), last_error_);
     }
-#else
-    void* handle = dlopen(dll_path.c_str(), RTLD_LAZY);
-    if (!handle) {
-        last_error_ = std::string("Failed to load SO: ") + dlerror();
-        return false;
-    }
-#endif
-
-    // Resolve DataBind vtable symbol: {TypeName}_databind
-    std::string symbol = type_name + "_databind";
-
-#ifdef _WIN32
-    DataBind* codec = reinterpret_cast<DataBind*>(GetProcAddress(handle, symbol.c_str()));
-#else
-    DataBind* codec = static_cast<DataBind*>(dlsym(handle, symbol.c_str()));
-#endif
-
-    if (!codec) {
-#ifdef _WIN32
-        FreeLibrary(handle);
-#else
-        dlclose(handle);
-#endif
-        last_error_ = "Symbol not found: " + symbol;
-        return false;
-    }
-
-    // Store DLL handle and codec
-    auto dll_handle = std::make_unique<DllHandle>();
-    dll_handle->handle = handle;
-    dll_handle->codec = codec;
-    dll_codecs_[type_name] = std::move(dll_handle);
-
-    last_error_.clear();
-    return true;
+    return csv_codec_;
 }
 
 } // namespace rulesforge

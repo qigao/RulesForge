@@ -50,6 +50,7 @@ enum class NodeKind : uint8_t {
   Terminal,
   QueryTerminal,
   QueryInput,
+  Window,
 };
 
 // --- BASE CLASS ---

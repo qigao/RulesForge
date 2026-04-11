@@ -2,13 +2,12 @@
 #define CODEC_REGISTRY_HPP
 
 #include "codec/fact_value_adapter.hpp"
-#include "codec/json_fact_parser.hpp"
-#include "codec/csv_fact_parser.hpp"
 #include "data/fact_arena.hpp"
+#include "core/constraint_types.hpp"
 
-extern "C" {
+ 
 #include "data_bind.h"
-}
+ 
 
 #include <memory>
 #include <string>
@@ -31,19 +30,8 @@ public:
      * @brief Load declarations and generate schema
      */
     void load_declarations(std::vector<ParsedDeclaration> const& declarations);
-
-    /**
-     * @brief Get codec for a type (lazy initialization)
-     */
-    DataBind* get_codec(std::string const& type_name);
-
-    /**
-     * @brief Load codec from DLL/SO plugin
-     * @param type_name Message type name (e.g., "Order")
-     * @param dll_path Path to DLL/SO file
-     * @return true on success, false on failure
-     */
-    bool load_codec_from_dll(std::string const& type_name, std::string const& dll_path);
+    void load_declarations(std::vector<ParsedDeclaration> const& declarations,
+                           std::vector<ParsedEnum> const& enums);
 
     /**
      * @brief Parse binary data to Fact (uses provided arena)
@@ -67,20 +55,17 @@ public:
 
 private:
     std::unique_ptr<FactValueAdapter> adapter_;
-    rulesforge::FactArena temp_arena_;  // Temporary arena for adapter
-    std::unordered_map<std::string, DataBind*> codecs_;
-    DataBind* json_codec_ = nullptr;  // Shared JSON codec for all types
+    DataBind* binary_codec_ = nullptr;
+    DataBind* json_codec_ = nullptr;
+    DataBind* csv_codec_ = nullptr;
     std::vector<ParsedDeclaration> declarations_;
+    std::vector<ParsedEnum> enums_;
     std::string last_error_;
 
-    // DLL plugin management
-    struct DllHandle {
-        void* handle;
-        DataBind* codec;
-    };
-    std::unordered_map<std::string, std::unique_ptr<DllHandle>> dll_codecs_;
-
+    void reset_codecs();
+    DataBind* get_or_create_binary_codec();
     DataBind* get_or_create_json_codec();
+    DataBind* get_or_create_csv_codec();
 };
 
 } // namespace rulesforge

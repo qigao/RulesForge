@@ -73,7 +73,9 @@ class EvalNode : public ReteNode
 public:
   static constexpr NodeKind Kind = NodeKind::Eval;
   EvalNode() : ReteNode(NodeKind::Eval) {}
-  EvalNode(std::string expression, std::map<std::string, int> bindings);
+  EvalNode(std::string expression,
+           std::map<std::string, int> bindings,
+           std::map<std::string, std::string> scalar_binding_fields);
   void left_activate(StatefulSession& session,
                      Token const& token) override;
 
@@ -96,8 +98,32 @@ private:
   // Immutable config
   std::string expression;
   std::map<std::string, int> binding_to_token_idx;
+  std::map<std::string, std::string> scalar_binding_to_field;
   std::shared_ptr<rulesforge::ExpressionEvaluator> compiled_expression;
   std::unordered_map<std::string, EvalResolvedVar> resolved_vars_;
+};
+
+class WindowNode : public ReteNode
+{
+public:
+  static constexpr NodeKind Kind = NodeKind::Window;
+  WindowNode() : ReteNode(NodeKind::Window) {}
+  WindowNode(ParsedWindow const& window_info);
+
+  void left_activate(StatefulSession&, Token const&) override {}
+  
+  void right_activate(StatefulSession& session,
+                      Fact* fact,
+                      PropagationType p_type) override;
+
+  void print_node(std::ostream& os) const override;
+  friend class ReteSerializer;
+
+private:
+  void evaluate_expiration(StatefulSession& session);
+
+  // Immutable config
+  ParsedWindow info;
 };
 
 #endif  // RETE_NODE_TRANSFORM_HPP

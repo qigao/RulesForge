@@ -36,6 +36,7 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::build() {
     logd("BetaNetworkBuilder::build starting. is_query: {}, param_count: {}", is_query_build_, parameter_count_);
     last_node_ = nullptr;
     binding_to_idx_.clear();
+    inline_binding_to_field_.clear();
     first_beta_node_in_chain = nullptr;
     int pattern_depth = 0;
 
@@ -66,7 +67,7 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::build() {
         if (current_node) { last_node_ = current_node; }
 
         bool adds_fact_to_token =
-            (pattern.type == PatternType::STANDARD && std::holds_alternative<std::monostate>(pattern.source)) ||
+            pattern.type == PatternType::STANDARD ||
             std::holds_alternative<ParsedAccumulate>(pattern.source) ||
             std::holds_alternative<ParsedUnnest>(pattern.source);
         if (adds_fact_to_token) {
@@ -97,6 +98,7 @@ void BetaNetworkBuilder::collect_inline_bindings(ConstraintNode const* node, int
     if (!node) return;
     if (node->type == NodeType::LEAF && node->constraint.field_binding) {
         binding_to_idx_[*node->constraint.field_binding] = depth;
+        inline_binding_to_field_[*node->constraint.field_binding] = node->constraint.left_field;
     }
     for (auto const& child : node->children) { collect_inline_bindings(child.get(), depth); }
 }
@@ -150,6 +152,17 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::create_node_for_pattern(ParsedPatt
         }
         auto alpha_root = kb_.partition_and_get_alpha_root(*pattern_for_alpha, join_constraints);
         alpha_tails = build_alpha_chain(alpha_root.get(), {entry});
+
+        if (pattern_for_alpha->window_info.has_value()) {
+            std::vector<std::shared_ptr<ReteNode>> new_tails;
+            for (auto& tail : alpha_tails) {
+                auto window_node = network_.create_node<WindowNode>(*pattern_for_alpha->window_info);
+                tail->add_child(window_node);
+                new_tails.push_back(window_node);
+            }
+            alpha_tails = new_tails;
+            logd("  -> Attached WindowNode to {} alpha tail(s)", new_tails.size());
+        }
     }
 
     if (std::holds_alternative<ParsedAccumulate>(pattern.source)) {
@@ -270,9 +283,10 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::create_eval_node(ParsedPattern& p)
     key.kind = NodeKind::Eval;
     key.eval_expr = p.eval_expression.value_or("");
     key.bindings = binding_to_idx_;
+    key.eval_scalar_fields = inline_binding_to_field_;
 
     auto node = network_.find_or_create_beta_node<EvalNode>(parents, std::move(key),
-        std::move(p.eval_expression.value_or("")), binding_to_idx_);
+        std::move(p.eval_expression.value_or("")), binding_to_idx_, inline_binding_to_field_);
 
     logd("  -> Created/Shared EvalNode (ID: {}), code: '{}'", node->id, p.eval_expression.value_or(""));
     return node;

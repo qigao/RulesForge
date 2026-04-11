@@ -1,0 +1,20 @@
+package {{package_leaf}}
+
+{{#enums}}
+type {{name}} int
+
+const (
+{{#values}}
+    {{go_name}} {{enum_name}}
+{{/values}}
+)
+
+{{/enums}}
+{{#declarations}}
+type {{go_name}} struct {
+{{#fields}}
+    {{name}} {{go_type}}
+{{/fields}}
+}
+
+{{/declarations}}

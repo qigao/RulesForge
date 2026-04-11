@@ -1,6 +1,11 @@
 // --- EvalNode ---
-EvalNode::EvalNode(std::string expr,std::map<std::string, int> bindings) :
-    ReteNode(NodeKind::Eval), expression(std::move(expr)), binding_to_token_idx(std::move(bindings)) {
+EvalNode::EvalNode(std::string expr,
+                   std::map<std::string, int> bindings,
+                   std::map<std::string, std::string> scalar_binding_fields) :
+    ReteNode(NodeKind::Eval),
+    expression(std::move(expr)),
+    binding_to_token_idx(std::move(bindings)),
+    scalar_binding_to_field(std::move(scalar_binding_fields)) {
     if (!expression.empty()) {
         std::string compile_error;
         compiled_expression = rulesforge::ExpressionEvaluator::compile(expression, &compile_error);
@@ -17,7 +22,12 @@ EvalNode::EvalNode(std::string expr,std::map<std::string, int> bindings) :
                 binding_name = var_name.substr(0, dot_pos);
                 r.field_name = var_name.substr(dot_pos + 1);
             } else {
-                r.field_name = "this";
+                auto field_it = scalar_binding_to_field.find(binding_name);
+                if (field_it != scalar_binding_to_field.end()) {
+                    r.field_name = field_it->second;
+                } else {
+                    r.field_name = "this";
+                }
             }
             r.use_fact_id = (r.field_name == "this" || r.field_name == "id");
 
@@ -44,7 +54,7 @@ void EvalNode::left_activate(StatefulSession& session, Token const& token) {
     if (expression.empty()) {
         result = true;
     } else if (compiled_expression) {
-        auto resolver = [this, &token](std::string const& var_name) -> double {
+        auto resolver = [this, &token](std::string const& var_name) -> ConstraintValue {
             auto it = resolved_vars_.find(var_name);
             if (it == resolved_vars_.end()) return 0.0;
 
@@ -57,9 +67,19 @@ void EvalNode::left_activate(StatefulSession& session, Token const& token) {
             if (r.use_fact_id) {
                 return static_cast<double>(fact->id);
             }
-            return constraint_value_to_double_flexible(fact->get_field(r.field_name));
+            
+            auto val_opt = fact->get_field(r.field_name);
+            if (val_opt) return *val_opt;
+            return 0.0;
         };
-        result = compiled_expression->evaluate(resolver) != 0.0;
+        ConstraintValue cv_result = compiled_expression->evaluate(resolver);
+        if (std::holds_alternative<double>(cv_result)) {
+            result = std::get<double>(cv_result) != 0.0;
+        } else if (std::holds_alternative<int64_t>(cv_result)) {
+            result = std::get<int64_t>(cv_result) != 0;
+        } else {
+            result = false;
+        }
     }
     if (result) {
         mem.memory[wme] = wme;

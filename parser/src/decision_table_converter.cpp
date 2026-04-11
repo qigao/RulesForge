@@ -5,7 +5,6 @@
 // Helper to replace "$1" with the actual value from the CSV cell.
 std::string DecisionTableConverter::substitute(std::string_view template_str, std::string_view value) const {
     std::string result;
-    size_t last_pos = 0;
     size_t pos = template_str.find("$1");
     if (pos == std::string::npos) { return std::string(template_str); }
     result.reserve(template_str.length() - 2 + value.length());
@@ -111,4 +110,3 @@ std::string DecisionTableConverter::generate_drl() {
 
     return drl_ss.str();
 }
-

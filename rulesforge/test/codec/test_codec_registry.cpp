@@ -5,9 +5,26 @@
 
 #include "tinytest.h"
 #include "rfl_parser.hpp"
+#include "engine/data_source.hpp"
 #include "engine/knowledge_base.hpp"
 #include "engine/stateful_session.hpp"
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <vector>
+
+namespace {
+
+std::vector<uint8_t> make_truncated_person_binary() {
+  std::vector<uint8_t> data;
+  data.push_back(4);
+  data.push_back(0);
+  data.push_back('J');
+  data.push_back('o');
+  return data;
+}
+
+}
 
 suite("Codec Registry") {
   section("JSON to Fact") {
@@ -142,6 +159,236 @@ Bob,35,Berlin)";
 
               // Check all facts inserted
               check(session->get_fact_count() == 2);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  section("DataSource CSV path usage") {
+    given("a schema with exactly one declared type") {
+      char const* rfl = R"(
+        declare Person
+            name: String
+            age: int
+        end
+      )";
+
+      when("loading CSV via DataSource::csv(path)") {
+        ParsingResult result;
+        auto kb = build_knowledge_base(rfl, result);
+
+        then("should read the file content instead of treating the path as CSV text") {
+          check(result.success);
+
+          if (kb) {
+            auto session = kb->create_session();
+            check_not_null(session.get());
+
+            auto csv_path = std::filesystem::temp_directory_path() / "rulesforge_databind_people.csv";
+            {
+              std::ofstream out(csv_path, std::ios::binary);
+              out << "name,age\nJohn,30\nAmy,25\n";
+            }
+
+            try {
+              session->add_data(rulesforge::DataSource::csv(csv_path.string()));
+              check(session->get_fact_count() == 2);
+            } catch (...) {
+              std::filesystem::remove(csv_path);
+              throw;
+            }
+
+            std::filesystem::remove(csv_path);
+          }
+        }
+      }
+    }
+  }
+
+  section("DataSource JSON jmespath usage") {
+    given("a schema with exactly one declared type") {
+      char const* rfl = R"(
+        declare Person
+            name: String
+            age: int
+        end
+      )";
+
+      when("loading JSON via DataSource::json(content, jmespath)") {
+        ParsingResult result;
+        auto kb = build_knowledge_base(rfl, result);
+
+        then("should insert one fact per extracted JSON object") {
+          check(result.success);
+
+          if (kb) {
+            auto session = kb->create_session();
+            check_not_null(session.get());
+
+            char const* json = R"({"people":[{"name":"John","age":30},{"name":"Amy","age":25}]})";
+
+            session->add_data(rulesforge::DataSource::json(json, "people[*]"));
+
+            check(session->get_fact_count() == 2);
+          }
+        }
+      }
+    }
+  }
+
+  section("Binary codec import wiring") {
+    given("a rule file that imports a missing binary codec") {
+      char const* rfl = R"(
+        import binary codec "Person" from "missing_codec.dll"
+
+        declare Person
+            name: String
+        end
+      )";
+
+      when("building the knowledge base") {
+        ParsingResult result;
+        auto kb = build_knowledge_base(rfl, result, "missing_codec_test.rfl", false);
+
+        then("should fail instead of silently ignoring the binary codec import") {
+          check(kb == nullptr);
+          check(!result.success);
+          check(!result.errors.empty());
+        }
+      }
+    }
+  }
+
+  section("Binary failure does not poison JSON adapter state") {
+    given("a schema that supports both binary and json parsing") {
+      char const* rfl = R"(
+        declare Person
+            name: String
+            age: int
+        end
+      )";
+
+      when("a binary parse fails before a json parse") {
+        ParsingResult result;
+        auto kb = build_knowledge_base(rfl, result);
+
+        then("the later json parse should still succeed") {
+          check(result.success);
+
+          if (kb) {
+            auto session = kb->create_session();
+            check_not_null(session.get());
+
+            if (session) {
+              bool binary_failed = false;
+              auto binary = make_truncated_person_binary();
+
+              try {
+                session->add_fact_from_binary("Person", binary.data(), binary.size());
+              } catch (std::runtime_error const&) {
+                binary_failed = true;
+              }
+
+              check(binary_failed);
+
+              Fact* fact = session->add_fact_from_json("Person", R"({"name":"John","age":30})");
+              check_not_null(fact);
+              if (fact) {
+                check(fact->type == "Person");
+                check(std::get<std::string>(fact->fields["name"]) == "John");
+                check(std::get<int64_t>(fact->fields["age"]) == 30);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  section("Binary codec creation reports actual schema errors") {
+    given("a schema that JSON supports but binary does not") {
+      char const* rfl = R"(
+        declare Item
+            id: int
+        end
+
+        declare Order
+            items: List<Item>
+        end
+      )";
+
+      when("requesting a binary parse") {
+        ParsingResult result;
+        auto kb = build_knowledge_base(rfl, result);
+
+        then("the thrown error should preserve the concrete codec creation reason") {
+          check(result.success);
+
+          if (kb) {
+            auto session = kb->create_session();
+            check_not_null(session.get());
+
+            if (session) {
+              uint8_t dummy[4] = {0, 0, 0, 0};
+              bool threw = false;
+
+              try {
+                session->add_fact_from_binary("Order", dummy, sizeof(dummy));
+              } catch (std::runtime_error const& e) {
+                threw = true;
+                check(std::string(e.what()).find("Unsupported List element type") != std::string::npos);
+                check(std::string(e.what()).find("Order.items") != std::string::npos);
+              }
+
+              check(threw);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  section("Enum Support") {
+    given("a schema with enum-backed field") {
+      char const* rfl = R"(
+        enum Status<int>
+            PENDING
+            ACTIVE
+        end
+
+        declare Order
+            status: Status
+        end
+      )";
+
+      when("parsing JSON and binary for the enum field") {
+        ParsingResult result;
+        auto kb = build_knowledge_base(rfl, result);
+
+        then("should preserve enum metadata through CodecRegistry") {
+          check(result.success);
+
+          if (kb) {
+            auto session = kb->create_session();
+            check_not_null(session.get());
+
+            if (session) {
+              Fact* json_fact = session->add_fact_from_json("Order", R"({"status":1})");
+              check_not_null(json_fact);
+              if (json_fact) {
+                check(json_fact->type == "Order");
+                check(std::get<int64_t>(json_fact->fields["status"]) == 1);
+              }
+
+              std::vector<uint8_t> binary = {1, 0, 0, 0};
+              Fact* binary_fact = session->add_fact_from_binary("Order", binary.data(), binary.size());
+              check_not_null(binary_fact);
+              if (binary_fact) {
+                check(binary_fact->type == "Order");
+                check(std::get<int64_t>(binary_fact->fields["status"]) == 1);
+              }
             }
           }
         }
@@ -515,6 +762,44 @@ Bob,35,Berlin)";
         }
       }
     }
+
+    given("a schema with Set<long>") {
+      char const* rfl = R"(
+        declare User
+            ids: Set<long>
+        end
+      )";
+
+      when("parsing JSON with integer array") {
+        ParsingResult result;
+        auto kb = build_knowledge_base(rfl, result);
+
+        then("should parse Set<long> into ValueSet<int64_t> correctly") {
+          check(result.success);
+
+          if (kb) {
+            auto session = kb->create_session();
+
+            if (session) {
+              Fact* fact = session->add_fact_from_json("User", R"({"ids":[11,22,11]})");
+
+              check_not_null(fact);
+              if (fact) {
+                auto& ids_val = fact->fields["ids"];
+                check(std::holds_alternative<std::shared_ptr<ValueSet>>(ids_val));
+
+                if (std::holds_alternative<std::shared_ptr<ValueSet>>(ids_val)) {
+                  auto ids = std::get<std::shared_ptr<ValueSet>>(ids_val);
+                  check(ids->values.size() == 2);
+                  check(ids->values.count(int64_t(11)) == 1);
+                  check(ids->values.count(int64_t(22)) == 1);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   section("Map Support") {
@@ -556,6 +841,51 @@ Bob,35,Berlin)";
                   auto env_it = metadata->entries.find(std::string("env"));
                   if (env_it != metadata->entries.end()) {
                     check(std::get<std::string>(env_it->second) == "prod");
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    given("a schema with Map<string, long>") {
+      char const* rfl = R"(
+        declare Config
+            metadata: Map<String, long>
+        end
+      )";
+
+      when("parsing JSON with integer values") {
+        ParsingResult result;
+        auto kb = build_knowledge_base(rfl, result);
+
+        then("should parse Map<string, long> into ValueMap correctly") {
+          check(result.success);
+
+          if (kb) {
+            auto session = kb->create_session();
+
+            if (session) {
+              Fact* fact = session->add_fact_from_json("Config", R"({"metadata":{"low":101,"high":202}})");
+
+              check_not_null(fact);
+              if (fact) {
+                auto& metadata_val = fact->fields["metadata"];
+                check(std::holds_alternative<std::shared_ptr<ValueMap>>(metadata_val));
+
+                if (std::holds_alternative<std::shared_ptr<ValueMap>>(metadata_val)) {
+                  auto metadata = std::get<std::shared_ptr<ValueMap>>(metadata_val);
+                  check(metadata->entries.size() == 2);
+
+                  auto low_it = metadata->entries.find(std::string("low"));
+                  check(low_it != metadata->entries.end());
+                  if (low_it != metadata->entries.end()) {
+                    check(std::holds_alternative<int64_t>(low_it->second));
+                    if (std::holds_alternative<int64_t>(low_it->second)) {
+                      check(std::get<int64_t>(low_it->second) == 101);
+                    }
                   }
                 }
               }

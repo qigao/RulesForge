@@ -5,10 +5,6 @@
 #include <filesystem>
 #include <fstream>
 
-#ifndef RFL_TEST_DATA_DIR
-#define RFL_TEST_DATA_DIR "test"
-#endif
-
 static std::string test_path(std::string const& relative) {
     return (std::filesystem::path(RFL_TEST_DATA_DIR) / relative).string();
 }
