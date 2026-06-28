@@ -7,7 +7,7 @@ Primary references:
 - `parser/parser/rfl_grammar_lemon.y`
 - `parser/src/rhs_parser.cpp`
 - `parser/src/semantic_analyzer.cpp`
-- `parser/src/expression_evaluator.cpp`
+- `parser/src/expression_descriptor.cpp`
 - parser tests under `parser/tests/`
 
 ## 1. File Structure
@@ -68,15 +68,7 @@ import com.example.model.Customer
 import com.example.model.*
 ```
 
-Binary codec imports are also supported:
-
-```rfl
-import binary codec "Person" from "plugins/person_codec.dll"
-```
-
-Runtime note:
-- the KnowledgeBase loads imported binary codecs during build
-- build fails if the DLL or exported codec symbol cannot be loaded
+External payload parsing is not part of the RulesForge engine runtime. Use TurboScript parser/data_bind, host-side code, or the RulesForge C API schema helpers to parse payloads and insert constructed facts.
 
 ## 1.1 Globals
 
@@ -356,10 +348,9 @@ $items: AnyType() from collect($o: Order())
 $item: Item() from unnest($order.items)
 ```
 
-4. `from json(input, "expr")` **[DEPRECATED]**
+4. `from json(input, "expr")` **[REMOVED]**
 
-> **⚠️ Deprecated**: Use `session->add_data(DataSource::json(...))` in C++ instead.
-> This syntax will be removed in a future version.
+JSON parsing is not a RulesForge runtime responsibility. Use TurboScript parser/data_bind or another host-side parser to construct facts before insertion.
 
 ```rfl
 $r: Row() from json("{\"orders\":[{\"amount\":120.5}]}", "orders[*]")
@@ -368,17 +359,16 @@ $r: Row() from json(file("data/orders.json"), "orders[*]")
 
 **Recommended approach**:
 ```cpp
-// Load data in C++
-session->add_data(DataSource::json(json_content, "orders[*]"));
+// Parse and bind outside RulesForge, then insert facts.
+session->add_fact(row_fact);
 
 // Simplified rule
 $r: Row()
 ```
 
-5. `from dsv/csv(input, "filter-expr")` **[DEPRECATED]**
+5. `from dsv/csv(input, "filter-expr")` **[REMOVED]**
 
-> **⚠️ Deprecated**: Use `session->add_data(DataSource::csv(...))` in C++ instead.
-> This syntax will be removed in a future version.
+CSV/DSV parsing is not a RulesForge runtime responsibility. Use TurboScript parser/data_bind or another host-side parser to construct facts before insertion.
 
 ```rfl
 $r: Row() from dsv("amount_n,sym_s\n120.5,A\n80.0,B\n", "amount > 100 and sym == \"A\"")
@@ -388,17 +378,16 @@ $r: Row() from csv(file("data/orders.csv"), "amount > 100")
 
 **Recommended approach**:
 ```cpp
-// Load data from a CSV file path in C++
-session->add_data(DataSource::csv("data/orders.csv"));
+// Parse and bind outside RulesForge, then insert facts.
+session->add_fact(row_fact);
 
 // Simplified rule
 $r: Row()
 ```
 
 Note:
-- `DataSource::csv(...)` currently reads CSV from a file path
-- its `filter` parameter is accepted by the API but is not applied by `add_data()`
-- `DataSource::dsv(...)` is not implemented in `add_data()`
+- `DataSource` is fact-only in RulesForge.
+- External file formats should be handled by TurboScript parser/data_bind or host application code.
 
 6. `from entry-point "stream-name"`
 
@@ -408,18 +397,10 @@ $e: Event() from entry-point "sensor-stream"
 
 For accumulate source pattern, `from entry-point` is also allowed inside source pattern.
 
-Accumulate source pattern also supports the same data-source clauses:
+Accumulate source pattern does not ingest external data. Insert facts before rule execution:
 
-```rfl
-$sum: Number() from accumulate(
-    $p: Purchase() from json(file("data/orders.json"), "orders[*]"),
-    sum($p.amount)
-)
-
-$sum2: Number() from accumulate(
-    $r: Purchase() from csv(file("data/orders.csv"), "amount > 100"),
-    sum($r.amount)
-)
+```cpp
+session->add_fact(purchase_fact);
 ```
 
 ### 4.7 Query Call Pattern (LHS)
@@ -430,9 +411,9 @@ Query invocation pattern is supported using quoted query name:
 "FindAdults"($person)
 ```
 
-## 5. RHS (`then`) Native Actions
+## 5. RHS (`then`) Actions
 
-RHS is parsed by `RhsParser` and compiled into native actions.
+RHS is parsed by `RhsParser` and compiled into the supported RHS execution path.
 
 ### 5.1 Action Types
 
@@ -490,7 +471,7 @@ Supported assignment values:
 - boolean literal (`true` / `false`)
 - variable reference (`$v`, `$v.field`)
 - numeric/expression value
-- native function call value (registered from host/plugin), e.g. `metric($o.total)`
+- host function call value, e.g. `metric($o.total)`
 
 Expression syntax in RHS supports:
 - arithmetic: `+ - * / % ^`
@@ -518,36 +499,33 @@ Practical note:
 - document only functions that the current parser accepts and the current runtime actually registers
 - do not assume the entire upstream ExprTk function surface is available unless it is wired here
 
-### 5.4 Native Function and DLL Function Table Support
+### 5.4 Host Callback Support
 
-RHS function calls can be backed by host-registered native functions or plugin DLL/so function tables.
+RHS function calls can be backed by explicitly registered host callbacks.
 
 Rule side usage is the same:
 
 ```rfl
 then
-    invoke pluginLog($s.id, $s.temperature)
-    update $s { score = pluginMetric($s.temperature, 2) }
+    invoke hostLog($s.id, $s.temperature)
+    update $s { score = hostMetric($s.temperature, 2) }
 end
 ```
 
-Host integration paths (C API):
+Host integration path (C API):
 - direct registration: `ruleforge_kb_register_native_function(...)`
-- DLL/so table loading: `ruleforge_kb_load_native_function_table(...)`
 
 Runtime resolution:
 1. parse RHS `invoke` / assignment call expression
-2. resolve function name from KnowledgeBase native registry
+2. resolve function name from the KnowledgeBase callback registry
 3. evaluate arguments
-4. call native callback
+4. call host callback
 
-See full C API examples:
-- `plugins/examples/CAPI_NATIVE_DLL_EN.md`
-- `plugins/examples/NATIVE_FUNCTIONS.md`
+For ownership and failure semantics, see [`C_API_CONTRACT.md`](/C:/projects/cpp/rulesforge/docs/C_API_CONTRACT.md).
 
-## 5.5 Data Ingestion API
+## 5.5 Fact Input API
 
-RulesForge provides a unified `add_data()` API for loading data from multiple sources.
+RulesForge engine sessions accept already constructed facts. External files and payloads should be parsed by TurboScript parser/data_bind, host application code, or the C API schema-aware DataBind helpers before insertion.
 
 ### C++ API
 
@@ -557,32 +535,15 @@ RulesForge provides a unified `add_data()` API for loading data from multiple so
 // Add fact object
 session->add_data(fact);
 session->add_data(DataSource::fact(fact));
-
-// Add one fact from a JSON object
-std::string json_content = read_file("orders.json");
-session->add_data(DataSource::json(json_content));
-
-// Apply JMESPath and add one fact per extracted object
-session->add_data(DataSource::json(json_content, "orders[*]"));
-
-// Add from CSV file path
-session->add_data(DataSource::csv("data/orders.csv"));
-
-// Add from binary buffer
-session->add_data(DataSource::binary(buffer));
 ```
 
 Current runtime behavior:
-- `add_data(JSON/CSV/BINARY)` infers the target declaration type
-- inference prefers a declaration named `Row`
-- otherwise exactly one declaration must exist, or `add_data()` throws
-- `DataSource::json(content, "expr")` applies JMESPath before parsing
-- `DataSource::csv(path)` reads the file content at `path`
-- `DataSource::csv(path, filter)` accepts `filter`, but `add_data()` does not apply it yet
-- `DataSource::dsv(...)` is not implemented in `add_data()`
-- `DataSource::binary(buffer)` requires declarations or imported binary codecs to be loaded into the `KnowledgeBase`
+- `add_data(DataSource::fact(...))` delegates to `add_fact(...)`
+- fact validation still uses declarations loaded from RFL or `import "name.schema"`
+- C++ engine runtime is fact-only
+- schema-aware C API helpers can use installed `TurboScript::DataBind` to bind JSON/CSV/XML/binary payloads into session-owned facts
 
-### Migration from `from` clauses
+### Migration from external data clauses
 
 **Before** (deprecated):
 ```rfl
@@ -594,11 +555,10 @@ then
 end
 ```
 
-**After** (recommended):
+**After**:
 ```cpp
-// C++ side
-auto json_content = read_file("orders.json");
-session->add_data(DataSource::json(json_content, "orders[*]"));
+// Host or TurboScript side parses JSON and constructs Row facts.
+session->add_fact(row_fact);
 ```
 
 ```rfl

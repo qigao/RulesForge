@@ -1,41 +1,43 @@
 # RulesForge 使用指南
 
-此文為產品層指南；若欲查精確語法，以 [`../dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md) 為準。若本文與程式相左，則程式勝。
+此文是产品层指南；精确语法以 [`../dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md) 为准。若本文与代码不一致，以代码为准。
 
-## 1. 先選對 API 面
+RulesForge 是基于 RETE 的规则引擎。它支持动态 schema 和数据绑定，并通过 JIT 后端运行已支持的规则 kernel。
 
-RulesForge 當前有三層可實際整合之介面：
+## 1. 先选对 API 面
 
-- 公開 C API：[`include/rule_forge.h`](/C:/projects/cpp/rulesforge/include/rule_forge.h)
+RulesForge 当前有三层可实际集成的接口：
+
+- 公开 C API：[`include/rule_forge.h`](/C:/projects/cpp/rulesforge/include/rule_forge.h)
 - C++ 引擎 API：`rulesforge/include` 與 `parser/include`
-- 外掛 ABI：[`include/rule_forge_plugin.h`](/C:/projects/cpp/rulesforge/include/rule_forge_plugin.h)
+- 通过 C API 暴露的显式 host callback 边界
 
-建議：
+建议：
 
-- 新應用嵌入：先用 C API
-- 需更細緻之進程內控制：用 C++ API
-- 需可重用之外部 source/sink 整合：用 plugin ABI
+- 新应用嵌入：先用 C API
+- 需要更细的进程内控制：用 C++ API
+- 外部副作用：显式注册 host callback
 
-## 2. 執行時模型
+## 2. 运行时模型
 
-現碼核心只有兩個主要物件：
+当前运行时核心有两个主要对象：
 
-- `KnowledgeBase`：已編譯規則、native function 註冊、codec registry
-- `StatefulSession`：事實、agenda、查詢、追蹤、驗證模式、運行期指標
+- `KnowledgeBase`：已编译规则与 host callback 注册
+- `StatefulSession`：事实、agenda、查询、追踪、验证模式、运行期指标
 
-執行緒模型：
+线程模型：
 
-- `KnowledgeBase` 在規則載入與 native 註冊完成後，可供共享
+- `KnowledgeBase` 在规则加载与 callback 注册完成后，可供共享
 - `StatefulSession` 非 thread-safe
 
-## 3. 載入規則
+## 3. 加载规则
 
-目前實作之規則載入路徑有：
+目前实现的规则加载路径有：
 
-- 記憶體內 RFL 字串
-- 單一 RFL 檔
-- 多個 RFL 檔加 import 解析
-- 經由 C API 載入 decision table CSV
+- 内存中的 RFL 字符串
+- 单个 RFL 文件
+- 多个 RFL 文件加 import 解析
+- 通过 C API 加载 decision table CSV
 
 相關 API：
 
@@ -44,35 +46,39 @@ RulesForge 當前有三層可實際整合之介面：
 - `ruleforge_kb_load_drl_files()`
 - `ruleforge_kb_load_decision_table_csv()`
 
-## 4. 載入事實
+## 4. 加载事实
 
-引擎當前實用之資料載入格式，凡三：
+RulesForge 引擎看到的是 fact。公开 C API 另提供基于 `TurboScript::DataBind` 的 schema-aware 数据绑定入口。
 
-- JSON
-- CSV
-- binary payload（需有對應 codec 宣告或匯入）
+- 已构造的 fact 对象
+- 带 schema 的 JSON
+- 带 schema 的 CSV
+- 带 schema 的 XML
+- 带 schema 的 binary TBE payload
 
 C API 入口：
 
 - `ruleforge_session_add_fact_json()`
-- `ruleforge_session_add_facts_csv()`
-- `ruleforge_session_add_fact_binary()`
+- `ruleforge_session_add_fact_json_schema()`
+- `ruleforge_session_add_fact_binary_schema()`
+- `ruleforge_session_add_facts_csv_schema()`
+- `ruleforge_session_add_facts_xml_schema()`
+- field-based fact construction APIs
 
 C++ 入口：
 
-- `session->add_data(DataSource::json(...))`
-- `session->add_data(DataSource::csv(...))`
-- `session->add_data(DataSource::binary(...))`
+- `session->add_fact(fact)`
+- `session->add_data(DataSource::fact(fact))`
 
-補充：
+补充：
 
-- C++ `DataSource::json(content, expr)` 可套用 JMESPath
-- C++ `DataSource::csv(...)` 目前讀的是檔案路徑
-- binary 載入依賴 knowledge base 中可用之 codec
+- C++ engine runtime 仍然是 fact-only。
+- schema-aware C API helper 会调用 `TurboScript::DataBind`，把绑定结果转换成 session-owned fact，再插入 session。
+- RFL 中可以用 `import "name.schema"` 导入 schema 声明。
 
-## 5. 查詢
+## 5. 查询
 
-RulesForge 支援於 RFL 中定義 named query，並於載入事實、觸發規則後執行查詢。
+RulesForge 支持在 RFL 中定义 named query，并在加载事实、触发规则后执行查询。
 
 C API：
 
@@ -84,47 +90,38 @@ C++：
 
 - `session->execute_query("QueryName")`
 
-## 6. Native 函數與外掛
+## 6. Host Callback
 
-此二者是兩條不同擴展路徑，勿混為一談。
+RHS host 调用：
 
-Native RHS 函數：
+- 用 `ruleforge_kb_register_native_function()` 显式注册
+- 供规则内 `invoke(...)` 之类逻辑调用
+- 保持确定性，失败按运行时错误处理
 
-- 可用 `ruleforge_kb_register_native_function()` 直接註冊
-- 或以 `ruleforge_kb_load_native_function_table()` 載入 DLL/so 函數表
-- 供規則內 `invoke(...)` 之類邏輯調用
+## 7. RFL 当前实现范围
 
-Source/sink 外掛：
-
-- 由 [`include/rule_forge_plugin.h`](/C:/projects/cpp/rulesforge/include/rule_forge_plugin.h) 定義
-- 供 plugin-based ingestion/routing 使用
-- 示例在 [`plugins/examples`](/C:/projects/cpp/rulesforge/plugins/examples)
-- 說明在 [`plugins/README.md`](/C:/projects/cpp/rulesforge/plugins/README.md)
-
-## 7. RFL 現已實作到哪裡
-
-當前 parser 與 runtime 已覆蓋：
+当前 parser 与 runtime 已覆盖：
 
 - `package`、`import`、`global`、`declare`、`enum`、`function`、`query`、`rule`
 - `salience`、`agenda-group`、`activation-group`、`no-loop`、`enabled`、`duration`、`timer`、`extends`
 - `not`、`exists`、`forall`、`accumulate`、query call 等模式
-- `insert`、`insertLogical`、`update`、`retract`、`halt` 與 RHS 控制流
-- `over window:time(...)` 之滑動視窗語法
+- `insert`、`insertLogical`、`update`、`retract`、`halt` 与 RHS 控制流
+- `over window:time(...)` 滑动窗口语法
 
-精確語法與限制，仍請讀 [`../dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md)。
+精确语法与限制请读 [`../dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md)。
 
-## 8. 生產落地清單
+## 8. 生产落地清单
 
-- 規則編譯一次，重用 `KnowledgeBase`
-- 每執行緒或每請求建立一個 `StatefulSession`
-- 每個整合邊界只選一種資料載入格式，勿自找複雜
-- 在 CI 驗證規則包與樣例資料
-- 追蹤與指標只在需要時開啟
-- 自定 native function 要小、可預測、且安全
+- 规则编译一次，重用 `KnowledgeBase`
+- 每线程或每请求建立一个 `StatefulSession`
+- 每个集成边界只选一种数据加载格式
+- 在 CI 验证规则包与样例数据
+- 追踪与指标只在需要时开启
+- 自定义 host callback 要小、确定、且安全
 
-## 9. 接著看何處
+## 9. 接着看哪里
 
 - 快速入口：[`QUICKSTART.md`](/C:/projects/cpp/rulesforge/docs/zh-CN/QUICKSTART.md)
 - 部署：[`DEPLOYMENT.md`](/C:/projects/cpp/rulesforge/docs/zh-CN/DEPLOYMENT.md)
 - 示例：[`EXAMPLES.md`](/C:/projects/cpp/rulesforge/docs/zh-CN/EXAMPLES.md)
-- 外掛整合：[`PLUGINS.md`](/C:/projects/cpp/rulesforge/docs/zh-CN/PLUGINS.md)
+- data binding 归属：[`../TURBOSCRIPT_DATABIND_PARSER_COMPARISON.md`](/C:/projects/cpp/rulesforge/docs/TURBOSCRIPT_DATABIND_PARSER_COMPARISON.md)

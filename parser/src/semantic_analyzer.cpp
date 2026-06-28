@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -6,7 +7,7 @@
 
 #include "semantic_analyzer.hpp"
 
-#include "expression_evaluator.hpp"
+#include "expression_descriptor.hpp"
 #include "rhs_parser.hpp"
 #include "core/logging_control.hpp"
 
@@ -35,6 +36,30 @@ int calculate_levenshtein_distance(std::string const& s1, std::string const& s2)
     std::swap(p, d);
   }
   return p[m];
+}
+
+bool pattern_adds_fact_to_token(ParsedPattern const& pattern)
+{
+  return (pattern.type == PatternType::STANDARD
+          && (std::holds_alternative<std::monostate>(pattern.source)
+              || std::holds_alternative<std::string>(pattern.source)))
+         || std::holds_alternative<ParsedAccumulate>(pattern.source)
+         || std::holds_alternative<ParsedUnnest>(pattern.source);
+}
+
+ParsedQuery const* find_query_by_name(std::vector<ParsedQuery> const& queries,
+                                      std::string const& name)
+{
+  auto it = std::find_if(
+      queries.begin(),
+      queries.end(),
+      [&](ParsedQuery const& query) { return query.name == name; });
+  return it == queries.end() ? nullptr : &*it;
+}
+
+bool is_accumulate_expression_text(std::string const& text)
+{
+  return text.find_first_of("+-*/(") != std::string::npos;
 }
 }  // anonymous namespace
 
@@ -85,9 +110,14 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
         && constraint.left_field != "this")
     {
       if (analyzer.get_type_schemas().count(fact_type)) {
-        if (!analyzer.get_type_schemas().at(fact_type).count(
-                constraint.left_field))
-        {
+        auto const& fields = analyzer.get_type_schemas().at(fact_type);
+        bool field_exists = fields.count(constraint.left_field) != 0;
+        if (!field_exists) {
+          auto const dot_pos = constraint.left_field.find('.');
+          field_exists = dot_pos != std::string::npos
+              && fields.count(constraint.left_field.substr(0, dot_pos)) != 0;
+        }
+        if (!field_exists) {
           analyzer.add_error(pos,
                              "In rule '" + rule.name + "', constraint field '"
                                  + constraint.left_field
@@ -164,19 +194,10 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
       }
     }
 
-    // Compile arithmetic expressions in constraints (e.g., "price > base * 1.2")
+    // LHS arithmetic constraints are lowered by the MIR plan; semantic analysis
+    // preserves the source expression and lets backend lowering decide support.
     if (constraint.right_arith_expr.has_value() && !constraint.right_arith_expr->empty()) {
-      std::string const& expr = *constraint.right_arith_expr;
-      std::string compile_error;
-      constraint.compiled_expr = rulesforge::ExpressionEvaluator::compile(expr, &compile_error);
-      if (!constraint.compiled_expr) {
-        analyzer.add_error(pos,
-                           "In rule '" + rule.name
-                               + "', failed to compile constraint expression '"
-                               + expr + "': " + compile_error);
-      } else {
-        logd("  -> Compiled constraint expression: {}", expr);
-      }
+      logd("  -> Preserved MIR constraint expression: {}", *constraint.right_arith_expr);
     }
   } else {
     for (auto const& child : node->children) {
@@ -358,12 +379,7 @@ void SemanticAnalyzer::analyze_pattern_list(
     // - A standard pattern with entry-point source (std::string)
     // - A pattern with accumulate source
     // - A pattern with unnest source
-    bool adds_fact_to_token =
-        (pattern.type == PatternType::STANDARD
-         && (std::holds_alternative<std::monostate>(pattern.source)
-             || std::holds_alternative<std::string>(pattern.source)))
-        || std::holds_alternative<ParsedAccumulate>(pattern.source)
-        || std::holds_alternative<ParsedUnnest>(pattern.source) ;
+    bool adds_fact_to_token = pattern_adds_fact_to_token(pattern);
 
     if (adds_fact_to_token && !pattern.binding.empty()) {
       if (symbols.count(pattern.binding)) {
@@ -375,8 +391,42 @@ void SemanticAnalyzer::analyze_pattern_list(
             "  -> Found new binding '{}' at depth {}", pattern.binding, depth);
         symbols[pattern.binding] = SymbolInfo {&pattern, depth, std::nullopt};
       }
+    } else if (!pattern.binding.empty()
+               && !std::holds_alternative<ParsedQueryCall>(pattern.source)) {
+      add_error(pattern.pos,
+                "In rule '" + rule.name
+                    + "', pattern binding is only supported for fact-producing patterns.");
     }
     analyze_pattern(pattern, symbols, rule, pattern.pos, depth);
+    if (auto const* query_call = std::get_if<ParsedQueryCall>(&pattern.source)) {
+      if (auto const* query = find_query_by_name(state_.parsed_queries, query_call->query_name)) {
+        for (std::size_t index = static_cast<std::size_t>(query->parameter_count);
+             index < query->patterns.size();
+             ++index) {
+          auto const& query_pattern = query->patterns[index];
+          if (!pattern_adds_fact_to_token(query_pattern)
+              || query_pattern.binding.empty())
+          {
+            continue;
+          }
+          if (symbols.count(query_pattern.binding)) {
+            add_error(pattern.pos,
+                      "In rule '" + rule.name + "', query call '"
+                          + query_call->query_name
+                          + "' projects duplicate binding '"
+                          + query_pattern.binding + "'.");
+            continue;
+          }
+          logd("  -> Query call '{}' projects binding '{}' at depth {}",
+               query_call->query_name,
+               query_pattern.binding,
+               depth);
+          symbols[query_pattern.binding] =
+              SymbolInfo {&query_pattern, depth, std::nullopt};
+          depth++;
+        }
+      }
+    }
     if (adds_fact_to_token) {
       depth++;
     }
@@ -465,11 +515,13 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
 
           std::string field_to_accumulate;
           std::string type_to_check_against = arg.source_pattern->fact_type;
-          bool is_arithmetic_expr = arg.field.find_first_of("+-*/") != std::string::npos;
+          bool is_accumulate_expr = is_accumulate_expression_text(arg.field);
 
-          if (is_arithmetic_expr) {
-            // For arithmetic expressions like "$avail - $reserved", validate all bindings
-            // and keep the expression as-is for code generation
+          if (is_accumulate_expr) {
+            // MIR coverage owns expression support. Semantic analysis only checks
+            // that referenced bindings exist and preserves unsupported shapes for
+            // build-time lowering diagnostics.
+            arg.uses_mir_value_expression = true;
             std::regex binding_regex(R"(\$[a-zA-Z_][a-zA-Z0-9_]*)");
             std::sregex_iterator iter(arg.field.begin(), arg.field.end(), binding_regex);
             std::sregex_iterator end;
@@ -496,19 +548,8 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
               return;
             }
 
-            // Compile the arithmetic expression using ExpressionEvaluator
-            std::string compile_error;
-            arg.compiled_expr = rulesforge::ExpressionEvaluator::compile(arg.field, &compile_error);
-            if (!arg.compiled_expr) {
-              add_error(pattern_pos,
-                        "In rule '" + rule.name
-                            + "', failed to compile accumulate expression '"
-                            + arg.field + "': " + compile_error);
-              return;
-            }
-            logd("    -> Compiled accumulate expression: {}", arg.field);
+            logd("    -> Preserved accumulate expression for MIR lowering: {}", arg.field);
 
-            // Keep the arithmetic expression as the field to accumulate
             field_to_accumulate = arg.field;
             type_to_check_against = arg.source_pattern->fact_type;
 
@@ -560,8 +601,7 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
             }
           }
 
-          // Skip schema validation for arithmetic expressions - the bindings were already validated
-          if (field_to_accumulate != "this" && !is_arithmetic_expr) {
+          if (field_to_accumulate != "this" && !is_accumulate_expr) {
             auto schema_it = get_type_schemas().find(type_to_check_against);
             if (schema_it == get_type_schemas().end()
                 || !schema_it->second.count(field_to_accumulate))
@@ -575,6 +615,36 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
           logd("    -> Accumulate field resolved to '{}'",
                     field_to_accumulate);
           arg.accumulate_field_name = field_to_accumulate;
+        }
+
+        if constexpr (std::is_same_v<T, ParsedQueryCall>) {
+          if (!pattern.binding.empty()) {
+            add_error(pattern_pos,
+                      "In rule '" + rule.name
+                          + "', query call row binding is not supported; use the query result pattern bindings.");
+            return;
+          }
+          auto const* query = find_query_by_name(state_.parsed_queries, arg.query_name);
+          if (query == nullptr) {
+            add_error(pattern_pos,
+                      "In rule '" + rule.name + "', query call references unknown query '"
+                          + arg.query_name + "'.");
+            return;
+          }
+          if (arg.arguments.size() != static_cast<std::size_t>(query->parameter_count)) {
+            add_error(pattern_pos,
+                      "In rule '" + rule.name + "', query call '" + arg.query_name
+                          + "' expects " + std::to_string(query->parameter_count)
+                          + " argument(s) but got " + std::to_string(arg.arguments.size()) + ".");
+            return;
+          }
+          for (auto const& argument : arg.arguments) {
+            if (symbols.find(argument) == symbols.end()) {
+              add_error(pattern_pos,
+                        "In rule '" + rule.name + "', query call '" + arg.query_name
+                            + "' uses undeclared binding '" + argument + "'.");
+            }
+          }
         }
 
       },
@@ -668,8 +738,15 @@ void SemanticAnalyzer::analyze_rhs(ParsedRule& rule, SymbolTable const& symbols)
     }
   }
 
+  std::unordered_set<std::string> globals;
+  for (auto const& global : state_.parsed_globals) {
+    if (!global.name.empty()) {
+      globals.insert("$" + global.name);
+    }
+  }
+
   std::string parse_error;
-  rule.compiled_actions = rulesforge::RhsParser::parse(rule.rhs_code, bindings, &parse_error);
+  rule.compiled_actions = rulesforge::RhsParser::parse(rule.rhs_code, bindings, globals, &parse_error);
 
   if (rule.compiled_actions.empty() && !parse_error.empty()) {
     add_error(rule.pos, "In rule '" + rule.name + "', RHS parse error: " + parse_error);
@@ -729,11 +806,11 @@ bool SemanticAnalyzer::analyze_rules_and_queries()
   }
 
   // Note: errors_ is NOT cleared here, to accumulate errors from both phases.
-  for (auto& rule : state_.parsed_rules) {
-    analyze_rule(rule, rule_names);
-  }
   for (auto& query : state_.parsed_queries) {
     analyze_query(query);
+  }
+  for (auto& rule : state_.parsed_rules) {
+    analyze_rule(rule, rule_names);
   }
   logd("Semantic Analysis - Phase 2 finished. Total errors: {}.",
             errors_.size());

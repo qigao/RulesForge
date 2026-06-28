@@ -58,7 +58,7 @@ Why use `capi_demo` first:
 4. How to load JSON or CSV facts
 5. Why sessions are not shared across threads
 
-Do not start with plugin DLLs, custom native callbacks, or router integration unless you already have a concrete integration need.
+Do not start with host callbacks unless you already have a concrete integration need.
 
 ## Recommended Reading Order
 

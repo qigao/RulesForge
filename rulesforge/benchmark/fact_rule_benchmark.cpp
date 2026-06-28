@@ -7,6 +7,8 @@
 // 4. Fact retraction throughput and latency
 
 #include "tinytest.h"
+#include "decision_table_compiler.hpp"
+#include "decision_table_parser.hpp"
 #include "rfl_parser.hpp"
 #include "engine/knowledge_base.hpp"
 #include "engine/stateful_session.hpp"
@@ -72,7 +74,149 @@ rule "Simple Match" when $f : TestFact(value > 50) then end
     return kb;
 }
 
+static std::string simple_drl() {
+    return R"(
+package benchmark
+declare TestFact id: int, value: int, category: String end
+rule "Simple Match" when $f : TestFact(value > 50) then end
+)";
+}
+
+static std::shared_ptr<KnowledgeBase> build_expression_kb() {
+    std::string drl = R"(
+package benchmark
+declare Order id: int, amount: double, base: double end
+rule "Expression Match" when Order(amount > ($base * 1.2)) then end
+)";
+    ParsingResult result;
+    auto kb = build_knowledge_base(drl, result);
+    if (!result.success) throw std::runtime_error("Failed to build expression KB");
+    return kb;
+}
+
+static std::shared_ptr<KnowledgeBase> build_rhs_kb() {
+    std::string drl = R"(
+package benchmark
+declare TestFact id: int, value: int, category: String end
+declare Result factId: int, bucket: String end
+rule "Insert Result" when $f : TestFact(value > 50) then insert Result { factId = $f.id, bucket = $f.category } end
+)";
+    ParsingResult result;
+    auto kb = build_knowledge_base(drl, result);
+    if (!result.success) throw std::runtime_error("Failed to build RHS KB");
+    return kb;
+}
+
+static std::vector<std::shared_ptr<Fact>> create_order_facts(int count) {
+    std::vector<std::shared_ptr<Fact>> facts;
+    facts.reserve(count);
+    for (int i = 0; i < count; ++i) {
+        auto fact = std::make_shared<Fact>();
+        fact->type = "benchmark.Order";
+        fact->fields["id"] = static_cast<int64_t>(i);
+        fact->fields["amount"] = static_cast<double>((i % 200) + 1);
+        fact->fields["base"] = 100.0;
+        facts.push_back(fact);
+    }
+    return facts;
+}
+
+static std::string decision_table_csv() {
+    return R"CSV(PACKAGE,benchmark.dt
+DECLARE,Customer,"name: String, balance: double, status: String"
+DECLARE,Offer,"message: String"
+QUERY,find_offers,$o: Offer()
+,CONDITION: Customer(balance > $1),"CONDITION: Customer(status == ""$1"")","ACTION: insert Offer { message = '$1' }",Salience
+High Balance Offer,5000,*,High balance,10
+Gold Status Offer,*,GOLD,Gold status,20
+)CSV";
+}
+
 suite("Fact/Rule Benchmarks") {
+    group("MIR Migration Baselines") {
+        bench("benchmarks KB build and session creation") {
+            std::string drl = simple_drl();
+            auto kb = build_simple_kb();
+
+            benchmark("build simple KB x100", 3, 100.0) {
+                for (int i = 0; i < 100; ++i) {
+                    ParsingResult result;
+                    auto built = build_knowledge_base(drl, result);
+                    if (!result.success || !built) {
+                        throw std::runtime_error("Failed to build simple KB");
+                    }
+                }
+            }
+
+            benchmark("create session x10K", 5, 10000.0) {
+                for (int i = 0; i < 10000; ++i) {
+                    auto session = kb->create_session();
+                    if (!session) {
+                        throw std::runtime_error("Failed to create session");
+                    }
+                }
+            }
+        }
+
+        bench("benchmarks expression and RHS-heavy firing") {
+            auto expression_kb = build_expression_kb();
+            auto rhs_kb = build_rhs_kb();
+            auto orders = create_order_facts(5000);
+            auto facts = create_facts(5000);
+
+            benchmark("fire 5K alpha expression facts", 5, 1.0) {
+                auto s = expression_kb->create_session();
+                s->add_facts(orders);
+                s->fire_all_rules();
+            }
+
+            benchmark("fire 5K RHS insert facts", 5, 1.0) {
+                auto s = rhs_kb->create_session();
+                s->add_facts(facts);
+                s->fire_all_rules();
+            }
+
+            benchmark("session memory metrics after 10K facts", 3, 1.0) {
+                auto s = rhs_kb->create_session();
+                auto many_facts = create_facts(10000);
+                s->add_facts(many_facts);
+                s->fire_all_rules();
+                auto metrics = s->get_metrics();
+                if (metrics.memory_max_bytes == 0) {
+                    throw std::runtime_error("Session memory max should be non-zero");
+                }
+                volatile auto used = metrics.memory_used_bytes;
+                volatile auto percent = metrics.memory_usage_percent;
+                (void)used;
+                (void)percent;
+            }
+        }
+    }
+
+    group("Decision Table Baselines") {
+        bench("benchmarks decision-table parse and compile") {
+            auto csv = decision_table_csv();
+
+            benchmark("decision table parse+compile x100", 3, 100.0) {
+                for (int i = 0; i < 100; ++i) {
+                    ParsingResult parse_result;
+                    DecisionTable table = DecisionTableParser::parse_string(
+                        csv, "fact_rule_benchmark_decision_table", parse_result);
+                    if (!parse_result.success) {
+                        throw std::runtime_error("Failed to parse decision table");
+                    }
+
+                    std::vector<StructuredError> errors;
+                    parser_state state = DirectTableCompiler::compile(
+                        table, "fact_rule_benchmark_decision_table", errors);
+                    if (!errors.empty() || state.parsed_rules.empty()) {
+                        throw std::runtime_error("Failed to compile decision table");
+                    }
+                }
+            }
+        }
+    }
+
     group("Rule Complexity vs Firing") {
         bench("benchmarks firing cost by rule complexity") {
             // Simple: single field condition

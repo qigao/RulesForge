@@ -47,6 +47,15 @@ suite("RhsParser") {
             check(actions.size() == 1);
             check(actions[0].assignments.size() == 1);
         }
+
+        it("fails on undeclared variable") {
+            std::string err;
+            auto actions = RhsParser::parse(
+                R"(update $unknown { x = 1 })", make_bindings(), &err);
+
+            check(actions.empty());
+            check(!err.empty());
+        }
     }
 
     group("insert") {
@@ -203,6 +212,40 @@ suite("RhsParser") {
             check(a.numeric_expr != nullptr);
         }
 
+        it("allows declared global in expression") {
+            auto actions = RhsParser::parse(
+                R"(update $user { score = $threshold + 1 })",
+                make_bindings(),
+                std::unordered_set<std::string>{"$threshold"});
+
+            check(actions.size() == 1);
+            auto const& a = actions[0].assignments[0];
+            check(a.type == RhsValueType::NUMERIC);
+            check(a.numeric_expr != nullptr);
+        }
+
+        it("fails on undeclared expression variable") {
+            std::string err;
+            auto actions = RhsParser::parse(
+                R"(update $user { score = $missing + 1 })",
+                make_bindings(),
+                &err);
+
+            check(actions.empty());
+            check(err.find("RHS uses undeclared variable '$missing'") != std::string::npos);
+        }
+
+        it("fails on undeclared variable reference source") {
+            std::string err;
+            auto actions = RhsParser::parse(
+                R"(update $user { score = $missing.value })",
+                make_bindings(),
+                &err);
+
+            check(actions.empty());
+            check(err.find("RHS uses undeclared variable '$missing'") != std::string::npos);
+        }
+
         it("parses exprtk math functions") {
             auto actions = RhsParser::parse(
                 R"(update $user {
@@ -327,6 +370,63 @@ suite("RhsParser") {
             check(actions[0].iter_source_list[0] == "$user");
             check(actions[0].iter_source_list[1] == "$item");
             check(actions[0].iter_source_list[2] == "$order");
+        }
+
+        it("allows declared global as for source") {
+            auto actions = RhsParser::parse(
+                R"(for $x in $results { halt })",
+                make_bindings(),
+                std::unordered_set<std::string>{"$results"});
+
+            check(actions.size() == 1);
+            check(actions[0].type == RhsActionType::FOR);
+            check(actions[0].iter_source_var == "$results");
+        }
+
+        it("fails on undeclared for source variable") {
+            std::string err;
+            auto actions = RhsParser::parse(
+                R"(for $x in $missing { halt })",
+                make_bindings(),
+                &err);
+
+            check(actions.empty());
+            check(err.find("RHS uses undeclared variable '$missing'") != std::string::npos);
+        }
+
+        it("fails on undeclared for value-list variable") {
+            std::string err;
+            auto actions = RhsParser::parse(
+                R"(for $x in ($item, $missing) { halt })",
+                make_bindings(),
+                &err);
+
+            check(actions.empty());
+            check(err.find("RHS uses undeclared variable '$missing'") != std::string::npos);
+        }
+
+        it("does not allow globals as update targets") {
+            std::string err;
+            auto actions = RhsParser::parse(
+                R"(update $results { count = 1 })",
+                make_bindings(),
+                std::unordered_set<std::string>{"$results"},
+                &err);
+
+            check(actions.empty());
+            check(err.find("RHS uses undeclared variable '$results'") != std::string::npos);
+        }
+
+        it("allows update of for loop iteration variable") {
+            auto actions = RhsParser::parse(
+                R"(for $x in $order.items { update $x { processed = true } })",
+                make_bindings());
+
+            check(actions.size() == 1);
+            check(actions[0].type == RhsActionType::FOR);
+            check(actions[0].body_actions.size() == 1);
+            check(actions[0].body_actions[0].type == RhsActionType::UPDATE);
+            check(actions[0].body_actions[0].target_var == "$x");
         }
     }
 

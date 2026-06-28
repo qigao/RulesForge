@@ -1,6 +1,6 @@
 
 #include "core/rfl_rete_defs.hpp"
-#include "expression_evaluator.hpp"
+#include "expression_descriptor.hpp"
 #include "core/logging_control.hpp"
 
 #include <sstream>
@@ -92,6 +92,11 @@ bool ConstraintValueCompare::operator()(ConstraintValue const& a, ConstraintValu
     }, a);
 }
 
+bool ConstraintValueEquals::operator()(ConstraintValue const& a, ConstraintValue const& b) const {
+    ConstraintValueCompare compare;
+    return !compare(a, b) && !compare(b, a);
+}
+
 bool operator==(FactList const& a, FactList const& b) {
     if (a.facts.size() != b.facts.size()) {
         return false;
@@ -132,7 +137,6 @@ ParsedConstraint::ParsedConstraint(ParsedConstraint const& other)
       right_value_list(other.right_value_list),
       temporal_constraint(other.temporal_constraint),
       right_arith_expr(other.right_arith_expr),
-      compiled_expr(other.compiled_expr),  // shared_ptr shallow copy
       cached_left_field_path(other.cached_left_field_path),
       cached_right_field_path(other.cached_right_field_path)
 {
@@ -149,7 +153,6 @@ ParsedConstraint& ParsedConstraint::operator=(ParsedConstraint const& other) {
         right_value_list = other.right_value_list;
         temporal_constraint = other.temporal_constraint;
         right_arith_expr = other.right_arith_expr;
-        compiled_expr = other.compiled_expr;  // shared_ptr shallow copy
         cached_left_field_path = other.cached_left_field_path;
         cached_right_field_path = other.cached_right_field_path;
     }
@@ -165,6 +168,7 @@ bool ParsedConstraint::operator==(ParsedConstraint const& other) const {
     if (right_literal != other.right_literal) return false;
     if (right_bound_field != other.right_bound_field) return false;
     if (right_value_list != other.right_value_list) return false;
+    if (right_arith_expr != other.right_arith_expr) return false;
 
     // Check temporal constraints
     bool this_has_temp = temporal_constraint.has_value();
@@ -178,12 +182,6 @@ bool ParsedConstraint::operator==(ParsedConstraint const& other) const {
         if (t1.rhs_binding_and_field != t2.rhs_binding_and_field) return false;
         if (t1.window_ms != t2.window_ms) return false;
     }
-
-    // Compiled expressions are parser-owned implementation details.
-    // Keep core equality at the structural level and only compare presence.
-    bool this_has_expr = (compiled_expr != nullptr);
-    bool other_has_expr = (other.compiled_expr != nullptr);
-    if (this_has_expr != other_has_expr) return false;
 
     return true;
 }
@@ -550,15 +548,27 @@ std::optional<ConstraintValue> Fact::get_field(std::vector<PathSegment> const& s
 
         if (std::holds_alternative<FactList>(*current_value)) {
             FactList const& fl = std::get<FactList>(*current_value);
+            auto const& next_seg = segments[i + 1];
+            if (next_seg.name == "size" || next_seg.name == "isEmpty") {
+                continue;
+            }
             if (fl.facts.empty()) {
-                bool next_null_safe = (i + 1 < segments.size()) && segments[i + 1].null_safe;
-                if (seg.null_safe || next_null_safe) return NilValue{};
-                return std::nullopt;
+                return make_typed_list();
             }
             if (fl.facts.size() != 1) {
-                bool next_null_safe = (i + 1 < segments.size()) && segments[i + 1].null_safe;
-                if (seg.null_safe || next_null_safe) return NilValue{};
-                return std::nullopt;
+                std::vector<PathSegment> remaining(segments.begin() + static_cast<std::ptrdiff_t>(i + 1),
+                                                   segments.end());
+                auto projected = std::make_shared<TypedList>();
+                for (auto const* fact : fl.facts) {
+                    if (fact == nullptr) {
+                        continue;
+                    }
+                    auto value = fact->get_field(remaining);
+                    if (value) {
+                        projected->values.push_back(std::move(*value));
+                    }
+                }
+                return projected;
             }
             current_fact = fl.facts[0];
             if (!current_fact) {
@@ -690,7 +700,7 @@ ParsedAccumulate::ParsedAccumulate() {}
 
 ParsedAccumulate::ParsedAccumulate(ParsedAccumulate const& other) :
     function(other.function), field(other.field), accumulate_field_name(other.accumulate_field_name),
-    compiled_expr(other.compiled_expr),  // shared_ptr shallow copy
+    uses_mir_value_expression(other.uses_mir_value_expression),
     inline_binding_to_field(other.inline_binding_to_field) {
     if (other.source_pattern) { source_pattern = std::make_unique<ParsedPattern>(*other.source_pattern); }
 }
@@ -700,7 +710,7 @@ ParsedAccumulate& ParsedAccumulate::operator=(ParsedAccumulate const& other) {
     function = other.function;
     field = other.field;
     accumulate_field_name = other.accumulate_field_name;
-    compiled_expr = other.compiled_expr;  // shared_ptr shallow copy
+    uses_mir_value_expression = other.uses_mir_value_expression;
     inline_binding_to_field = other.inline_binding_to_field;
     source_pattern = other.source_pattern ? std::make_unique<ParsedPattern>(*other.source_pattern) : nullptr;
     return *this;

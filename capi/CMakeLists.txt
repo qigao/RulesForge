@@ -31,10 +31,24 @@ target_include_directories(
 
 target_link_libraries(
     ${CAPI_TARGET_NAME}
-    PRIVATE rfl_parser RulesForge ${CMAKE_DL_LIBS}
-    PUBLIC TurboNet::Utils TurboScript::TurboScript
+    PRIVATE rfl_parser RulesForge TurboNet::Parser ${CMAKE_DL_LIBS}
+    PUBLIC TurboNet::Utils TurboScript::DataBind
 )
 set_target_properties(${CAPI_TARGET_NAME} PROPERTIES FOLDER capi/)
+
+if(WIN32)
+    add_custom_command(
+        TARGET ${CAPI_TARGET_NAME}
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:${CAPI_TARGET_NAME}>
+                $<TARGET_FILE_DIR:${CAPI_TARGET_NAME}>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:TurboScript::TurboScript>
+                $<TARGET_FILE_DIR:${CAPI_TARGET_NAME}>
+        COMMAND_EXPAND_LISTS
+    )
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     # Link against pthread for WASM if threading is used Emscripten provides its
@@ -54,7 +68,7 @@ elseif(ANDROID)
     # Link against Android specific libraries if needed, e.g., log for logging
     # target_link_libraries(${CAPI_TARGET_NAME} PUBLIC log android)
 endif()
-if(ENABLE_TESTS)
+if(BUILD_TESTING OR ENABLE_TESTS)
     add_subdirectory(tests)
 endif()
 add_subdirectory(examples)

@@ -34,7 +34,6 @@ class QueryEngine;
 
 namespace rulesforge {
     class RhsExecutor;
-    class ExpressionEvaluator;
 }
 
 class StatefulSession : public INetworkCallback
@@ -85,28 +84,10 @@ public:
   void add_facts(std::vector<std::shared_ptr<Fact>> const& facts);
 
   /**
-   * @brief Unified data ingestion interface
+   * @brief Add already constructed fact data.
    */
   void add_data(rulesforge::DataSource const& source);
   void add_data(Fact* fact) { add_fact(fact); }
-
-  /**
-   * @brief Add fact from binary data using data_bind codec
-   * @deprecated Use add_data(DataSource::binary(...)) instead
-   */
-  Fact* add_fact_from_binary(std::string const& type_name, uint8_t const* buf, size_t len);
-
-  /**
-   * @brief Add fact from JSON string
-   * @deprecated Use add_data(DataSource::json(...)) instead
-   */
-  Fact* add_fact_from_json(std::string const& type_name, std::string const& json_str);
-
-  /**
-   * @brief Add facts from CSV string (batch insert)
-   * @deprecated Use add_data(DataSource::csv(...)) instead
-   */
-  std::vector<Fact*> add_facts_from_csv(std::string const& type_name, std::string const& csv_str);
 
   /**
    * @brief Insert a fact into a named entry point stream.
@@ -220,6 +201,8 @@ public:
   Fact* logical_insert(Fact const& fact) override;
 
   Fact* create_fact(std::string const& type) override;
+  std::optional<FieldType> get_declared_field_type(std::string const& fact_type,
+                                                   std::string_view field_name) const override;
 
   inline TokenWME const* get_or_create_wme(
       TokenWME const* parent_wme, Fact const* fact)
@@ -234,12 +217,18 @@ public:
 
     auto it = wme_cache_.find(hash);
     if (it != wme_cache_.end()) {
-      return it->second;
+      for (auto const* cached_wme : it->second) {
+        if (cached_wme != nullptr
+            && cached_wme->parent == parent_wme
+            && cached_wme->fact == fact) {
+          return cached_wme;
+        }
+      }
     }
 
     TokenWME* new_wme = token_pool_.create_token(parent_wme, fact);
 
-    wme_cache_[hash] = new_wme;
+    wme_cache_[hash].push_back(new_wme);
     return new_wme;
   }
 
@@ -258,8 +247,6 @@ public:
   inline void invalidate_wme_cache(size_t hash) {
     auto it = wme_cache_.find(hash);
     if (it != wme_cache_.end()) {
-      // Destroy the token and remove from cache
-      token_pool_.destroy_token(const_cast<TokenWME*>(it->second));
       wme_cache_.erase(it);
     }
   }
@@ -268,13 +255,6 @@ public:
   void add_activations_batch(std::vector<Activation>& activations);  // PHREAK: batch agenda insert
   void remove_activation(size_t activation_hash);
   void logical_retract(TokenWME const* wme);
-
-  bool execute_eval(std::string const& code,
-                    Token const& token,
-                    std::map<std::string, int> const& bindings);
-  bool execute_eval(rulesforge::ExpressionEvaluator const& expr,
-                    Token const& token,
-                    std::map<std::string, int> const& bindings);
 
   NetworkMemory& net_mem() { return net_mem_; }
   NetworkMemory const& net_mem() const { return net_mem_; }
@@ -292,6 +272,7 @@ private:
   void ensure_consistent_for_mutation(char const* operation) const;
   void validate_fact_for_insert(Fact const& fact) const;
   void prime_network_state();
+  void refresh_query_call_nodes();
   void fire_activation(Activation& activation);
   bool is_node_pending_dirty(ReteNode const& node) const;
   void mark_phreak_dirty_for_node(int node_id);
@@ -299,7 +280,7 @@ private:
   void clear_phreak_dirty_state();
 
   // Cache using raw pointers
-  using TokenWMECache = std::unordered_map<size_t, TokenWME const*>;
+  using TokenWMECache = std::unordered_map<size_t, std::vector<TokenWME const*>>;
 
   std::shared_ptr<KnowledgeBase const> kb_;
 

@@ -1,0 +1,137 @@
+package com.picimpact.dispatch.pricing
+
+//
+// Runtime input:
+//   QuantityInput { quantity }
+//
+// Runtime output:
+//   Two CurrencyPriceResult rows: one for CNY and one for USD.
+//
+// Intended execution model:
+//   sessionless/low-frequency calculation. Create a fresh session, insert one
+//   QuantityInput, fire rules, query GeneratedCurrencyPrices, then discard the
+//   session.
+
+declare QuantityInput
+    quantity: int
+end
+
+declare CurrencyPriceResult
+    activePlan: String
+    currency: String
+    quantity: int
+    unitPrice: double
+    discountRate: double
+    totalBeforeDiscount: double
+    totalPrice: double
+end
+
+// Generated from CNY discount_rules. Highest min_quantity rules have higher salience.
+
+rule "standard CNY price for quantity >= 5"
+    salience 100
+    when
+        $input : QuantityInput(quantity >= 5)
+        not CurrencyPriceResult(currency == "CNY")
+    then
+        insert CurrencyPriceResult {
+            activePlan = "standard",
+            currency = "CNY",
+            quantity = $input.quantity,
+            unitPrice = 6.5,
+            discountRate = 0.75,
+            totalBeforeDiscount = $input.quantity * 6.5,
+            totalPrice = $input.quantity * 6.5 * 0.75
+        }
+end
+
+rule "standard CNY price for quantity 3 to 4"
+    salience 99
+    when
+        $input : QuantityInput(quantity >= 3, quantity < 5)
+        not CurrencyPriceResult(currency == "CNY")
+    then
+        insert CurrencyPriceResult {
+            activePlan = "standard",
+            currency = "CNY",
+            quantity = $input.quantity,
+            unitPrice = 6.5,
+            discountRate = 0.9,
+            totalBeforeDiscount = $input.quantity * 6.5,
+            totalPrice = $input.quantity * 6.5 * 0.9
+        }
+end
+
+rule "standard CNY price for quantity 1 to 2"
+    salience 98
+    when
+        $input : QuantityInput(quantity >= 1, quantity < 3)
+        not CurrencyPriceResult(currency == "CNY")
+    then
+        insert CurrencyPriceResult {
+            activePlan = "standard",
+            currency = "CNY",
+            quantity = $input.quantity,
+            unitPrice = 6.5,
+            discountRate = 1.0,
+            totalBeforeDiscount = $input.quantity * 6.5,
+            totalPrice = $input.quantity * 6.5
+        }
+end
+
+// Generated from USD discount_rules. Highest min_quantity rules have higher salience.
+
+rule "standard USD price for quantity >= 5"
+    salience 100
+    when
+        $input : QuantityInput(quantity >= 5)
+        not CurrencyPriceResult(currency == "USD")
+    then
+        insert CurrencyPriceResult {
+            activePlan = "standard",
+            currency = "USD",
+            quantity = $input.quantity,
+            unitPrice = 1.25,
+            discountRate = 0.7,
+            totalBeforeDiscount = $input.quantity * 1.25,
+            totalPrice = $input.quantity * 1.25 * 0.7
+        }
+end
+
+rule "standard USD price for quantity 3 to 4"
+    salience 99
+    when
+        $input : QuantityInput(quantity >= 3, quantity < 5)
+        not CurrencyPriceResult(currency == "USD")
+    then
+        insert CurrencyPriceResult {
+            activePlan = "standard",
+            currency = "USD",
+            quantity = $input.quantity,
+            unitPrice = 1.25,
+            discountRate = 0.85,
+            totalBeforeDiscount = $input.quantity * 1.25,
+            totalPrice = $input.quantity * 1.25 * 0.85
+        }
+end
+
+rule "standard USD price for quantity 1 to 2"
+    salience 98
+    when
+        $input : QuantityInput(quantity >= 1, quantity < 3)
+        not CurrencyPriceResult(currency == "USD")
+    then
+        insert CurrencyPriceResult {
+            activePlan = "standard",
+            currency = "USD",
+            quantity = $input.quantity,
+            unitPrice = 1.25,
+            discountRate = 1.0,
+            totalBeforeDiscount = $input.quantity * 1.25,
+            totalPrice = $input.quantity * 1.25
+        }
+end
+
+query "GeneratedCurrencyPrices"
+    $price : CurrencyPriceResult()
+end

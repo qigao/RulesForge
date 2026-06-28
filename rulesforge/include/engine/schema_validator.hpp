@@ -9,6 +9,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <optional>
 
 /**
  * @brief PROD-002: Validation mode for fact insertion
@@ -114,6 +115,21 @@ public:
     bool has_declaration(std::string const& type_name) const {
         auto resolution = resolve_declaration(type_name);
         return resolution.declaration != nullptr && !resolution.is_ambiguous();
+    }
+
+    std::optional<FieldType> get_field_type(std::string const& type_name,
+                                            std::string_view field_name) const {
+        auto resolution = resolve_declaration(type_name);
+        if (resolution.is_ambiguous() || !resolution.declaration) {
+            return std::nullopt;
+        }
+
+        for (auto const& field : resolution.declaration->fields) {
+            if (field.name == field_name) {
+                return field.type;
+            }
+        }
+        return std::nullopt;
     }
 
     std::string canonicalize_type_name(std::string const& type_name) const {

@@ -33,6 +33,5 @@ function(add_rulesforge_benchmark source)
 endfunction()
 
 add_rulesforge_benchmark(fact_rule_benchmark.cpp rfl_parser)
-add_rulesforge_benchmark(binary_bind_benchmark.cpp data_bind rfl_parser)
 add_rulesforge_benchmark(agenda_benchmark.cpp)
 add_rulesforge_benchmark(token_pool_benchmark.cpp)

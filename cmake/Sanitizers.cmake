@@ -30,6 +30,17 @@ if(ENABLE_SANITIZER_ADDRESS OR ENABLE_SANITIZER_UNDEFINED OR ENABLE_SANITIZER_LE
     set(SANITIZER_COMPILE_FLAGS "")
     set(SANITIZER_LINK_FLAGS "")
 
+    if(ENABLE_SANITIZER_ADDRESS AND NOT MSVC)
+        foreach(_link_flag_var IN ITEMS CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS)
+            if(DEFINED ${_link_flag_var} AND NOT "${${_link_flag_var}}" STREQUAL "")
+                string(REPLACE "--as-needed," "" _rulesforge_sanitized_link_flags "${${_link_flag_var}}")
+                string(REPLACE "--as-needed" "" _rulesforge_sanitized_link_flags "${_rulesforge_sanitized_link_flags}")
+                set(${_link_flag_var} "${_rulesforge_sanitized_link_flags}")
+            endif()
+        endforeach()
+        list(APPEND SANITIZER_LINK_FLAGS -Wl,--no-as-needed)
+    endif()
+
     if(ENABLE_SANITIZER_ADDRESS)
         if(MSVC)
             list(APPEND SANITIZER_COMPILE_FLAGS /fsanitize=address)

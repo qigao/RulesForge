@@ -2,6 +2,7 @@
 #define NETWORK_MEMORY_HPP
 
 #include <memory>
+#include <set>
 #include <vector>
 #include "core/token.hpp"
 #include "engine/rfl_accumulators.hpp"
@@ -20,6 +21,7 @@ struct MemSlotCounts {
     int accumulate = 0;
     int terminal = 0;
     int query_terminal = 0;
+    int query_call = 0;
     int eval = 0;
     int unnest = 0;
     int window = 0;
@@ -49,10 +51,12 @@ struct NetworkMemory {
     struct HashedJoinMem {
         std::unordered_map<ConstraintValue,
             std::vector<TokenWME const*>,
-            ConstraintValueHasher> left;
+            ConstraintValueHasher,
+            ConstraintValueEquals> left;
         std::unordered_map<ConstraintValue,
             std::vector<Fact*>,
-            ConstraintValueHasher> right;
+            ConstraintValueHasher,
+            ConstraintValueEquals> right;
         std::unordered_map<TokenWME const*,
             std::vector<TokenWME const*>> left_to_children;
         std::unordered_map<int64_t,
@@ -96,6 +100,11 @@ struct NetworkMemory {
             TokenWME const* wme;
             Fact* result_fact;
             std::unique_ptr<IAccumulator> accumulator;
+            double mir_numeric_sum = 0.0;
+            double mir_numeric_extreme = 0.0;
+            int64_t mir_count = 0;
+            bool mir_sum_is_double = false;
+            std::multiset<double> mir_numeric_values;
             std::vector<Fact*> contributing_facts_list;
             std::unordered_set<Fact*> contributing_facts_set;
 
@@ -128,6 +137,12 @@ struct NetworkMemory {
         std::map<TokenWME const*, Token> results;
     };
 
+    // --- QueryCallNode state ---
+    struct QueryCallMem {
+        std::unordered_map<TokenWME const*, Token> left;
+        std::unordered_map<TokenWME const*, std::vector<TokenWME const*>> parent_to_children;
+    };
+
     // --- EvalNode state ---
     struct EvalMem {
         std::unordered_map<TokenWME const*, TokenWME const*> memory;
@@ -156,6 +171,7 @@ struct NetworkMemory {
     std::vector<AccumulateMem> accumulate;
     std::vector<TerminalMem> terminal;
     std::vector<QueryTerminalMem> query_terminal;
+    std::vector<QueryCallMem> query_call;
     std::vector<EvalMem> eval;
     std::vector<UnnestMem> unnest;
     std::vector<WindowMem> window;
@@ -170,6 +186,7 @@ struct NetworkMemory {
         accumulate.resize(counts.accumulate);
         terminal.resize(counts.terminal);
         query_terminal.resize(counts.query_terminal);
+        query_call.resize(counts.query_call);
         eval.resize(counts.eval);
         unnest.resize(counts.unnest);
         window.resize(counts.window);

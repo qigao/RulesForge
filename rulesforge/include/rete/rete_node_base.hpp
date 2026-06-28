@@ -13,6 +13,7 @@
 
 #include "core/parsed_rule.hpp"
 #include "core/token.hpp"
+#include "engine/mir_execution_plan.hpp"
 #include "engine/rfl_accumulators.hpp"
 #include "rete/network_memory.hpp"
 
@@ -35,6 +36,7 @@ class UnnestNode;
 class EvalNode;
 class TerminalNode;
 class QueryTerminalNode;
+class QueryCallNode;
 
 // Node kind tag for O(1) type checks — replaces dynamic_cast in hot paths
 enum class NodeKind : uint8_t {
@@ -50,6 +52,7 @@ enum class NodeKind : uint8_t {
   Terminal,
   QueryTerminal,
   QueryInput,
+  QueryCall,
   Window,
 };
 
@@ -70,6 +73,7 @@ public:
       case NodeKind::Eval:
       case NodeKind::Unnest:
       case NodeKind::QueryInput:
+      case NodeKind::QueryCall:
         return true;
       default:
         return false;
@@ -148,7 +152,8 @@ class BetaConditionNode : public ReteNode
 public:
   BetaConditionNode(NodeKind k) : ReteNode(k) {}
   BetaConditionNode(NodeKind k, std::vector<ParsedConstraint> const& joins,
-                    std::map<std::string, int> const& bindings);
+                    std::map<std::string, int> const& bindings,
+                    std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates = {});
   void left_activate(StatefulSession& session,
                      Token const& token) override;
   void right_activate(StatefulSession& session,
@@ -172,6 +177,7 @@ protected:
   // Immutable config (set at build time)
   std::vector<ParsedConstraint> join_constraints;
   std::map<std::string, int> binding_to_token_idx;
+  std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates;
 };
 
 // =========================================================================
@@ -182,7 +188,8 @@ class BaseJoinNode : public ReteNode
 {
 public:
   BaseJoinNode(NodeKind k, std::vector<ParsedConstraint> joins,
-               std::map<std::string, int> bindings);
+               std::map<std::string, int> bindings,
+               std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates = {});
   void left_activate(StatefulSession& session,
                      Token const& token) override = 0;
   void right_activate(StatefulSession& session,
@@ -209,6 +216,7 @@ protected:
   // Immutable config
   std::vector<ParsedConstraint> join_constraints_;
   std::map<std::string, int> binding_to_token_idx_;
+  std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates_;
 };
 
 #endif  // RETE_NODE_BASE_HPP

@@ -11,12 +11,12 @@
 
 struct DecisionTableCompileStats {
     std::size_t direct_success = 0;
-    std::size_t fallback_success = 0;
-    std::size_t fallback_unknown_preamble = 0;
-    std::size_t fallback_declare_parse = 0;
-    std::size_t fallback_query_parse = 0;
-    std::size_t fallback_salience_parse = 0;
-    std::size_t fallback_condition_parse = 0;
+    std::size_t parser_path_success = 0;
+    std::size_t parser_path_unknown_preamble = 0;
+    std::size_t parser_path_declare_parse = 0;
+    std::size_t parser_path_query_parse = 0;
+    std::size_t parser_path_salience_parse = 0;
+    std::size_t parser_path_condition_parse = 0;
 };
 
 class DirectTableCompiler {

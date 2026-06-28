@@ -4,11 +4,13 @@
 #include "engine/query_result.hpp"
 #include "engine/stateful_session.hpp"
 
-#include <jsoncons/json.hpp>
+#include <turbo_parser.h>
 
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -27,55 +29,92 @@ std::string read_file(std::string const& path) {
     return buffer.str();
 }
 
-ConstraintValue to_constraint_value(jsoncons::json const& value) {
-    if (value.is_string()) {
-        return value.as<std::string>();
+struct TurboJsonDeleter {
+    void operator()(json_value_t* value) const {
+        if (value) {
+            turbo_free_json(&value);
+        }
     }
-    if (value.is_bool()) {
-        return static_cast<int64_t>(value.as<bool>() ? 1 : 0);
+};
+
+using TurboJsonHandle = std::unique_ptr<json_value_t, TurboJsonDeleter>;
+
+TurboJsonHandle parse_json_document(std::string const& content) {
+    json_value_t* root = nullptr;
+    int const rc =
+        turbo_parse_json(reinterpret_cast<uint8_t const*>(content.data()), content.size(), &root);
+    if (rc != 0 || root == nullptr) {
+        if (root) {
+            turbo_free_json(&root);
+        }
+        throw std::runtime_error("failed to parse JSON input");
     }
-    if (value.is_int64()) {
-        return value.as<int64_t>();
-    }
-    if (value.is_uint64()) {
-        return static_cast<int64_t>(value.as<uint64_t>());
-    }
-    if (value.is_double()) {
-        return value.as<double>();
-    }
-    if (value.is_null()) {
+    return TurboJsonHandle(root);
+}
+
+ConstraintValue to_constraint_value(json_value_t const* value) {
+    if (!value) {
         return NilValue{};
+    }
+
+    switch (turbo_json_type(value)) {
+        case TURBO_JSON_STRING: {
+            char const* text = turbo_json_string(value);
+            std::size_t const len = turbo_json_string_len(value);
+            return text ? std::string(text, len) : std::string();
+        }
+        case TURBO_JSON_BOOL:
+            return static_cast<int64_t>(turbo_json_bool(value) ? 1 : 0);
+        case TURBO_JSON_NUMBER: {
+            double const number = turbo_json_number(value);
+            double truncated = 0.0;
+            if (std::modf(number, &truncated) == 0.0
+                && number >= static_cast<double>(std::numeric_limits<int64_t>::min())
+                && number <= static_cast<double>(std::numeric_limits<int64_t>::max())) {
+                return static_cast<int64_t>(number);
+            }
+            return number;
+        }
+        case TURBO_JSON_NULL:
+            return NilValue{};
+        default:
+            break;
     }
     throw std::runtime_error("unsupported JSON value in flat example data");
 }
 
-std::shared_ptr<Fact> make_fact(std::string const& type_name, jsoncons::json const& object) {
-    if (!object.is_object()) {
+std::shared_ptr<Fact> make_fact(std::string const& type_name, json_value_t const* object) {
+    if (!object || turbo_json_type(object) != TURBO_JSON_OBJECT) {
         throw std::runtime_error("expected JSON object for fact type " + type_name);
     }
 
     auto fact = std::make_shared<Fact>();
     fact->type = type_name;
-    for (auto const& member : object.object_range()) {
-        if (!member.key().empty() && member.key()[0] == '_') {
+    std::size_t const field_count = turbo_json_object_size(object);
+    for (std::size_t i = 0; i < field_count; ++i) {
+        char const* key = turbo_json_object_key(object, i);
+        json_value_t const* value = turbo_json_object_value(object, i);
+        if (!key || key[0] == '_') {
             continue;
         }
-        auto interned = rulesforge::StringInterner::instance().intern(member.key());
-        fact->fields[rulesforge::InternedString(interned)] = to_constraint_value(member.value());
+        auto interned = rulesforge::StringInterner::instance().intern(std::string_view(key));
+        fact->fields[rulesforge::InternedString(interned)] = to_constraint_value(value);
     }
     return fact;
 }
 
 void add_fact_array(StatefulSession& session,
-                    jsoncons::json const& root,
+                    json_value_t const* root,
                     char const* array_key,
                     std::string const& type_name,
                     std::vector<std::shared_ptr<Fact>>& owned_facts) {
-    auto const it = root.find(array_key);
-    if (it == root.object_range().end() || !it->value().is_array()) {
+    json_value_t const* array = turbo_json_object_get(root, array_key);
+    if (!array || turbo_json_type(array) != TURBO_JSON_ARRAY) {
         return;
     }
-    for (auto const& item : it->value().array_range()) {
+    std::size_t const count = turbo_json_array_size(array);
+    for (std::size_t i = 0; i < count; ++i) {
+        json_value_t const* item = turbo_json_array_get(array, i);
         auto fact = make_fact(type_name, item);
         session.add_fact(fact);
         owned_facts.push_back(std::move(fact));
@@ -83,16 +122,18 @@ void add_fact_array(StatefulSession& session,
 }
 
 void insert_stream_array(StatefulSession& session,
-                         jsoncons::json const& root,
+                         json_value_t const* root,
                          char const* array_key,
                          std::string const& type_name,
                          char const* stream_name,
                          std::vector<std::shared_ptr<Fact>>& owned_facts) {
-    auto const it = root.find(array_key);
-    if (it == root.object_range().end() || !it->value().is_array()) {
+    json_value_t const* array = turbo_json_object_get(root, array_key);
+    if (!array || turbo_json_type(array) != TURBO_JSON_ARRAY) {
         return;
     }
-    for (auto const& item : it->value().array_range()) {
+    std::size_t const count = turbo_json_array_size(array);
+    for (std::size_t i = 0; i < count; ++i) {
+        json_value_t const* item = turbo_json_array_get(array, i);
         auto fact = make_fact(type_name, item);
         session.insert_into(stream_name, fact.get());
         owned_facts.push_back(std::move(fact));
@@ -193,12 +234,12 @@ int main(int argc, char** argv) {
         }
 
         auto session = kb->create_session();
-        auto root = jsoncons::json::parse(read_file(argv[2]));
+        auto root = parse_json_document(read_file(argv[2]));
 
         std::vector<std::shared_ptr<Fact>> owned_facts;
-        add_fact_array(*session, root, "accountProfiles", "com.bank.fraud.AccountProfile", owned_facts);
-        add_fact_array(*session, root, "highRiskCountries", "com.bank.fraud.HighRiskCountry", owned_facts);
-        insert_stream_array(*session, root, "transactions", "com.bank.fraud.Transaction", "transaction-stream",
+        add_fact_array(*session, root.get(), "accountProfiles", "com.bank.fraud.AccountProfile", owned_facts);
+        add_fact_array(*session, root.get(), "highRiskCountries", "com.bank.fraud.HighRiskCountry", owned_facts);
+        insert_stream_array(*session, root.get(), "transactions", "com.bank.fraud.Transaction", "transaction-stream",
                             owned_facts);
 
         int fired = session->fire_all_rules();

@@ -11,6 +11,7 @@
 #include <string_view>
 #include <functional>
 
+#include "core/constraint_types.hpp"
 
 namespace rulesforge {
 struct ModifiedFieldsHint {
@@ -32,7 +33,7 @@ struct ModifiedFieldsHint {
     }
 
     bool contains(std::string_view field) const {
-        if (overflow) return true;  // conservative fallback
+        if (overflow) return true;  // conservative dirty-field match
         for (uint8_t i = 0; i < count; ++i) {
             if (fields[i] == field) return true;
         }
@@ -72,6 +73,8 @@ public:
 
     // P1-002: Factory for facts to be used in RHS
     virtual Fact* create_fact(std::string const& type) = 0;
+    virtual std::optional<FieldType> get_declared_field_type(std::string const& fact_type,
+                                                             std::string_view field_name) const = 0;
 
     // P1 FIX: rfl.halt() support
     virtual void halt() = 0;

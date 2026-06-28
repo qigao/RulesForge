@@ -126,7 +126,7 @@ public:
             }
 
             if (!replaced) {
-                // Best-effort fallback when replacement is not available.
+                // Best-effort replacement path when direct replacement is not available.
                 try {
                     reset_session(session);
                 } catch (...) {

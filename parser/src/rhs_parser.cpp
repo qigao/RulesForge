@@ -1,6 +1,6 @@
 #include "rhs_parser.hpp"
 #include "core/logging_control.hpp"
-#include "expression_evaluator.hpp"
+#include "expression_descriptor.hpp"
 
 #include <cctype>
 #include <regex>
@@ -298,8 +298,10 @@ RhsParser::Token RhsParser::Lexer::peek() {
 // Parser Implementation
 // ============================================================================
 
-RhsParser::Parser::Parser(std::string const &input, std::map<std::string, int> const &bindings)
-    : lexer_(input), bindings_(bindings) {
+RhsParser::Parser::Parser(std::string const &input,
+                          std::map<std::string, int> const &bindings,
+                          std::unordered_set<std::string> const &globals)
+    : lexer_(input), bindings_(bindings), globals_(globals) {
   current_ = lexer_.next();
 }
 
@@ -332,6 +334,39 @@ void RhsParser::Parser::error(std::string const &message) {
              std::to_string(current_.column) + ": " + message;
     had_error_ = true;
   }
+}
+
+bool RhsParser::Parser::is_fact_binding_available(std::string const& name) const {
+  return bindings_.find(name) != bindings_.end()
+      || local_bindings_.find(name) != local_bindings_.end();
+}
+
+bool RhsParser::Parser::is_value_source_available(std::string const& name) const {
+  return is_fact_binding_available(name)
+      || globals_.find(name) != globals_.end();
+}
+
+bool RhsParser::Parser::validate_value_source_ref(std::string const& ref) {
+  if (ref.empty() || ref[0] != '$') {
+    return true;
+  }
+
+  size_t const dot_pos = ref.find('.');
+  std::string const base = dot_pos == std::string::npos ? ref : ref.substr(0, dot_pos);
+  if (!is_value_source_available(base)) {
+    error("RHS uses undeclared variable '" + base + "'");
+    return false;
+  }
+  return true;
+}
+
+bool RhsParser::Parser::validate_expression_sources(rulesforge::ExpressionDescriptor const& expression) {
+  for (auto const& variable : expression.variables()) {
+    if (!validate_value_source_ref(variable)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 std::vector<CompiledAction> RhsParser::Parser::parse() {
@@ -389,6 +424,9 @@ CompiledAction RhsParser::Parser::parse_update() {
   advance(); // consume 'update'
   Token var = consume(Token::TOK_VARIABLE, "Expected variable after 'update'");
   action.target_var = var.text;
+  if (!var.text.empty() && !is_fact_binding_available(var.text)) {
+    error("RHS uses undeclared variable '" + var.text + "'");
+  }
 
   consume(Token::TOK_LBRACE, "Expected '{' after variable");
   action.assignments = parse_field_assignments();
@@ -436,7 +474,7 @@ CompiledAction RhsParser::Parser::parse_retract() {
   action.target_var = var.text;
 
   // Validate that the variable is declared in LHS bindings
-  if (!var.text.empty() && bindings_.find(var.text) == bindings_.end()) {
+  if (!var.text.empty() && !is_fact_binding_available(var.text)) {
     error("RHS uses undeclared variable '" + var.text + "'");
   }
 
@@ -494,11 +532,12 @@ CompiledAction RhsParser::Parser::parse_if() {
   // Parse condition expression
   std::string condition_expr = parse_expression();
   std::string compile_error;
-  action.condition = ExpressionEvaluator::compile(condition_expr, &compile_error);
+  action.condition = ExpressionDescriptor::compile(condition_expr, &compile_error);
   if (!action.condition) {
     error("Failed to compile IF condition: " + compile_error);
     return action;
   }
+  validate_expression_sources(*action.condition);
 
   consume(Token::TOK_LBRACE, "Expected '{' after if condition");
 
@@ -541,9 +580,15 @@ CompiledAction RhsParser::Parser::parse_for() {
     advance(); // consume '('
     Token first = consume(Token::TOK_VARIABLE, "Expected variable in list");
     action.iter_source_list.push_back(first.text);
+    if (!first.text.empty() && !is_fact_binding_available(first.text)) {
+      error("RHS uses undeclared variable '" + first.text + "'");
+    }
     while (match(Token::TOK_COMMA)) {
       Token var = consume(Token::TOK_VARIABLE, "Expected variable in list");
       action.iter_source_list.push_back(var.text);
+      if (!var.text.empty() && !is_fact_binding_available(var.text)) {
+        error("RHS uses undeclared variable '" + var.text + "'");
+      }
     }
     consume(Token::TOK_RPAREN, "Expected ')' after variable list");
   } else if (check(Token::TOK_VARIABLE)) {
@@ -551,6 +596,9 @@ CompiledAction RhsParser::Parser::parse_for() {
     // Or field form: for $item in $var.field { ... }
     Token source_var = advance();
     action.iter_source_var = source_var.text;
+    if (!source_var.text.empty() && !is_value_source_available(source_var.text)) {
+      error("RHS uses undeclared variable '" + source_var.text + "'");
+    }
     if (match(Token::TOK_DOT)) {
       Token field = consume(Token::TOK_IDENTIFIER, "Expected field name after '.'");
       action.iter_source_field = field.text;
@@ -563,8 +611,13 @@ CompiledAction RhsParser::Parser::parse_for() {
   consume(Token::TOK_LBRACE, "Expected '{' after for header");
 
   // Parse body actions
+  bool const inserted_local_binding = !action.iter_var.empty()
+      && local_bindings_.insert(action.iter_var).second;
   while (!check(Token::TOK_RBRACE) && !check(Token::TOK_END) && !had_error_) {
     action.body_actions.push_back(parse_action());
+  }
+  if (inserted_local_binding) {
+    local_bindings_.erase(action.iter_var);
   }
   consume(Token::TOK_RBRACE, "Expected '}' after for body");
 
@@ -581,11 +634,12 @@ CompiledAction RhsParser::Parser::parse_while() {
   // Parse condition expression
   std::string condition_expr = parse_expression();
   std::string compile_error;
-  action.condition = ExpressionEvaluator::compile(condition_expr, &compile_error);
+  action.condition = ExpressionDescriptor::compile(condition_expr, &compile_error);
   if (!action.condition) {
     error("Failed to compile WHILE condition: " + compile_error);
     return action;
   }
+  validate_expression_sources(*action.condition);
 
   consume(Token::TOK_LBRACE, "Expected '{' after while condition");
 
@@ -607,11 +661,12 @@ CompiledAction RhsParser::Parser::parse_switch() {
   // Parse switch expression
   std::string switch_expr = parse_expression();
   std::string compile_error;
-  action.switch_expr = ExpressionEvaluator::compile(switch_expr, &compile_error);
+  action.switch_expr = ExpressionDescriptor::compile(switch_expr, &compile_error);
   if (!action.switch_expr) {
     error("Failed to compile SWITCH expression: " + compile_error);
     return action;
   }
+  validate_expression_sources(*action.switch_expr);
 
   consume(Token::TOK_LBRACE, "Expected '{' after switch expression");
 
@@ -624,11 +679,12 @@ CompiledAction RhsParser::Parser::parse_switch() {
 
       // Parse case value
       std::string case_expr = parse_expression();
-      sc.value = ExpressionEvaluator::compile(case_expr, &compile_error);
+      sc.value = ExpressionDescriptor::compile(case_expr, &compile_error);
       if (!sc.value) {
         error("Failed to compile CASE value: " + compile_error);
         return action;
       }
+      validate_expression_sources(*sc.value);
 
       consume(Token::TOK_LBRACE, "Expected '{' after case value");
 
@@ -741,9 +797,12 @@ FieldAssignment RhsParser::Parser::parse_value() {
     }
     if (!assign.has_precomputed_literal) {
       std::string compile_error;
-      assign.numeric_expr = ExpressionEvaluator::compile(num.text, &compile_error);
+      assign.numeric_expr = ExpressionDescriptor::compile(num.text, &compile_error);
       if (!assign.numeric_expr) {
         error("Failed to compile expression '" + num.text + "': " + compile_error);
+      }
+      if (assign.numeric_expr) {
+        validate_expression_sources(*assign.numeric_expr);
       }
     }
   } else if (check(Token::TOK_DOUBLE)) {
@@ -757,9 +816,12 @@ FieldAssignment RhsParser::Parser::parse_value() {
     }
     if (!assign.has_precomputed_literal) {
       std::string compile_error;
-      assign.numeric_expr = ExpressionEvaluator::compile(num.text, &compile_error);
+      assign.numeric_expr = ExpressionDescriptor::compile(num.text, &compile_error);
       if (!assign.numeric_expr) {
         error("Failed to compile expression '" + num.text + "': " + compile_error);
+      }
+      if (assign.numeric_expr) {
+        validate_expression_sources(*assign.numeric_expr);
       }
     }
   } else {
@@ -770,13 +832,17 @@ FieldAssignment RhsParser::Parser::parse_value() {
     if (!expr.empty() && expr[0] == '$' && expr.find_first_of("+-*/><!=") == std::string::npos) {
       assign.type = RhsValueType::VAR_REF;
       assign.var_ref = expr;
+      validate_value_source_ref(assign.var_ref);
     } else {
       // Compile as numeric expression
       assign.type = RhsValueType::NUMERIC;
       std::string compile_error;
-      assign.numeric_expr = ExpressionEvaluator::compile(expr, &compile_error);
+      assign.numeric_expr = ExpressionDescriptor::compile(expr, &compile_error);
       if (!assign.numeric_expr) {
         error("Failed to compile expression '" + expr + "': " + compile_error);
+      }
+      if (assign.numeric_expr) {
+        validate_expression_sources(*assign.numeric_expr);
       }
     }
   }
@@ -997,11 +1063,13 @@ std::string RhsParser::Parser::parse_term() {
 // RhsParser Static Methods
 // ============================================================================
 
-std::vector<CompiledAction> RhsParser::parse(std::string const &rhs_code,
-                                             std::map<std::string, int> const &bindings,
-                                             std::string *error_out) {
+std::vector<CompiledAction> RhsParser::parse(
+    std::string const &rhs_code,
+    std::map<std::string, int> const &bindings,
+    std::unordered_set<std::string> const &globals,
+    std::string *error_out) {
 
-  Parser parser(rhs_code, bindings);
+  Parser parser(rhs_code, bindings, globals);
   auto actions = parser.parse();
 
   if (actions.empty() && error_out) {
@@ -1009,6 +1077,13 @@ std::vector<CompiledAction> RhsParser::parse(std::string const &rhs_code,
   }
 
   return actions;
+}
+
+std::vector<CompiledAction> RhsParser::parse(std::string const &rhs_code,
+                                             std::map<std::string, int> const &bindings,
+                                             std::string *error_out) {
+  static std::unordered_set<std::string> const kNoGlobals;
+  return parse(rhs_code, bindings, kNoGlobals, error_out);
 }
 
 } // namespace rulesforge

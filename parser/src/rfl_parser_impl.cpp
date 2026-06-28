@@ -106,7 +106,7 @@ static int token_type_to_lemon_id(TokenType t) {
         case TokenType::TK_CODE_CHUNK:       return TOK_CODE_CHUNK;
         case TokenType::TK_BINARY:           return TOK_IDENTIFIER;
         case TokenType::TK_CODEC:            return TOK_IDENTIFIER;
-        case TokenType::TK_CONTAINS_KEY:     return TOK_IDENTIFIER;
+        case TokenType::TK_CONTAINS_KEY:     return TOK_CONTAINS_KEY;
         case TokenType::TK_EOF:              return 0; // Lemon uses 0 for EOF
         case TokenType::TK_ERROR:            return 0;
     }

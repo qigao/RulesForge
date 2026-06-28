@@ -2,8 +2,8 @@
  * @file ruleforge_types.h
  * @brief Shared status codes and opaque handle types.
  *
- * Both rule_forge.h (main C API) and rule_forge_plugin.h (plugin vtables) need
- * ruleforge_status_t and ruleforge_fact_t.
+ * The main C API uses ruleforge_status_t and ruleforge_fact_t across opaque
+ * handle boundaries.
  */
 
 #ifndef RULEFORGE_TYPES_H

@@ -3,8 +3,29 @@
 
 #include <string>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
+#include <filesystem>
 #include <cstring>
+
+namespace {
+void write_u32_le(uint8_t* buf, size_t offset, uint32_t value) {
+    buf[offset + 0] = static_cast<uint8_t>(value & 0xffu);
+    buf[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xffu);
+    buf[offset + 2] = static_cast<uint8_t>((value >> 16) & 0xffu);
+    buf[offset + 3] = static_cast<uint8_t>((value >> 24) & 0xffu);
+}
+
+ruleforge_status_t native_predicate_true(void*, int, const char**, char** out_result) {
+    if (!out_result) return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    char const value[] = "true";
+    auto* result = static_cast<char*>(std::malloc(sizeof(value)));
+    if (!result) return RULES_FORGE_ERROR_GENERIC;
+    std::memcpy(result, value, sizeof(value));
+    *out_result = result;
+    return RULES_FORGE_OK;
+}
+}
 
 suite("CAPI") {
     group("Initialization and Cleanup") {
@@ -41,6 +62,23 @@ suite("CAPI") {
             check_not_null(kb);
             check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
 
+            ruleforge_cleanup();
+        }
+
+        it("registers native predicate helpers") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            check_int_eq(
+                ruleforge_kb_register_native_predicate(kb, "always_true", native_predicate_true, nullptr),
+                RULES_FORGE_OK);
+            check_int_ne(
+                ruleforge_kb_register_native_predicate(kb, nullptr, native_predicate_true, nullptr),
+                RULES_FORGE_OK);
+            check_str_contains(ruleforge_get_last_error_message(), "Predicate name is NULL");
+
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
             ruleforge_cleanup();
         }
 
@@ -174,6 +212,63 @@ end
             ruleforge_cleanup();
         }
 
+        it("adds schema-bound JSON fact through TurboScript DataBind") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            auto schema_path = std::filesystem::temp_directory_path()
+                / "rulesforge_capi_databind_json.schema";
+            {
+                std::ofstream schema(schema_path, std::ios::binary);
+                schema << "schema Market [id(8), version(1), byte_order(little)]; "
+                          "message Customer { int32 age; double score; string name; }";
+            }
+
+            std::string drl = std::string("import \"")
+                + schema_path.generic_string()
+                + R"(";
+                    query "FindCustomer"
+                        $c : Customer(age == 30, name == "Alice")
+                    end
+                )";
+            check_int_eq(ruleforge_kb_load_drl(kb, drl.c_str()), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            ruleforge_fact_t fact = nullptr;
+            check_int_eq(
+                ruleforge_session_add_fact_json_schema(
+                    session,
+                    schema_path.string().c_str(),
+                    "Customer",
+                    R"({"name":"Alice","age":30,"score":98.5})",
+                    &fact),
+                RULES_FORGE_OK);
+            check_not_null(fact);
+
+            int64_t age = 0;
+            check_int_eq(ruleforge_fact_get_field_as_int(fact, "age", &age), RULES_FORGE_OK);
+            check_int_eq((int)age, 30);
+
+            double score = 0.0;
+            check_int_eq(ruleforge_fact_get_field_as_double(fact, "score", &score), RULES_FORGE_OK);
+            check(score == 98.5);
+
+            ruleforge_query_result_t query_result = nullptr;
+            check_int_eq(ruleforge_session_query(session, "FindCustomer", &query_result), RULES_FORGE_OK);
+            check_not_null(query_result);
+            check_int_eq(ruleforge_query_result_get_size(query_result), 1);
+
+            check_int_eq(ruleforge_query_result_destroy(query_result), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            std::filesystem::remove(schema_path);
+            ruleforge_cleanup();
+        }
+
         it("resolves short fact names against packaged declarations") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;
@@ -227,7 +322,7 @@ end
             ruleforge_cleanup();
         }
 
-        it("adds fact from binary and returns stable fact handle") {
+        it("rejects binary payload ingestion in RulesForge runtime") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;
             check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
@@ -258,28 +353,195 @@ end
             std::memcpy(payload + 8, &c, sizeof(c));
 
             ruleforge_fact_t fact = nullptr;
-            check_int_eq(
-                ruleforge_session_add_fact_binary_ex(
-                    session, "BinaryFact", payload, sizeof(payload), &fact),
-                RULES_FORGE_OK);
-            check_not_null(fact);
-
-            int64_t value = 0;
-            check_int_eq(ruleforge_fact_get_field_as_int(fact, "a", &value), RULES_FORGE_OK);
-            check_int_eq((int)value, 100);
-            check_int_eq(ruleforge_fact_get_field_as_int(fact, "b", &value), RULES_FORGE_OK);
-            check_int_eq((int)value, 200);
-            check_int_eq(ruleforge_fact_get_field_as_int(fact, "c", &value), RULES_FORGE_OK);
-            check_long_eq(value, 300000LL);
-
-            ruleforge_query_result_t query_result = nullptr;
-            check_int_eq(ruleforge_session_query(session, "AllBinaryFacts", &query_result), RULES_FORGE_OK);
-            check_not_null(query_result);
-            check_int_eq(ruleforge_query_result_get_size(query_result), 1);
-            check_int_eq(ruleforge_query_result_destroy(query_result), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_add_fact_binary_ex(
+                             session, "BinaryFact", payload, sizeof(payload), &fact),
+                         RULES_FORGE_ERROR_INVALID_ARGUMENT);
+            check(fact == nullptr);
 
             check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
             check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
+
+        it("adds schema-bound binary fact through TurboScript DataBind") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            auto schema_path = std::filesystem::temp_directory_path()
+                / "rulesforge_capi_databind_binary.schema";
+            {
+                std::ofstream schema(schema_path, std::ios::binary);
+                schema << "schema Market [id(10), version(1), byte_order(little)]; "
+                          "message BinaryFact { uint32 a; uint32 b; uint32 c; }";
+            }
+
+            std::string drl = std::string("import \"")
+                + schema_path.generic_string()
+                + R"(";
+                    query "FindBinary"
+                        $f : BinaryFact(a == 100, b == 200, c == 300)
+                    end
+                )";
+            check_int_eq(ruleforge_kb_load_drl(kb, drl.c_str()), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            uint8_t payload[12] = {0};
+            write_u32_le(payload, 0, 100);
+            write_u32_le(payload, 4, 200);
+            write_u32_le(payload, 8, 300);
+
+            ruleforge_fact_t fact = nullptr;
+            check_int_eq(
+                ruleforge_session_add_fact_binary_schema(
+                    session,
+                    schema_path.string().c_str(),
+                    "BinaryFact",
+                    payload,
+                    sizeof(payload),
+                    &fact),
+                RULES_FORGE_OK);
+            check_not_null(fact);
+
+            int64_t c = 0;
+            check_int_eq(ruleforge_fact_get_field_as_int(fact, "c", &c), RULES_FORGE_OK);
+            check_int_eq((int)c, 300);
+
+            ruleforge_query_result_t query_result = nullptr;
+            check_int_eq(ruleforge_session_query(session, "FindBinary", &query_result), RULES_FORGE_OK);
+            check_not_null(query_result);
+            check_int_eq(ruleforge_query_result_get_size(query_result), 1);
+
+            check_int_eq(ruleforge_query_result_destroy(query_result), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            std::filesystem::remove(schema_path);
+            ruleforge_cleanup();
+        }
+
+        it("adds schema-bound CSV facts through TurboScript DataBind") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            auto schema_path = std::filesystem::temp_directory_path()
+                / "rulesforge_capi_databind_csv.schema";
+            {
+                std::ofstream schema(schema_path, std::ios::binary);
+                schema << "schema Market [id(9), version(1), byte_order(little)]; "
+                          "message Customer { int32 age; double score; string name; }";
+            }
+
+            std::string drl = std::string("import \"")
+                + schema_path.generic_string()
+                + R"(";
+                    rule "AnyCustomer"
+                    when
+                        $c : Customer(age >= 18)
+                    then
+                    end
+                )";
+            check_int_eq(ruleforge_kb_load_drl(kb, drl.c_str()), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            char const* csv = "name,age,score\nAlice,30,98.5\nBob,17,70.0\n";
+            ruleforge_fact_t* facts = nullptr;
+            int loaded = 0;
+            check_int_eq(
+                ruleforge_session_add_facts_csv_schema(
+                    session,
+                    schema_path.string().c_str(),
+                    "Customer",
+                    csv,
+                    &facts,
+                    &loaded),
+                RULES_FORGE_OK);
+            check_int_eq(loaded, 2);
+            check_not_null(facts);
+            check_size_eq(ruleforge_session_get_fact_count(session), 2);
+
+            char name_buffer[32] = {0};
+            size_t actual_length = 0;
+            check_int_eq(
+                ruleforge_fact_get_field_as_string(
+                    facts[0], "name", name_buffer, sizeof(name_buffer), &actual_length),
+                RULES_FORGE_OK);
+            check_str_eq(name_buffer, "Alice");
+
+            ruleforge_fact_array_free(facts);
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            std::filesystem::remove(schema_path);
+            ruleforge_cleanup();
+        }
+
+        it("adds schema-bound XML facts through TurboScript DataBind") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            auto schema_path = std::filesystem::temp_directory_path()
+                / "rulesforge_capi_databind_xml.schema";
+            {
+                std::ofstream schema(schema_path, std::ios::binary);
+                schema << "schema Market [id(11), version(1), byte_order(little)]; "
+                          "enum Side <uint8> { Buy = 1; Sell = 2; } "
+                          "message Order { uint32 id; Side side; string symbol; }";
+            }
+
+            std::string drl = std::string("import \"")
+                + schema_path.generic_string()
+                + R"(";
+                    query "FindOrder"
+                        $o : Order(id == 2, side == 2, symbol == "WXYZ")
+                    end
+                )";
+            check_int_eq(ruleforge_kb_load_drl(kb, drl.c_str()), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            char const* xml =
+                "<orders>"
+                "<order><id>1</id><side>Buy</side><symbol>ABCD</symbol></order>"
+                "<order><id>2</id><side>Sell</side><symbol>WXYZ</symbol></order>"
+                "</orders>";
+            ruleforge_fact_t* facts = nullptr;
+            int loaded = 0;
+            check_int_eq(
+                ruleforge_session_add_facts_xml_schema(
+                    session,
+                    schema_path.string().c_str(),
+                    "Order",
+                    xml,
+                    "//order",
+                    &facts,
+                    &loaded),
+                RULES_FORGE_OK);
+            check_int_eq(loaded, 2);
+            check_not_null(facts);
+
+            int64_t side = 0;
+            check_int_eq(ruleforge_fact_get_field_as_int(facts[1], "side", &side), RULES_FORGE_OK);
+            check_int_eq((int)side, 2);
+
+            ruleforge_query_result_t query_result = nullptr;
+            check_int_eq(ruleforge_session_query(session, "FindOrder", &query_result), RULES_FORGE_OK);
+            check_not_null(query_result);
+            check_int_eq(ruleforge_query_result_get_size(query_result), 1);
+
+            check_int_eq(ruleforge_query_result_destroy(query_result), RULES_FORGE_OK);
+            ruleforge_fact_array_free(facts);
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            std::filesystem::remove(schema_path);
             ruleforge_cleanup();
         }
 
@@ -441,6 +703,42 @@ end
             const char* fact_type = "Fact";
             const char* fact_json = R"({"id": 1})";
             check_int_eq(ruleforge_session_add_fact_json(session, fact_type, fact_json), RULES_FORGE_OK);
+
+            int fired_count = 0;
+            check_int_eq(ruleforge_session_fire_all_rules(session, -1, &fired_count), RULES_FORGE_OK);
+            check_int_eq(fired_count, 1);
+
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            ruleforge_cleanup();
+        }
+
+        it("fires rules through explicit native eval predicates") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+            check_int_eq(
+                ruleforge_kb_register_native_predicate(kb, "always_true", native_predicate_true, nullptr),
+                RULES_FORGE_OK);
+
+            const char* native_eval_drl = R"(
+declare Fact
+    id: long
+end
+
+rule "NativeEvalRule"
+    when
+        $f : Fact()
+        eval(native.always_true())
+    then
+end
+)";
+            check_int_eq(ruleforge_kb_load_drl(kb, native_eval_drl), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+            check_int_eq(ruleforge_session_add_fact_json(session, "Fact", R"({"id": 1})"), RULES_FORGE_OK);
 
             int fired_count = 0;
             check_int_eq(ruleforge_session_fire_all_rules(session, -1, &fired_count), RULES_FORGE_OK);

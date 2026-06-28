@@ -10,7 +10,7 @@ Requirements:
 - C17/C++20 compiler
 - Ninja
 - `vcpkg`
-- local package roots for `TurboNet`, `TurboScript`, and `TurboNet`
+- local package roots for `TurboNet` and `TurboScript`
 
 Generic configure command:
 

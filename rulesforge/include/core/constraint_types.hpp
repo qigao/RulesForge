@@ -14,8 +14,6 @@
 #include "core/value_types.hpp"
 #include "core/fact.hpp"
 
-namespace rulesforge { class ExpressionEvaluator; }
-
 struct SourcePosition {
     std::string source;
     std::size_t line = 0;
@@ -171,8 +169,7 @@ struct ParsedConstraint {
     std::vector<PathSegment> cached_right_field_path; // Optimization: parsed path for RHS binding
     std::optional<std::vector<ConstraintValue>> right_value_list;
     std::optional<ParsedTemporalConstraint> temporal_constraint;
-    std::optional<std::string> right_arith_expr;  // Original expression string for compilation
-    std::shared_ptr<rulesforge::ExpressionEvaluator> compiled_expr;  // Compiled expression (replaces ArithExprValue AST)
+    std::optional<std::string> right_arith_expr;  // Original expression string for MIR lowering
     ParsedConstraint() = default;
     ParsedConstraint(ParsedConstraint&&) = default;
     ParsedConstraint& operator=(ParsedConstraint&&) = default;

@@ -1,6 +1,8 @@
 # RulesForge
 
-RulesForge is a C/C++ rule engine built around a Rete-style matching network, an RFL domain language, and a small public C API for embedding, plugins, and runtime integration.
+RulesForge is a RETE-based rule engine for C/C++ embedding. It supports dynamic schema and data binding, then executes rules through a JIT-backed runtime.
+
+Internally, RFL describes rules and working memory, TurboScript::DataBind handles schema-aware data binding, RETE plans rule propagation, and supported rule kernels run through the JIT execution path.
 
 English: `README.md`
 简体中文: `docs/zh-CN/README.md`
@@ -10,8 +12,6 @@ English: `README.md`
 - `rulesforge/`: core C++ engine library
 - `parser/`: standalone RFL parser library
 - `capi/`: public shared library and C API in [`include/rule_forge.h`](/C:/projects/cpp/rulesforge/include/rule_forge.h)
-- `plugins/`: source/sink plugin ABI and sample plugins
-- `router/`: route engine built on the plugin ABI
 - `docs/`: product docs, DSL reference, deployment notes, and examples
 - `tools/rulesforge_schema_compiler/`: schema/code generation tool
 
@@ -20,7 +20,6 @@ English: `README.md`
 If you are new to the project, start from the C API:
 
 - Main API: [`include/rule_forge.h`](/C:/projects/cpp/rulesforge/include/rule_forge.h)
-- Plugin ABI: [`include/rule_forge_plugin.h`](/C:/projects/cpp/rulesforge/include/rule_forge_plugin.h)
 - Shared types: [`include/ruleforge_types.h`](/C:/projects/cpp/rulesforge/include/ruleforge_types.h)
 
 The C++ engine API is available, but it is lower-level and spread across `rulesforge/include` and `parser/include`. For syntax details, use [`docs/dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md), which is already aligned with the current parser/runtime.
@@ -33,7 +32,7 @@ Prerequisites:
 - A C17/C++20 toolchain
 - Ninja
 - `vcpkg`
-- local packages for `TurboNet`, `TurboScript`, and `TurboNet`
+- local packages for `TurboNet` and `TurboScript`
 
 The top-level CMake expects these package roots:
 
@@ -82,11 +81,12 @@ You should see the rules compile, facts load, rules fire, and the query output p
 - Beginner guide: [`docs/BEGINNER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/BEGINNER_GUIDE.md)
 - User guide: [`docs/USER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/USER_GUIDE.md)
 - DSL reference: [`docs/dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md)
+- Product readiness: [`docs/PRODUCT_READINESS.md`](/C:/projects/cpp/rulesforge/docs/PRODUCT_READINESS.md)
+- Error catalog: [`docs/ERROR_CATALOG.md`](/C:/projects/cpp/rulesforge/docs/ERROR_CATALOG.md)
+- C API contract: [`docs/C_API_CONTRACT.md`](/C:/projects/cpp/rulesforge/docs/C_API_CONTRACT.md)
+- TurboScript DataBind/parser comparison: [`docs/TURBOSCRIPT_DATABIND_PARSER_COMPARISON.md`](/C:/projects/cpp/rulesforge/docs/TURBOSCRIPT_DATABIND_PARSER_COMPARISON.md)
 - Deployment: [`docs/DEPLOYMENT.md`](/C:/projects/cpp/rulesforge/docs/DEPLOYMENT.md)
-- Production data loading notes: [`docs/PRODUCTION_DATABIND_BEST_PRACTICES.md`](/C:/projects/cpp/rulesforge/docs/PRODUCTION_DATABIND_BEST_PRACTICES.md)
 - Examples index: [`docs/examples/README.md`](/C:/projects/cpp/rulesforge/docs/examples/README.md)
-- Plugins: [`plugins/README.md`](/C:/projects/cpp/rulesforge/plugins/README.md)
-- Router: [`router/README.md`](/C:/projects/cpp/rulesforge/router/README.md)
 
 ## Current Review Summary
 

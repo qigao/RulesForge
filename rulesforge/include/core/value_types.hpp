@@ -36,6 +36,10 @@ struct ConstraintValueHasher {
   std::size_t operator()(ConstraintValue const &v) const;
 };
 
+struct ConstraintValueEquals {
+  bool operator()(ConstraintValue const &a, ConstraintValue const &b) const;
+};
+
 struct TypedList {
   std::vector<ConstraintValue> values;
 };

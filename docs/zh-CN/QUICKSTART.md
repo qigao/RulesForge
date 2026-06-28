@@ -10,7 +10,7 @@
 - 支援 C17/C++20 之編譯器
 - Ninja
 - `vcpkg`
-- 本地可用之 `TurboNet`、`TurboScript`、`TurboNet`
+- 本地可用的 `TurboNet` 和 `TurboScript`
 
 通用配置命令：
 

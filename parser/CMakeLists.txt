@@ -2,7 +2,7 @@
 # RFL Parser Static Library
 # =============================================================================
 # This library contains the RulesForge DSL parser (lexer + grammar + impl) It
-# can be used by both RulesForge engine and external tools (like data_bind)
+# can be used by both RulesForge engine and external tools.
 set(TARGET_NAME rfl_parser)
 
 # --- re2c + Lemon code generation ---
@@ -64,7 +64,9 @@ target_include_directories(
 )
 
 target_link_libraries(
-    ${TARGET_NAME} PUBLIC TurboNet::Utils TurboNet::Parser TurboScript::ExprTk
+    ${TARGET_NAME}
+    PUBLIC TurboNet::Utils TurboNet::Parser TurboScript::ExprTk
+    PRIVATE TurboScript::DataBind
 )
 
 if(MSVC)
@@ -82,6 +84,6 @@ set_target_properties(
 add_library(RulesForge::Parser ALIAS ${TARGET_NAME})
 
 # Tests
-if(ENABLE_TESTS)
+if(BUILD_TESTING OR ENABLE_TESTS)
     add_subdirectory(tests)
 endif()

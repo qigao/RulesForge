@@ -103,23 +103,23 @@ CXX_C_API ruleforge_status_t ruleforge_kb_destroy(ruleforge_knowledge_base_t kb)
 typedef ruleforge_status_t (*ruleforge_native_function_t)(
     void *ctx, int argc, const char **argv, char **out_result);
 
-// Plugin ABI for DLL function table loading.
-#define RULEFORGE_PLUGIN_ABI_V1 1u
+// Function-table ABI for loading RHS host callbacks from DLL/.so bundles.
+#define RULEFORGE_FUNCTION_TABLE_ABI_V1 1u
 
 typedef struct {
   const char *name;
   ruleforge_native_function_t callback;
   void *user_data;
-} ruleforge_plugin_function_entry_t;
+} ruleforge_function_table_entry_t;
 
 typedef struct {
   uint32_t abi_version;
   uint32_t function_count;
-  const ruleforge_plugin_function_entry_t *functions;
-} ruleforge_plugin_function_table_t;
+  const ruleforge_function_table_entry_t *functions;
+} ruleforge_function_table_t;
 
 typedef ruleforge_status_t (*ruleforge_get_function_table_t)(
-    ruleforge_plugin_function_table_t *out_table);
+    ruleforge_function_table_t *out_table);
 
 // Register a native C function that can be called from rules.
 // kb: Knowledge base.
@@ -133,10 +133,17 @@ CXX_C_API ruleforge_status_t ruleforge_kb_register_native_function(
     ruleforge_native_function_t callback,
     void *user_data);
 
+// Register a native C predicate that can be used as a compiled runtime helper.
+// The callback should return "true"/"false" or "1"/"0" in out_result.
+CXX_C_API ruleforge_status_t ruleforge_kb_register_native_predicate(
+    ruleforge_knowledge_base_t kb,
+    const char *predicate_name,
+    ruleforge_native_function_t callback,
+    void *user_data);
+
 // Load a DLL/.so bundle of RHS native functions and register all entries.
-// This is for invoke()-style native callbacks, not the standard source/sink plugin ABI.
-// For standard reusable plugin extension, use rule_forge_plugin.h vtables.
-// library_path: Path to plugin library.
+// This is for invoke()-style host callbacks.
+// library_path: Path to function-table library.
 // symbol_name: Optional exported symbol name. Pass NULL for default "ruleforge_get_function_table".
 CXX_C_API ruleforge_status_t ruleforge_kb_load_native_function_table(
     ruleforge_knowledge_base_t kb,
@@ -171,21 +178,38 @@ CXX_C_API ruleforge_status_t ruleforge_session_add_fact_json_ex(ruleforge_statef
                                                                 const char *fact_json,
                                                                 ruleforge_fact_t *out_fact);
 
-// Adds one fact to the Stateful Session from binary payload.
-// The fact type must have a matching declaration available to the session codec registry.
+// Adds a schema-bound JSON fact using TurboScript::DataBind.
+CXX_C_API ruleforge_status_t
+ruleforge_session_add_fact_json_schema(ruleforge_stateful_session_t session,
+                                       const char *schema_path,
+                                       const char *fact_type,
+                                       const char *fact_json,
+                                       ruleforge_fact_t *out_fact);
+
+// Binary payload parsing is handled by TurboScript::DataBind.
+// Use ruleforge_session_add_fact_binary_schema() for schema-aware binary binding.
 CXX_C_API ruleforge_status_t ruleforge_session_add_fact_binary(ruleforge_stateful_session_t session,
                                                                const char *fact_type,
                                                                const uint8_t *fact_data,
                                                                size_t fact_len);
 
-// Adds one fact to the Stateful Session from binary payload and returns a stable fact handle.
-// The returned handle remains valid until the session is reset or destroyed.
+// Binary payload parsing is handled by TurboScript::DataBind.
+// Use ruleforge_session_add_fact_binary_schema() for schema-aware binary binding.
 CXX_C_API ruleforge_status_t
 ruleforge_session_add_fact_binary_ex(ruleforge_stateful_session_t session,
                                      const char *fact_type,
                                      const uint8_t *fact_data,
                                      size_t fact_len,
                                      ruleforge_fact_t *out_fact);
+
+// Adds a schema-bound binary fact using TurboScript::DataBind.
+CXX_C_API ruleforge_status_t
+ruleforge_session_add_fact_binary_schema(ruleforge_stateful_session_t session,
+                                         const char *schema_path,
+                                         const char *fact_type,
+                                         const uint8_t *fact_data,
+                                         size_t fact_len,
+                                         ruleforge_fact_t *out_fact);
 
 // Adds facts to the Stateful Session from CSV content.
 // csv_source must include a header row. Each subsequent row is inserted as one fact.
@@ -203,6 +227,26 @@ CXX_C_API ruleforge_status_t ruleforge_session_add_facts_csv_ex(ruleforge_statef
                                                                 const char *csv_source,
                                                                 ruleforge_fact_t **out_facts,
                                                                 int *out_loaded_count);
+
+// Adds schema-bound CSV facts using TurboScript::DataBind.
+CXX_C_API ruleforge_status_t
+ruleforge_session_add_facts_csv_schema(ruleforge_stateful_session_t session,
+                                       const char *schema_path,
+                                       const char *fact_type,
+                                       const char *csv_source,
+                                       ruleforge_fact_t **out_facts,
+                                       int *out_loaded_count);
+
+// Adds schema-bound XML facts using TurboScript::DataBind.
+// xpath may be NULL or empty to bind the document root.
+CXX_C_API ruleforge_status_t
+ruleforge_session_add_facts_xml_schema(ruleforge_stateful_session_t session,
+                                       const char *schema_path,
+                                       const char *fact_type,
+                                       const char *xml_source,
+                                       const char *xpath,
+                                       ruleforge_fact_t **out_facts,
+                                       int *out_loaded_count);
 
 // Adds facts to the Stateful Session from a CSV file.
 // csv_file_path points to a CSV file that includes a header row.

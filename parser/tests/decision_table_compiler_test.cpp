@@ -25,7 +25,7 @@ suite("DecisionTableCompiler") {
 
         auto stats = DirectTableCompiler::get_stats();
         check(stats.direct_success >= 1);
-        check(stats.fallback_success == 0);
+        check(stats.parser_path_success == 0);
     }
 
     it("compiles supported decision table directly into parser state") {
@@ -57,7 +57,7 @@ suite("DecisionTableCompiler") {
         check(state.parsed_rules[0].condition_groups[0].size() == 1);
     }
 
-    it("falls back to parser path for unsupported condition syntax") {
+    it("uses parser path for unsupported condition syntax") {
         DirectTableCompiler::reset_stats();
 
         std::string const csv_content =
@@ -67,22 +67,22 @@ suite("DecisionTableCompiler") {
 
         ParsingResult parse_result;
         DecisionTable table =
-            DecisionTableParser::parse_string(csv_content, "decision_table_compiler_test_fallback", parse_result);
+            DecisionTableParser::parse_string(csv_content, "decision_table_compiler_test_parser_path", parse_result);
         check(parse_result.success);
 
         std::vector<StructuredError> errors;
         parser_state state =
-            DirectTableCompiler::compile(table, "decision_table_compiler_test_fallback", errors);
+            DirectTableCompiler::compile(table, "decision_table_compiler_test_parser_path", errors);
 
         check(errors.empty());
         check(!state.parsed_rules.empty());
 
         auto stats = DirectTableCompiler::get_stats();
-        check(stats.fallback_success >= 1);
-        check(stats.fallback_condition_parse >= 1);
+        check(stats.parser_path_success >= 1);
+        check(stats.parser_path_condition_parse >= 1);
     }
 
-    it("tracks fallback reason counters via table-driven cases") {
+    it("tracks parser path reason counters via table-driven cases") {
         auto make_base_table = []() {
             DecisionTable table;
             table.preamble_records = {{"PACKAGE", "com.example.dt"}};
@@ -95,22 +95,22 @@ suite("DecisionTableCompiler") {
             return table;
         };
 
-        struct FallbackCase {
+        struct ParserPathCase {
             char const* source_name;
             DecisionTable table;
             std::size_t DecisionTableCompileStats::*reason_counter;
-            bool expect_fallback_success;
+            bool expect_parser_path_success;
         };
 
-        std::vector<FallbackCase> cases;
+        std::vector<ParserPathCase> cases;
 
         {
             auto table = make_base_table();
             table.preamble_records.push_back({"UNKNOWN", "foo"});
             cases.push_back({
-                "decision_table_compiler_test_fallback_unknown_preamble",
+                "decision_table_compiler_test_parser_path_unknown_preamble",
                 std::move(table),
-                &DecisionTableCompileStats::fallback_unknown_preamble,
+                &DecisionTableCompileStats::parser_path_unknown_preamble,
                 true,
             });
         }
@@ -118,9 +118,9 @@ suite("DecisionTableCompiler") {
             auto table = make_base_table();
             table.preamble_records.push_back({"DECLARE", "Customer", "name String"});
             cases.push_back({
-                "decision_table_compiler_test_fallback_declare_parse",
+                "decision_table_compiler_test_parser_path_declare_parse",
                 std::move(table),
-                &DecisionTableCompileStats::fallback_declare_parse,
+                &DecisionTableCompileStats::parser_path_declare_parse,
                 false,
             });
         }
@@ -128,9 +128,9 @@ suite("DecisionTableCompiler") {
             auto table = make_base_table();
             table.preamble_records.push_back({"QUERY", "find_customers", "$c Customer()"});
             cases.push_back({
-                "decision_table_compiler_test_fallback_query_parse",
+                "decision_table_compiler_test_parser_path_query_parse",
                 std::move(table),
-                &DecisionTableCompileStats::fallback_query_parse,
+                &DecisionTableCompileStats::parser_path_query_parse,
                 false,
             });
         }
@@ -144,9 +144,9 @@ suite("DecisionTableCompiler") {
             };
             table.data = {{"Bad Salience Offer", "high", "5000", "Approved"}};
             cases.push_back({
-                "decision_table_compiler_test_fallback_salience_parse",
+                "decision_table_compiler_test_parser_path_salience_parse",
                 std::move(table),
-                &DecisionTableCompileStats::fallback_salience_parse,
+                &DecisionTableCompileStats::parser_path_salience_parse,
                 false,
             });
         }
@@ -159,9 +159,9 @@ suite("DecisionTableCompiler") {
             };
             table.data = {{"Unsupported Condition Offer", "5000", "Approved"}};
             cases.push_back({
-                "decision_table_compiler_test_fallback_condition_parse",
+                "decision_table_compiler_test_parser_path_condition_parse",
                 std::move(table),
-                &DecisionTableCompileStats::fallback_condition_parse,
+                &DecisionTableCompileStats::parser_path_condition_parse,
                 true,
             });
         }
@@ -176,9 +176,9 @@ suite("DecisionTableCompiler") {
             auto stats = DirectTableCompiler::get_stats();
             check((stats.*(tc.reason_counter)) >= 1);
             check(stats.direct_success == 0);
-            if (tc.expect_fallback_success) {
+            if (tc.expect_parser_path_success) {
                 check(errors.empty());
-                check(stats.fallback_success >= 1);
+                check(stats.parser_path_success >= 1);
             }
         }
     }

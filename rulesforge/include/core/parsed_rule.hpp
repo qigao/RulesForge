@@ -23,7 +23,7 @@ struct ParsedAccumulate {
   std::string function;
   std::string field;
   std::string accumulate_field_name;
-  std::shared_ptr<rulesforge::ExpressionEvaluator> compiled_expr;
+  bool uses_mir_value_expression = false;
   std::map<std::string, std::string> inline_binding_to_field;
   ParsedAccumulate();
   ParsedAccumulate(ParsedAccumulate const &other);

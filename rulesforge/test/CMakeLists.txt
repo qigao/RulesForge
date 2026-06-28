@@ -9,7 +9,7 @@ foreach(test_source ${TEST_SOURCES})
     add_executable(${executable_name} ${test_source})
     target_link_libraries(
         ${executable_name}
-        PRIVATE TurboNet::TinyTest data_bind rfl_parser ${TARGET_NAME} Threads::Threads
+        PRIVATE TurboNet::TinyTest rfl_parser ${TARGET_NAME} Threads::Threads
     )
     target_compile_definitions(
         ${executable_name}
@@ -27,7 +27,16 @@ foreach(test_source ${TEST_SOURCES})
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                $<INSTALL_INTERFACE:include/rulesforge>
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-                ${CMAKE_SOURCE_DIR}/tbe/data_bind
     )
     set_target_properties(${executable_name} PROPERTIES FOLDER ${folder_name})
+    if(WIN32)
+        add_custom_command(
+            TARGET ${executable_name}
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_RUNTIME_DLLS:${executable_name}>
+                    $<TARGET_FILE_DIR:${executable_name}>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
 endforeach()

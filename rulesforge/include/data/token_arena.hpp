@@ -2,9 +2,9 @@
 #define TOKEN_ARENA_HPP
 
 #include "core/token.hpp"
-#include <turbo_buffer.h>
-#include <new>
 #include <functional>
+#include <memory>
+#include <vector>
 
 namespace rulesforge {
 
@@ -12,14 +12,12 @@ namespace rulesforge {
 // Uses mem_pool_t for high-performance, contiguous allocation.
 class TokenArena {
 public:
-    explicit TokenArena(size_t size = 64 * 1024 * 1024) {
-         mem_init(&arena_, size);
+    explicit TokenArena(size_t size = 64 * 1024 * 1024) : reserved_size_(size) {
+         tokens_.reserve(1024);
          init_root();
     }
 
-    ~TokenArena() {
-        mem_destroy(&arena_);
-    }
+    ~TokenArena() = default;
 
     TokenWME* create_token(TokenWME const* parent, Fact const* fact) {
         TokenWME* token = allocate_raw();
@@ -40,12 +38,12 @@ public:
     TokenWME const* get_root() const { return root_; }
 
     void reset() {
-        mem_reset(&arena_);
+        tokens_.clear();
         init_root();
     }
 
     size_t memory_usage() const {
-        return arena_.total_used.load(std::memory_order_relaxed);
+        return tokens_.size() * sizeof(TokenWME);
     }
 
 private:
@@ -58,12 +56,14 @@ private:
     }
 
     TokenWME* allocate_raw() {
-        void* p = mem_alloc(&arena_, sizeof(TokenWME));
-        if (!p) throw std::bad_alloc();
-        return new (p) TokenWME();
+        auto token = std::make_unique<TokenWME>();
+        TokenWME* raw = token.get();
+        tokens_.push_back(std::move(token));
+        return raw;
     }
 
-    mem_pool_t arena_;
+    size_t reserved_size_ = 0;
+    std::vector<std::unique_ptr<TokenWME>> tokens_;
     TokenWME* root_;
 };
 

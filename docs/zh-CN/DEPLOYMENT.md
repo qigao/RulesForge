@@ -1,95 +1,94 @@
 # RulesForge 部署指南
 
-此文只談現碼所真有者，不談紙上完美架構。
+此文只谈当前代码实际支持的能力，不谈纸面架构。
 
-## 1. 編譯一次，重用多次
+## 1. 编译一次，重用多次
 
-建議之生產形態如下：
+建议的生产形态如下：
 
-- 將規則編譯為一個 `KnowledgeBase`
-- 在初始化階段註冊 native function 與 codec
-- 由此 knowledge base 建立多個短生命或可池化之 `StatefulSession`
+- 将规则编译为一个 `KnowledgeBase`
+- 初始化阶段按需注册 host callback
+- 由此 knowledge base 建立多个短生命周期或可池化的 `StatefulSession`
 
-若每個請求都重編同一套規則，那不是架構，是浪費 CPU。
+不要为每个请求重复编译同一套规则。
 
-## 2. 執行緒安全
+## 2. 线程安全
 
-當前契約：
+当前契约：
 
-- `KnowledgeBase`：僅於初始化完成後可安全共享
+- `KnowledgeBase`：仅在初始化完成后可安全共享
 - `StatefulSession`：非 thread-safe
 
-實務規則：
+实践规则：
 
-- 每個 worker thread、請求、或消息流，各用一個 session
+- 每个 worker thread、请求或消息流各用一个 session
 
-## 3. 資料載入怎麼選
+## 3. 数据加载怎么选
 
-每個整合邊界只選一條平實路徑：
+每个集成边界只选一条简单路径：
 
-- JSON：一般服務整合
-- CSV：批量或離線載入
-- binary：僅在汝已掌控 codec 且確實在乎吞吐時再用
+- JSON：一般服务集成
+- CSV：批量或离线加载
+- binary：只在已经控制 schema/payload 且确实需要吞吐时使用
 
-若汝的整合根本不需要三種都上，就別把三種都寫進產品文檔。
+不需要同时支持三种格式时，不要把三种都写进产品集成方案。
 
-## 4. 驗證與失敗模式
+## 4. 验证与失败模式
 
-RulesForge 經由 C API 提供 session 驗證模式與逐次呼叫狀態碼。
+RulesForge 通过 C API 提供 session 验证模式与逐次调用状态码。
 
-生產建議：
+生产建议：
 
-- 盡早拒收不合法事實
+- 尽早拒收不合法事实
 - 在 CI 保留代表性樣本 payload
-- 規則編譯錯誤不要用 fallback 蓋掉
+- 规则编译错误不要用 fallback 盖掉
 
-正確之失敗模式，通常是「載入或測試時立即失敗」，而非「偷偷補預設值」。
+正确的失败模式通常是“加载或测试时立即失败”，而不是“偷偷补默认值”。
 
-## 5. 原生擴展
+## 5. Host Callback 边界
 
-有兩種擴展面：
+RulesForge 将扩展代码限制在显式 host callback 边界：
 
-- 載入到 knowledge base 的 native RHS 函數
-- 依 [`include/rule_forge_plugin.h`](/C:/projects/cpp/rulesforge/include/rule_forge_plugin.h) 實作之 source/sink 外掛
+- 直接注册到 knowledge base 的 RHS host callback
 
-運維原則：
+运维原则：
 
-- callback 要可預測
-- 規則觸發之程式內，盡量限制外部 I/O
-- plugin binary 應與依賴它的 rule pack 一同版控
+- callback 要可预测
+- 规则触发的代码里尽量限制外部 I/O
+- callback 实现应与依赖它的 rule pack 一同版本化
 
-## 6. 可觀測性
+## 6. 可观测性
 
 C++ runtime 已提供：
 
-- 規則執行追蹤
-- 規則效能摘要
+- 规则执行追踪
+- 规则性能摘要
 - session 指標匯出器
 
-它們是診斷與剖析工具，不是長期把高噪音 tracing 開在生產流量上的藉口。
+它们是诊断与剖析工具，不应长期在生产流量中开启高噪音 tracing。
 
 ## 7. 打包
 
-此倉目前對外安裝面主要有：
+此仓库目前对外安装面主要有：
 
-- `include/` 下之 C 頭檔
-- `capi/` 產生之 `rule_forge` 共享庫
-- `lib/cmake/RulesForge` 下之 CMake package 檔
+- `include/` 下的 C 头文件
+- `capi/` 产生的 `rule_forge` 共享库
+- `lib/cmake/RulesForge` 下的 CMake package 文件
 
-若汝將 RulesForge 當產品依賴發行，便應以此為契約，勿把私有頭檔混進下游整合文檔。
+若将 RulesForge 作为产品依赖发布，应以此为契约，不要把私有头文件写进下游集成文档。
 
-## 8. 建議發版檢查表
+## 8. 建议发版检查表
 
-- 確認 `TurboNet`、`TurboScript`、`TurboNet`、`vcpkg` 之構建輸入
-- 在 CI 編譯規則
-- 執行 `ctest --output-on-failure`
-- 至少驗證一個 JSON 示例與一個 CSV 示例
-- 若規則依賴 plugin，驗證 plugin binary 可載入
-- 將 rule pack、plugin pack、應用版本一併記錄
+- 确认 `TurboNet`、`TurboScript`、`vcpkg` 的构建输入
+- 在 CI 编译规则
+- 执行 `ctest --output-on-failure`
+- 至少验证一个 JSON 示例与一个 CSV 示例
+- 若规则依赖 host callback，验证 callback 注册
+- 将 rule pack、callback 实现、应用版本一并记录
 
-## 9. 相關文檔
+## 9. 相关文档
 
 - 上手：[`QUICKSTART.md`](/C:/projects/cpp/rulesforge/docs/zh-CN/QUICKSTART.md)
-- 產品指南：[`USER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/zh-CN/USER_GUIDE.md)
-- 精確 DSL：[`../dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md)
-- 資料載入實務：[`../PRODUCTION_DATABIND_BEST_PRACTICES.md`](/C:/projects/cpp/rulesforge/docs/PRODUCTION_DATABIND_BEST_PRACTICES.md)
+- 产品指南：[`USER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/zh-CN/USER_GUIDE.md)
+- 精确 DSL：[`../dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md)
+- data binding 归属：[`../TURBOSCRIPT_DATABIND_PARSER_COMPARISON.md`](/C:/projects/cpp/rulesforge/docs/TURBOSCRIPT_DATABIND_PARSER_COMPARISON.md)

@@ -43,6 +43,10 @@ static std::shared_ptr<KnowledgeBase> create_test_kb() {
         query "findAdults"(NameParam $param)
             $a: Adult(name == $param.name)
         end
+
+        query "allAdults"
+            $a: Adult()
+        end
     )";
 
     ParsingResult result;
@@ -127,6 +131,12 @@ suite("Engine Session") {
             session->fire_all_rules();
             check(session->get_fact_count() == 2);
 
+            QueryResult all_adults = session->execute_query("allAdults");
+            check(all_adults.size() == 1);
+            auto inserted_adult_name = all_adults.single().getFieldAs<std::string>("$a", "name");
+            check(inserted_adult_name.has_value());
+            check(inserted_adult_name.value() == "John");
+
             auto query_arg_fact = std::make_shared<Fact>();
             query_arg_fact->type = "com.example.testing.NameParam";
             query_arg_fact->fields["name"] = "John";
@@ -141,6 +151,25 @@ suite("Engine Session") {
 
             check(adult_name.has_value());
             check(adult_name.value() == "John");
+        }
+
+        it("parameterized packaged query finds manually inserted facts") {
+            SessionTestFixture fixture;
+            auto kb = create_test_kb();
+            std::unique_ptr<StatefulSession> session = kb->create_session();
+            check(session != nullptr);
+
+            auto adult = std::make_shared<Fact>();
+            adult->type = "com.example.testing.Adult";
+            adult->fields["name"] = "John";
+            session->add_fact(adult);
+
+            auto query_arg_fact = std::make_shared<Fact>();
+            query_arg_fact->type = "com.example.testing.NameParam";
+            query_arg_fact->fields["name"] = "John";
+
+            QueryResult query_results = session->execute_query("findAdults", {query_arg_fact.get()});
+            check(query_results.size() == 1);
         }
     }
 

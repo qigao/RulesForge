@@ -1,2 +1,2 @@
 add_subdirectory(lemon)
-add_subdirectory(rulesforge_schema_compiler)
+add_subdirectory(mir)

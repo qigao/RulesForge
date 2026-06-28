@@ -27,4 +27,14 @@ foreach(test_source ${PARSER_TEST_SOURCES})
         CXX_STANDARD 20
         CXX_STANDARD_REQUIRED ON
     )
+    if(WIN32)
+        add_custom_command(
+            TARGET ${executable_name}
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_RUNTIME_DLLS:${executable_name}>
+                    $<TARGET_FILE_DIR:${executable_name}>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
 endforeach()

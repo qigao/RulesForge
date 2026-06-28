@@ -84,12 +84,33 @@ private:
   std::weak_ptr<QueryTerminalNode> terminal_node;
 };
 
+class QueryCallNode : public ReteNode
+{
+public:
+  static constexpr NodeKind Kind = NodeKind::QueryCall;
+  QueryCallNode() : ReteNode(NodeKind::QueryCall) {}
+  QueryCallNode(ParsedQueryCall call,
+                std::map<std::string, int> bindings,
+                std::vector<std::string> output_bindings);
+
+  void left_activate(StatefulSession& session, Token const& token) override;
+  void right_activate(StatefulSession&, Fact*, PropagationType) override {}
+  void refresh(StatefulSession& session);
+  void print_node(std::ostream& os) const override;
+
+private:
+  std::vector<TokenWME const*> project_query_results(StatefulSession& session, Token const& token) const;
+
+  ParsedQueryCall call_;
+  std::map<std::string, int> binding_to_token_idx_;
+  std::vector<std::string> output_bindings_;
+};
+
 namespace rulesforge::rete_prof {
 struct Stats {
   uint64_t alpha_checks = 0;
   uint64_t join_checks = 0;
   uint64_t compare_calls = 0;
-  uint64_t compiled_expr_evals = 0;
   uint64_t field_lookups = 0;
 };
 

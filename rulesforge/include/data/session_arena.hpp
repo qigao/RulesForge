@@ -1,14 +1,14 @@
 #ifndef SESSION_ARENA_HPP
 #define SESSION_ARENA_HPP
 
-#include <turbo_buffer.h>
-
+#include <algorithm>
 #include <cstddef>
 #include <functional>
-#include <new>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 /**
  * @brief Exception thrown when session memory limit is exceeded.
@@ -70,12 +70,9 @@ public:
         warning_threshold_percent_(DEFAULT_WARNING_THRESHOLD_PERCENT),
         warning_fired_(false),
         peak_used_(0) {
-    mem_init(&arena_, max_size);
   }
 
-  ~SessionArena() {
-    mem_destroy(&arena_);
-  }
+  ~SessionArena() { reset_temporaries(); }
 
   // Non-copyable, non-movable
   SessionArena(SessionArena const&) = delete;
@@ -92,19 +89,23 @@ public:
   T* allocate(Args&&... args) {
     check_memory_pressure();
 
-    void* ptr = mem_alloc(&arena_, sizeof(T));
-    if (!ptr) {
+    if (memory_used_ + sizeof(T) > max_size_) {
       throw SessionMemoryExhaustedException(sizeof(T), memory_available(), max_size_);
     }
+    auto owned = std::make_unique<T>(std::forward<Args>(args)...);
+    T* ptr = owned.get();
+    allocations_.push_back({sizeof(T), make_erased_unique(std::move(owned))});
+    memory_used_ += sizeof(T);
     update_peak();
-    return new (ptr) T(std::forward<Args>(args)...);
+    return ptr;
   }
 
   /**
    * @brief Reset all temporary allocations (call after fire_all_rules)
    */
   void reset_temporaries() {
-    mem_reset(&arena_);
+    allocations_.clear();
+    memory_used_ = 0;
     warning_fired_ = false;
   }
 
@@ -125,7 +126,7 @@ public:
 
   // Statistics
   size_t memory_used() const {
-    return arena_.total_used.load(std::memory_order_relaxed);
+    return memory_used_;
   }
   size_t memory_available() const {
     size_t used = memory_used();
@@ -165,12 +166,24 @@ private:
     }
   }
 
-  mem_pool_t arena_;
+  struct AllocationEntry {
+    size_t size = 0;
+    std::unique_ptr<void, void(*)(void*)> ptr{nullptr, +[](void*) {}};
+  };
+
+  template <typename T>
+  static std::unique_ptr<void, void(*)(void*)> make_erased_unique(std::unique_ptr<T> ptr) {
+    T* raw = ptr.release();
+    return std::unique_ptr<void, void(*)(void*)>(raw, +[](void* p) { delete static_cast<T*>(p); });
+  }
+
   size_t max_size_;
   int warning_threshold_percent_;
   bool warning_fired_;
   size_t peak_used_;
   MemoryPressureCallback pressure_callback_;
+  size_t memory_used_ = 0;
+  std::vector<AllocationEntry> allocations_;
 };
 
 /**

@@ -1,6 +1,5 @@
 #include "core/logging_control.hpp"
 
-#include "expression_evaluator.hpp"
 #include "core/exceptions.hpp"
 #include "engine/query_engine.hpp"
 #include "engine/rhs_executor.hpp"
@@ -12,11 +11,8 @@
 
 #include <algorithm>
 #include <cctype>
-#include <fstream>
 #include <sstream>
-
-#include <jsoncons/json.hpp>
-#include <jsoncons_ext/jmespath/jmespath.hpp>
+#include <stdexcept>
 
 using namespace rulesforge;
 
@@ -44,63 +40,6 @@ namespace {
         return NilValue{};
     }
 
-    std::string read_text_file_or_throw(std::string const& path) {
-        std::ifstream file(path, std::ios::binary);
-        if (!file) {
-            throw std::runtime_error("Failed to open file: " + path);
-        }
-        return std::string((std::istreambuf_iterator<char>(file)),
-                           std::istreambuf_iterator<char>());
-    }
-
-    std::vector<std::string> extract_json_documents_or_throw(std::string const& json_content,
-                                                             std::string const& jmespath_expr) {
-        if (jmespath_expr.empty()) {
-            return {json_content};
-        }
-
-        auto document = jsoncons::json::parse(json_content);
-        auto selected = jsoncons::jmespath::search(document, jmespath_expr);
-
-        std::vector<std::string> extracted;
-        if (selected.is_null()) {
-            return extracted;
-        }
-
-        if (selected.is_array()) {
-            extracted.reserve(selected.size());
-            for (auto const& item : selected.array_range()) {
-                extracted.push_back(item.to_string());
-            }
-            return extracted;
-        }
-
-        extracted.push_back(selected.to_string());
-        return extracted;
-    }
-
-    std::string resolve_codec_type_name_or_throw(StatefulSession const& session,
-                                                 char const* source_kind) {
-        auto const& declarations = session.get_knowledge_base()->get_parser_state().parsed_declarations;
-        if (declarations.empty()) {
-            throw std::runtime_error(std::string("Cannot infer type for ") + source_kind
-                                     + " data source: no declarations loaded");
-        }
-
-        for (auto const& decl : declarations) {
-            if (decl.type_name == "Row") {
-                return decl.type_name;
-            }
-        }
-
-        if (declarations.size() == 1) {
-            return declarations.front().type_name;
-        }
-
-        throw std::runtime_error(std::string("Cannot infer type for ") + source_kind
-                                 + " data source: multiple declarations loaded");
-    }
-
     // Zero-allocation version: walk token chain directly
     size_t compute_noloop_key_from_token(ParsedRule const* rule, TokenWME const* wme) {
         size_t hash = reinterpret_cast<uintptr_t>(rule);
@@ -112,6 +51,17 @@ namespace {
             curr = curr->parent;
         }
         return hash;
+    }
+
+    bool wme_references_fact(TokenWME const* wme, int64_t fact_id) {
+        auto curr = wme;
+        while (curr && curr->depth > 0) {
+            if (curr->fact && curr->fact->id == fact_id) {
+                return true;
+            }
+            curr = curr->parent;
+        }
+        return false;
     }
 
 }   // namespace
@@ -162,6 +112,14 @@ void StatefulSession::prime_network_state() {
     // Optimization: Use pre-calculated beta root nodes instead of scanning all nodes
     for (auto* node : net.beta_root_nodes) {
         node->left_activate(*this, dummy_token);
+    }
+}
+
+void StatefulSession::refresh_query_call_nodes() {
+    for (auto* node : kb_->network().query_call_nodes) {
+        if (node != nullptr) {
+            node->refresh(*this);
+        }
     }
 }
 
@@ -219,6 +177,7 @@ void StatefulSession::add_fact(Fact* fact) {
         it->second->right_activate(*this, fact, PropagationType::ASSERT);
     } else {
     }
+    refresh_query_call_nodes();
 }
 
 void StatefulSession::add_fact(std::shared_ptr<Fact> const& fact) {
@@ -278,6 +237,7 @@ void StatefulSession::add_facts(std::vector<Fact*> const& facts) {
         } else {
         }
     }
+    refresh_query_call_nodes();
 }
 
 void StatefulSession::add_facts(std::vector<std::shared_ptr<Fact>> const& facts) {
@@ -324,6 +284,7 @@ void StatefulSession::insert_into(std::string const& stream_name, Fact* fact) {
         }
     } else {
     }
+    refresh_query_call_nodes();
 }
 
 void StatefulSession::retract_facts(std::vector<Fact*> const& facts) {
@@ -353,6 +314,7 @@ void StatefulSession::retract_facts(std::vector<Fact*> const& facts) {
             it->second->right_activate_batch(*this, type_facts, PropagationType::RETRACT);
         }
     }
+    refresh_query_call_nodes();
 
     for (auto* fact : facts) {
         if (fact) release_retained_fact(fact->id);
@@ -449,7 +411,7 @@ int StatefulSession::fire_all_rules(int max_rules) {
                     // Transient network facts (e.g., from JMESPath/accumulate) are not
                     // inserted into working memory and typically keep id==0.
                     if (f->id <= 0) continue;
-                    if (!working_memory_.get(f->id)) {
+                    if (!working_memory_.contains_fact_pointer(f)) {
                         activation_valid = false;
                         break;
                     }
@@ -501,6 +463,34 @@ void StatefulSession::fire_activation(Activation& activation) {
         agenda_.cancel_activation_group(*activation.rule->activation_group, activation.hash_value);
     }
 
+    auto execute_rule_rhs = [&]() {
+        if (activation.rule->compiled_actions.empty()) {
+            return;
+        }
+
+        current_activation_ = &activation;
+        try {
+            auto rhs_t0 = std::chrono::steady_clock::now();
+            auto rule_index_it = kb_->rule_name_index_.find(activation.rule->name);
+            if (rule_index_it == kb_->rule_name_index_.end() || !kb_->rhs_backend_plan_) {
+                throw std::runtime_error("RHS backend plan unavailable for rule '" + activation.rule->name + "'");
+            }
+            auto const* rhs_program =
+                kb_->rhs_backend_plan_->command_program_for_rule(rule_index_it->second);
+            if (!rhs_program) {
+                throw std::runtime_error("RHS command program unavailable for rule '" + activation.rule->name + "'");
+            }
+            rhs_executor_->execute(*rhs_program, activation.token, *activation.bindings, activation.rule->name);
+            auto rhs_t1 = std::chrono::steady_clock::now();
+            rhs_us += static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(rhs_t1 - rhs_t0).count());
+        } catch (...) {
+            current_activation_ = nullptr;
+            throw;
+        }
+        current_activation_ = nullptr;
+    };
+
     try {
         bool const tracing_enabled = tracer_.is_enabled();
         if (tracing_enabled) {
@@ -512,37 +502,9 @@ void StatefulSession::fire_activation(Activation& activation) {
                 }
             }
             RuleExecutionTimer timer(tracer_, activation.rule->name, involved_facts);
-            if (!activation.rule->compiled_actions.empty()) {
-                current_activation_ = &activation;
-                try {
-                    auto rhs_t0 = std::chrono::steady_clock::now();
-                    rhs_executor_->execute(activation.rule->compiled_actions, activation.token,
-                                           *activation.bindings, activation.rule->name);
-                    auto rhs_t1 = std::chrono::steady_clock::now();
-                    rhs_us += static_cast<uint64_t>(
-                        std::chrono::duration_cast<std::chrono::microseconds>(rhs_t1 - rhs_t0).count());
-                } catch (...) {
-                    current_activation_ = nullptr;
-                    throw;
-                }
-                current_activation_ = nullptr;
-            }
+            execute_rule_rhs();
         } else {
-            if (!activation.rule->compiled_actions.empty()) {
-                current_activation_ = &activation;
-                try {
-                    auto rhs_t0 = std::chrono::steady_clock::now();
-                    rhs_executor_->execute(activation.rule->compiled_actions, activation.token,
-                                           *activation.bindings, activation.rule->name);
-                    auto rhs_t1 = std::chrono::steady_clock::now();
-                    rhs_us += static_cast<uint64_t>(
-                        std::chrono::duration_cast<std::chrono::microseconds>(rhs_t1 - rhs_t0).count());
-                } catch (...) {
-                    current_activation_ = nullptr;
-                    throw;
-                }
-                current_activation_ = nullptr;
-            }
+            execute_rule_rhs();
         }
     } catch (ReteExecutionException const& e) {
         loge("--- RUNTIME ERROR in rule '{}': {}", e.get_rule_name(), e.what());
@@ -593,23 +555,23 @@ void StatefulSession::retract_fact(Fact* fact) {
         if (phreak_experimental_) mark_phreak_dirty_for_type(fact_to_retract->type);
         alpha_it->second->right_activate(*this, fact_to_retract, PropagationType::RETRACT);
     }
+    refresh_query_call_nodes();
 
     // Clean up any remaining WMEs that reference the retracted fact.
     // Note: RETE propagation above already invalidates WMEs it encounters,
     // so this loop only catches stragglers (e.g. orphaned cache entries).
     for (auto it = wme_cache_.begin(); it != wme_cache_.end(); ) {
-        if (!it->second) { ++it; continue; }
         bool references_fact = false;
-        auto curr = it->second;
-        while (curr && curr->depth > 0) {
-            if (curr->fact && curr->fact->id == fact_to_retract->id) {
+        for (auto const* wme : it->second) {
+            if (wme_references_fact(wme, fact_to_retract->id)) {
                 references_fact = true;
                 break;
             }
-            curr = curr->parent;
         }
         if (references_fact) {
-            logical_retract(it->second);
+            for (auto const* wme : it->second) {
+                logical_retract(wme);
+            }
             it = wme_cache_.erase(it);
         } else {
             ++it;
@@ -628,6 +590,7 @@ void StatefulSession::update_fact(Fact* fact, std::function<void(Fact&)> modifie
         if (phreak_experimental_) mark_phreak_dirty_for_type(fact->type);
         alpha_it->second->right_activate(*this, fact, PropagationType::MODIFY);
     }
+    refresh_query_call_nodes();
 }
 
 void StatefulSession::track_rhs_update_snapshot(Fact const& fact) {
@@ -653,6 +616,7 @@ void StatefulSession::propagate_modify(Fact* fact,
         alpha_it->second->right_activate(*this, fact, PropagationType::MODIFY);
     }
     current_modified_fields_ = nullptr;
+    refresh_query_call_nodes();
     auto t1 = std::chrono::steady_clock::now();
     runtime_counters_.propagate_modify_time_us +=
         std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
@@ -738,65 +702,12 @@ Fact* StatefulSession::create_fact(std::string const& type) {
     return fact;
 }
 
-bool StatefulSession::execute_eval(std::string const& code, Token const& token,
-                                   std::map<std::string, int> const& bindings) {
-    if (code.empty()) return true;
-
-    // Compile and evaluate the expression through ExpressionEvaluator
-    std::string compile_error;
-    auto expr = rulesforge::ExpressionEvaluator::compile(code, &compile_error);
-    if (!expr) {
-        loge("Failed to compile eval expression '{}': {}", code, compile_error);
-        return false;
+std::optional<FieldType> StatefulSession::get_declared_field_type(std::string const& fact_type,
+                                                                  std::string_view field_name) const {
+    if (!schema_validator_) {
+        return std::nullopt;
     }
-
-    return execute_eval(*expr, token, bindings);
-}
-
-bool StatefulSession::execute_eval(rulesforge::ExpressionEvaluator const& expr,
-                                   Token const& token,
-                                   std::map<std::string, int> const& bindings) {
-
-    // Create variable resolver
-    auto resolver = [this, &token, &bindings](std::string const& var_name) -> ConstraintValue {
-        // Handle $var.field format
-        size_t dot_pos = var_name.find('.');
-        std::string base_var = (dot_pos != std::string::npos) ? var_name.substr(0, dot_pos) : var_name;
-        std::string field_name = (dot_pos != std::string::npos) ? var_name.substr(dot_pos + 1) : "this";
-
-        auto it = bindings.find(base_var);
-        if (it == bindings.end()) {
-            logw("execute_eval: Variable '{}' not found in bindings", base_var);
-            return 0.0;
-        }
-
-        auto fact = token.get_fact_at_depth(it->second);
-        if (!fact) {
-            logw("execute_eval: No fact at depth {} for '{}'", it->second, base_var);
-            return 0.0;
-        }
-
-        if (field_name == "this" || field_name == "id") {
-            return static_cast<double>(fact->id);
-        }
-
-        auto field_val = fact->get_field(field_name);
-        if (!field_val) {
-            logw("execute_eval: Field '{}' not found on '{}'", field_name, base_var);
-            return 0.0;
-        }
-
-        return *field_val;
-    };
-
-    ConstraintValue cv_result = expr.evaluate(resolver);
-    double result = 0.0;
-    if (std::holds_alternative<double>(cv_result)) {
-        result = std::get<double>(cv_result);
-    } else if (std::holds_alternative<int64_t>(cv_result)) {
-        result = static_cast<double>(std::get<int64_t>(cv_result));
-    }
-    return result != 0.0;
+    return schema_validator_->get_field_type(fact_type, field_name);
 }
 
 void StatefulSession::addListener(std::shared_ptr<IEngineListener> listener) {
@@ -920,18 +831,17 @@ void StatefulSession::end_rhs_transaction(bool commit) {
 
             // Clean up WMEs that reference this fact
             for (auto it = wme_cache_.begin(); it != wme_cache_.end(); ) {
-                if (!it->second) { ++it; continue; }
                 bool references_fact = false;
-                auto curr = it->second;
-                while (curr && curr->depth > 0) {
-                    if (curr->fact && curr->fact->id == fact->id) {
+                for (auto const* wme : it->second) {
+                    if (wme_references_fact(wme, fact->id)) {
                         references_fact = true;
                         break;
                     }
-                    curr = curr->parent;
                 }
                 if (references_fact) {
-                    logical_retract(it->second);
+                    for (auto const* wme : it->second) {
+                        logical_retract(wme);
+                    }
                     it = wme_cache_.erase(it);
                 } else {
                     ++it;
@@ -1183,7 +1093,7 @@ void StatefulSession::flush_pending_nodes() {
                 }
             }
         } else {
-            // Safety fallback: no dirty paths were marked, use legacy full scan.
+            // Safety path: no dirty paths were marked, use full scan.
             for (auto const& node : net.all_nodes) {
                 if (node->flush_pending(*this)) {
                     flushed_this_round = true;
@@ -1253,123 +1163,12 @@ void StatefulSession::release_retained_fact(int64_t fact_id) {
     retained_shared_facts_.erase(fact_id);
 }
 
-Fact* StatefulSession::add_fact_from_binary(std::string const& type_name, uint8_t const* buf, size_t len) {
-    ensure_consistent_for_mutation("adding fact from binary");
-
-    auto* codec_registry = kb_->get_codec_registry();
-    if (!codec_registry) {
-        throw std::runtime_error("CodecRegistry not initialized");
-    }
-
-    std::string const canonical_type = canonicalize_fact_type_name(type_name);
-    Fact* fact = codec_registry->parse_binary(fact_arena_, canonical_type, buf, len);
-    if (!fact) {
-        throw std::runtime_error("Failed to parse binary: " + codec_registry->get_last_error());
-    }
-
-    add_fact(fact);
-    return fact;
-}
-
-Fact* StatefulSession::add_fact_from_json(std::string const& type_name, std::string const& json_str) {
-    ensure_consistent_for_mutation("adding fact from JSON");
-
-    auto* codec_registry = kb_->get_codec_registry();
-    if (!codec_registry) {
-        throw std::runtime_error("CodecRegistry not initialized");
-    }
-
-    std::string const canonical_type = canonicalize_fact_type_name(type_name);
-    Fact* fact = codec_registry->parse_json(fact_arena_, canonical_type, json_str);
-    if (!fact) {
-        throw std::runtime_error("Failed to parse JSON: " + codec_registry->get_last_error());
-    }
-
-    add_fact(fact);
-    return fact;
-}
-
-std::vector<Fact*> StatefulSession::add_facts_from_csv(std::string const& type_name, std::string const& csv_str) {
-    ensure_consistent_for_mutation("adding facts from CSV");
-
-    auto* codec_registry = kb_->get_codec_registry();
-    if (!codec_registry) {
-        throw std::runtime_error("CodecRegistry not initialized");
-    }
-
-    std::string const canonical_type = canonicalize_fact_type_name(type_name);
-    std::vector<Fact*> facts = codec_registry->parse_csv(fact_arena_, canonical_type, csv_str);
-    if (facts.empty()) {
-        throw std::runtime_error("Failed to parse CSV: " + codec_registry->get_last_error());
-    }
-
-    add_facts(facts);
-    return facts;
-}
-
 void StatefulSession::add_data(rulesforge::DataSource const& source) {
     ensure_consistent_for_mutation("adding data");
-
-    auto* codec_registry = kb_->get_codec_registry();
-    if (!codec_registry) {
-        throw std::runtime_error("CodecRegistry not initialized");
-    }
 
     switch (source.type()) {
         case rulesforge::DataSourceType::FACT:
             add_fact(source.get_fact());
             break;
-
-        case rulesforge::DataSourceType::JSON: {
-            std::string type_name = resolve_codec_type_name_or_throw(*this, "JSON");
-            auto payloads = extract_json_documents_or_throw(source.get_content(), source.get_path_or_filter());
-            if (payloads.empty()) {
-                break;
-            }
-
-            std::vector<Fact*> facts;
-            facts.reserve(payloads.size());
-            for (auto const& payload : payloads) {
-                Fact* fact = codec_registry->parse_json(fact_arena_, type_name, payload);
-                if (!fact) {
-                    throw std::runtime_error("Failed to parse JSON: " + codec_registry->get_last_error());
-                }
-                facts.push_back(fact);
-            }
-
-            if (facts.size() == 1) {
-                add_fact(facts.front());
-            } else {
-                add_facts(facts);
-            }
-            break;
-        }
-
-        case rulesforge::DataSourceType::CSV: {
-            std::string type_name = resolve_codec_type_name_or_throw(*this, "CSV");
-            std::string csv_content = read_text_file_or_throw(source.get_content());
-            std::vector<Fact*> facts = codec_registry->parse_csv(fact_arena_, type_name, csv_content);
-            if (facts.empty()) {
-                throw std::runtime_error("Failed to parse CSV: " + codec_registry->get_last_error());
-            }
-            add_facts(facts);
-            break;
-        }
-
-        case rulesforge::DataSourceType::DSV: {
-            // TODO: Implement DSV parsing
-            throw std::runtime_error("DSV data source not yet implemented");
-        }
-
-        case rulesforge::DataSourceType::BINARY: {
-            std::string type_name = resolve_codec_type_name_or_throw(*this, "binary");
-            auto const& binary = source.get_binary();
-            Fact* fact = codec_registry->parse_binary(fact_arena_, type_name, binary.data(), binary.size());
-            if (!fact) {
-                throw std::runtime_error("Failed to parse binary: " + codec_registry->get_last_error());
-            }
-            add_fact(fact);
-            break;
-        }
     }
 }

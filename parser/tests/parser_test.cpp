@@ -66,6 +66,45 @@ suite("Parser") {
             check(pattern.fact_type == "Person");
             check(pattern.constraint_root != nullptr);
         }
+
+        it("preserves greater-than constraints inside a single pattern") {
+            std::string drl = R"(
+                declare Order
+                    quantity : int
+                    finalPrice : double
+                end
+                rule "Round Down Payment"
+                when
+                    $order : Order(quantity > 2, finalPrice > 0.01)
+                then
+                end
+            )";
+
+            auto state = parse_success(drl);
+            check(state.parsed_rules.size() == 1);
+
+            auto const& pattern = state.parsed_rules[0].condition_groups[0][0];
+            check(pattern.constraint_root != nullptr);
+            check(pattern.constraint_root->type == NodeType::AND);
+            check(pattern.constraint_root->children.size() == 2);
+
+            auto const& quantity_node = pattern.constraint_root->children[0];
+            auto const& final_price_node = pattern.constraint_root->children[1];
+            check(quantity_node->type == NodeType::LEAF);
+            check(final_price_node->type == NodeType::LEAF);
+
+            check(quantity_node->constraint.left_field == "quantity");
+            check(quantity_node->constraint.op == CompareOp::GT);
+            check(quantity_node->constraint.right_literal.has_value());
+            check(std::holds_alternative<int64_t>(*quantity_node->constraint.right_literal));
+            check(std::get<int64_t>(*quantity_node->constraint.right_literal) == 2);
+
+            check(final_price_node->constraint.left_field == "finalPrice");
+            check(final_price_node->constraint.op == CompareOp::GT);
+            check(final_price_node->constraint.right_literal.has_value());
+            check(std::holds_alternative<double>(*final_price_node->constraint.right_literal));
+            check(std::get<double>(*final_price_node->constraint.right_literal) == 0.01);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -247,6 +286,48 @@ suite("Parser") {
             check(state.parsed_globals[0].name == "results");
             check(state.parsed_imports.size() == 1);
             check(state.parsed_imports[0] == "com.example.model.Person");
+        }
+
+        it("parses TurboScript schema imports") {
+            std::string drl = R"(
+                import "market.schema";
+                rule "schema import only"
+                when
+                then
+                end
+            )";
+
+            auto state = parse_success(drl, "rules.rfl");
+            check(state.schema_imports.size() == 1);
+            check(state.schema_imports[0].path == "market.schema");
+            check(state.schema_imports[0].source_name == "rules.rfl");
+        }
+
+        it("rejects legacy import schema syntax") {
+            std::string drl = R"(
+                import schema "market.schema";
+                rule "schema import only"
+                when
+                then
+                end
+            )";
+
+            auto errors = parse_expect_errors(drl, "rules.rfl");
+            check(!errors.empty());
+        }
+
+        it("rejects string imports that are not schema files") {
+            std::string drl = R"(
+                import "market.json";
+                rule "bad string import"
+                when
+                then
+                end
+            )";
+
+            auto errors = parse_expect_errors(drl, "rules.rfl");
+            check(!errors.empty());
+            check_str_contains(errors.front().message.c_str(), ".schema");
         }
 
         it("parses generic container field types in declarations") {

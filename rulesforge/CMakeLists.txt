@@ -6,21 +6,20 @@ file(GLOB_RECURSE SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h*
 )
 
 add_library(${TARGET_NAME} STATIC ${SOURCES})
-# Find dependencies
-find_package(xxHash CONFIG REQUIRED)
-find_package(jsoncons CONFIG REQUIRED)
+
 
 # Link dependencies
 
 target_link_libraries(
     ${TARGET_NAME}
-    PUBLIC xxHash::xxhash TurboNet::Utils Threads::Threads
-    PRIVATE jsoncons::jsoncons data_bind
+    PUBLIC  TurboNet::Utils Threads::Threads
+    PRIVATE mir_static
 )
 target_include_directories(
     ${TARGET_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                           $<INSTALL_INTERFACE:include/rulesforge>
                    PRIVATE ${CMAKE_SOURCE_DIR}/parser/include
+                           ${CMAKE_SOURCE_DIR}/tools/mir
 )
 if(MSVC)
     target_compile_options(${TARGET_NAME} PUBLIC /bigobj)
@@ -39,6 +38,14 @@ set_target_properties(${TARGET_NAME} PROPERTIES LINKER_LANGUAGE CXX)
 if(WIN32)
     target_compile_definitions(
         ${TARGET_NAME} PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN
+    )
+    add_custom_command(
+        TARGET ${TARGET_NAME}
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:TurboScript::TurboScript>
+                $<TARGET_FILE_DIR:${TARGET_NAME}>
+        COMMAND_EXPAND_LISTS
     )
 endif()
 

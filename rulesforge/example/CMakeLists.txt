@@ -4,6 +4,9 @@ foreach(example_source ${SOURCES})
     set(EXAMPLE_NAME ${source_name})
     add_executable(${EXAMPLE_NAME} ${example_source})
     target_link_libraries(${EXAMPLE_NAME} PRIVATE rfl_parser ${TARGET_NAME})
+    if(source_name STREQUAL "fraud_stream_runner")
+        target_link_libraries(${EXAMPLE_NAME} PRIVATE TurboNet::Parser)
+    endif()
     target_include_directories(${EXAMPLE_NAME} PRIVATE ../include)
 
     set_target_properties(

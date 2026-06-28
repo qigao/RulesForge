@@ -24,23 +24,33 @@ public:
 
 private:
     std::shared_ptr<ReteNode> create_node_for_pattern(ParsedPattern& pattern, int& pattern_depth);
-    std::shared_ptr<ReteNode> create_standard_node(int pattern_depth, std::vector<std::shared_ptr<ReteNode>> const&,
+    std::shared_ptr<ReteNode> create_standard_node(int pattern_depth,
+                                                   std::string const& fact_type,
+                                                   std::vector<std::shared_ptr<ReteNode>> const&,
                                                    std::vector<ParsedConstraint> const&);
     std::shared_ptr<ReteNode> create_eval_node(ParsedPattern&);
+    std::shared_ptr<ReteNode> create_query_call_node(ParsedPattern&, ParsedQueryCall&);
     std::shared_ptr<ReteNode> create_accumulate_node(ParsedPattern&, ParsedAccumulate&,
                                                      std::vector<std::shared_ptr<ReteNode>> const&,
                                                      std::vector<ParsedConstraint> const&);
     std::shared_ptr<ReteNode> create_unnest_node(ParsedPattern&, ParsedUnnest&);
-    std::shared_ptr<ReteNode> create_negative_node(ParsedPattern&, std::vector<std::shared_ptr<ReteNode>> const&,
+    std::shared_ptr<ReteNode> create_negative_node(ParsedPattern&,
+                                                   std::string const& fact_type,
+                                                   std::vector<std::shared_ptr<ReteNode>> const&,
                                                    std::vector<ParsedConstraint> const&);
-    std::shared_ptr<ReteNode> create_existential_node(ParsedPattern&, std::vector<std::shared_ptr<ReteNode>> const&,
+    std::shared_ptr<ReteNode> create_existential_node(ParsedPattern&,
+                                                      std::string const& fact_type,
+                                                      std::vector<std::shared_ptr<ReteNode>> const&,
                                                       std::vector<ParsedConstraint> const&);
 
     std::vector<std::shared_ptr<ReteNode>> build_alpha_chain(
         ConstraintNode const* node,
+        std::string const& fact_type,
         std::vector<std::shared_ptr<ReteNode>> parent_tails);
 
-    void collect_inline_bindings(ConstraintNode const* node, int depth);
+    void collect_inline_bindings(ConstraintNode const* node, int depth, std::string const& fact_type);
+    void register_pattern_fact_type(ParsedPattern const& pattern);
+    void normalize_inline_bound_fields(std::vector<ParsedConstraint>& constraints) const;
 
     CompiledNetwork& network_;
     KnowledgeBase const& kb_;
@@ -49,6 +59,7 @@ private:
     int parameter_count_;
     std::shared_ptr<ReteNode> last_node_;
     std::map<std::string, int> binding_to_idx_;
+    std::map<std::string, std::string> binding_to_fact_type_;
     std::map<std::string, std::string> inline_binding_to_field_;
 };
 

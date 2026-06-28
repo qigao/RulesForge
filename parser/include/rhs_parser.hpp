@@ -4,6 +4,7 @@
 #include "core/rhs_actions.hpp"
 #include <map>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace rulesforge {
@@ -29,9 +30,16 @@ public:
      * @brief Parse native RHS code into compiled actions.
      * @param rhs_code The RHS code string
      * @param bindings Variable bindings from LHS
+     * @param globals Declared global variables available to RHS
      * @param error_out Error message if parsing fails
      * @return Vector of compiled actions, empty on failure
      */
+    static std::vector<CompiledAction> parse(
+        std::string const& rhs_code,
+        std::map<std::string, int> const& bindings,
+        std::unordered_set<std::string> const& globals,
+        std::string* error_out = nullptr);
+
     static std::vector<CompiledAction> parse(
         std::string const& rhs_code,
         std::map<std::string, int> const& bindings,
@@ -75,7 +83,9 @@ private:
 
     class Parser {
     public:
-        Parser(std::string const& input, std::map<std::string, int> const& bindings);
+        Parser(std::string const& input,
+               std::map<std::string, int> const& bindings,
+               std::unordered_set<std::string> const& globals);
         std::vector<CompiledAction> parse();
         std::string const& error() const { return error_; }
     private:
@@ -112,9 +122,15 @@ private:
         Token advance();
         Token consume(Token::Type type, std::string const& message);
         void error(std::string const& message);
+        bool is_fact_binding_available(std::string const& name) const;
+        bool is_value_source_available(std::string const& name) const;
+        bool validate_expression_sources(rulesforge::ExpressionDescriptor const& expression);
+        bool validate_value_source_ref(std::string const& ref);
 
         Lexer lexer_;
         std::map<std::string, int> const& bindings_;
+        std::unordered_set<std::string> const& globals_;
+        std::unordered_set<std::string> local_bindings_;
         Token current_;
         std::string error_;
         bool had_error_ = false;

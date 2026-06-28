@@ -48,27 +48,8 @@ find_package(base64 CONFIG REQUIRED)
 find_package(zstd CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 
-find_package(
-    TurboNet CONFIG REQUIRED
-    HINTS "${TURBONET_ROOT}" "$ENV{TURBONET_ROOT}"
-)
-find_package(
-    TurboScript CONFIG REQUIRED
-    HINTS "${TURBOSCRIPT_ROOT}" "$ENV{TURBOSCRIPT_ROOT}"
-)
-
-set(_rulesforge_build_rpath "")
-foreach(_root IN ITEMS "${TURBONET_ROOT}" "$ENV{TURBONET_ROOT}" "${TURBOSCRIPT_ROOT}" "$ENV{TURBOSCRIPT_ROOT}")
-    if(_root)
-        list(APPEND _rulesforge_build_rpath "${_root}/lib")
-    endif()
-endforeach()
-list(REMOVE_DUPLICATES _rulesforge_build_rpath)
-if(_rulesforge_build_rpath)
-    set(CMAKE_BUILD_RPATH "${_rulesforge_build_rpath}")
-    set(CMAKE_INSTALL_RPATH "${_rulesforge_build_rpath}")
-    set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
-endif()
+find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
+find_package(TurboScript CONFIG REQUIRED PATHS "${TURBOSCRIPT_ROOT}")
 
 # Output files directory
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -77,13 +58,42 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 # Cmake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(Sanitizers)
 add_subdirectory(tools)
 include(FindTools)
-include(Sanitizers)
 # Add subdirectories
 add_subdirectory(parser)
-add_subdirectory(tbe)
+
 add_subdirectory(rulesforge)
 add_subdirectory(capi)
-add_subdirectory(plugins)
-add_subdirectory(router)
+
+if(BUILD_TESTING OR ENABLE_TESTS)
+    add_custom_target(
+        rulesforge_release_smoke
+        COMMAND
+            ${CMAKE_CTEST_COMMAND}
+            --test-dir ${CMAKE_BINARY_DIR}
+            -R
+            "^(engine_core_test\\.RulesForge|rhs_control_flow_test\\.RulesForge|rhs_invoke_test\\.RulesForge|parser_test\\.parser|parser_semantic_test\\.parser|rhs_parser_test\\.parser|expression_descriptor_test\\.parser|compiled_expression_compat_test\\.parser|capi_test|test_value_bridge|capi_demo_.*_smoke)$"
+            --output-on-failure
+        USES_TERMINAL
+        VERBATIM
+        COMMENT "Running RulesForge release smoke tests"
+    )
+    foreach(release_smoke_dep
+            engine_core_test.RulesForge
+            rhs_control_flow_test.RulesForge
+            rhs_invoke_test.RulesForge
+            parser_test.parser
+            parser_semantic_test.parser
+            rhs_parser_test.parser
+            expression_descriptor_test.parser
+            compiled_expression_compat_test.parser
+            capi_test
+            test_value_bridge
+            capi_demo)
+        if(TARGET ${release_smoke_dep})
+            add_dependencies(rulesforge_release_smoke ${release_smoke_dep})
+        endif()
+    endforeach()
+endif()

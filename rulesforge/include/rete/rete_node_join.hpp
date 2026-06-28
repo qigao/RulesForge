@@ -11,6 +11,8 @@ public:
   static constexpr NodeKind Kind = NodeKind::Alpha;
   AlphaNode() : ReteNode(NodeKind::Alpha) {}
   explicit AlphaNode(ParsedConstraint const& constraint);
+  AlphaNode(ParsedConstraint const& constraint,
+            std::optional<rulesforge::MirRuntimePredicateRef> mir_runtime_predicate);
   void left_activate(StatefulSession&, Token const&) override;
   void right_activate(StatefulSession&,
                       Fact*,
@@ -30,7 +32,8 @@ public:
 
 private:
   ParsedConstraint constraint;
-  bool check_constraint(Fact const& fact) const;
+  std::optional<rulesforge::MirRuntimePredicateRef> mir_runtime_predicate_;
+  bool check_constraint(StatefulSession const& session, Fact const& fact) const;
 };
 
 class EntryPointNode : public ReteNode
@@ -63,14 +66,17 @@ public:
   using HashedTokenMemory =
       std::unordered_map<ConstraintValue,
                          std::vector<TokenWME const*>,
-                         ConstraintValueHasher>;
+                         ConstraintValueHasher,
+                         ConstraintValueEquals>;
   using HashedFactMemory =
       std::unordered_map<ConstraintValue,
                          std::vector<Fact*>,
-                         ConstraintValueHasher>;
+                         ConstraintValueHasher,
+                         ConstraintValueEquals>;
 
   HashedJoinNode(std::vector<ParsedConstraint> joins,
                  std::map<std::string, int> bindings,
+                 std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates,
                  std::pair<std::string, int> left_hash_key,
                  std::string right_hash_key);
   void left_activate(StatefulSession& session,
@@ -111,7 +117,8 @@ public:
   using FactMemory = std::unordered_map<int64_t, Fact*>;
 
   CrossProductJoinNode(std::vector<ParsedConstraint> joins,
-                       std::map<std::string, int> bindings);
+                       std::map<std::string, int> bindings,
+                       std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates = {});
   void left_activate(StatefulSession& session,
                      Token const& token) override;
   void right_activate(StatefulSession& session,
@@ -137,7 +144,8 @@ public:
   static constexpr NodeKind Kind = NodeKind::Not;
   NotNode() : BetaConditionNode(NodeKind::Not, {}, {}) {}
   NotNode(std::vector<ParsedConstraint> const& joins,
-          std::map<std::string, int> const& bindings);
+          std::map<std::string, int> const& bindings,
+          std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates = {});
   void print_node(std::ostream& os) const override;
 
 protected:
@@ -158,7 +166,8 @@ public:
   static constexpr NodeKind Kind = NodeKind::Exists;
   ExistsNode() : BetaConditionNode(NodeKind::Exists, {}, {}) {}
   ExistsNode(std::vector<ParsedConstraint> const& joins,
-             std::map<std::string, int> const& bindings);
+             std::map<std::string, int> const& bindings,
+             std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates = {});
   void print_node(std::ostream& os) const override;
 
 protected:

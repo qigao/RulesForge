@@ -58,7 +58,7 @@ end
 4. 如何載入 JSON 或 CSV 事實
 5. 為何 session 不可跨執行緒共用
 
-未有明確整合需求之前，勿先跳入 plugin DLL、自定 native callback、或 router 整合。那只是徒增噪音。
+没有明确集成需求之前，不要先跳入 host callback。
 
 ## 建議閱讀次序
 

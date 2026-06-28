@@ -1,9 +1,10 @@
 /**
  * @file rfl_value_bridge.h
- * @brief C API bridge for binary codec integration with RulesForge
+ * @brief C ABI value bridge for RulesForge fact construction
  *
  * Provides C-compatible Value API that wraps RulesForge's C++ ConstraintValue.
- * Used by auto-generated binary codec code.
+ * Host code and TurboScript integration layers can use this bridge to build a
+ * structured Value tree and convert it to a RulesForge Fact before insertion.
  */
 
 #ifndef RFL_VALUE_BRIDGE_H
@@ -17,7 +18,7 @@ extern "C" {
 #endif
 
 /**
- * @brief Opaque Value handle (wraps std::map<string, ConstraintValue>)
+ * @brief Opaque Value handle.
  */
 typedef struct Value Value;
 
@@ -33,9 +34,19 @@ Value* value_create_object(void);
 void value_free(Value* obj);
 
 /**
- * @brief Set integer field
+ * @brief Set 64-bit integer field.
  */
 void value_set_field_int(Value* obj, const char* name, int64_t val);
+
+/**
+ * @brief Set 32-bit integer field.
+ */
+void value_set_field_int32(Value* obj, const char* name, int32_t val);
+
+/**
+ * @brief Set 64-bit integer field.
+ */
+void value_set_field_int64(Value* obj, const char* name, int64_t val);
 
 /**
  * @brief Set double field
@@ -54,8 +65,61 @@ void value_set_field_bytes(Value* obj, const char* name, const uint8_t* data, si
 
 /**
  * @brief Set nested object field
+ * @note The nested value is consumed by this call.
  */
 void value_set_field_object(Value* obj, const char* name, Value* nested);
+
+/**
+ * @brief Create a list value.
+ */
+Value* value_create_list(void);
+
+void value_add_list_item_int(Value* list, int32_t val);
+void value_add_list_item_int64(Value* list, int64_t val);
+void value_add_list_item_double(Value* list, double val);
+void value_add_list_item_string(Value* list, const char* val);
+
+/**
+ * @brief Append an object value to a list.
+ * @note The object value is consumed by this call.
+ */
+void value_add_list_item_object(Value* list, Value* obj);
+
+/**
+ * @brief Set list field.
+ * @note The list value is consumed by this call.
+ */
+void value_set_field_list(Value* obj, const char* name, Value* list);
+
+/**
+ * @brief Create a set value.
+ */
+Value* value_create_set(void);
+
+void value_add_set_item_int(Value* set, int32_t val);
+void value_add_set_item_double(Value* set, double val);
+void value_add_set_item_string(Value* set, const char* val);
+
+/**
+ * @brief Set set field.
+ * @note The set value is consumed by this call.
+ */
+void value_set_field_set(Value* obj, const char* name, Value* set);
+
+/**
+ * @brief Create a map value.
+ */
+Value* value_create_map(void);
+
+void value_add_map_entry_string_string(Value* map, const char* key, const char* val);
+void value_add_map_entry_string_int(Value* map, const char* key, int32_t val);
+void value_add_map_entry_string_double(Value* map, const char* key, double val);
+
+/**
+ * @brief Set map field.
+ * @note The map value is consumed by this call.
+ */
+void value_set_field_map(Value* obj, const char* name, Value* map);
 
 /**
  * @brief Get integer field
@@ -79,7 +143,7 @@ const char* value_get_field_string(const Value* obj, const char* name);
 /**
  * @brief Get nested object field
  * @return Field value, or NULL if not found
- * @note Returned pointer is owned by parent Value object
+ * @note Caller owns the returned Value and must call value_free().
  */
 Value* value_get_field_object(const Value* obj, const char* name);
 
@@ -88,9 +152,14 @@ Value* value_get_field_object(const Value* obj, const char* name);
  * @param obj Value object
  * @param type_name Fact type name (must match declared type)
  * @return Fact pointer, or NULL on failure
- * @note Caller owns the returned Fact
+ * @note Caller owns the returned Fact and must call value_free_fact().
  */
 struct Fact* value_to_fact(Value* obj, const char* type_name);
+
+/**
+ * @brief Free a Fact returned by value_to_fact().
+ */
+void value_free_fact(struct Fact* fact);
 
 #ifdef __cplusplus
 }

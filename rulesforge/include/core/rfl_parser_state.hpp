@@ -11,16 +11,18 @@
 // The temporary state used by a previous action-based parser design has been removed.
 // This makes the struct a simple, copyable data container for the AST.
 
-struct BinaryCodecImport {
-    std::string type_name;
-    std::string dll_path;
+struct SchemaImport {
+    std::string path;
+    std::string source_name;
+    std::size_t line = 0;
+    std::size_t column = 0;
 };
 
 struct parser_state {
     // Top-level metadata
     std::string package_name;
     std::vector<std::string> parsed_imports;
-    std::vector<BinaryCodecImport> binary_codec_imports;
+    std::vector<SchemaImport> schema_imports;
 
     // All successfully parsed top-level items
     std::vector<ParsedRule> parsed_rules;
@@ -36,4 +38,3 @@ struct parser_state {
 };
 
 #endif   // RFL_PARSER_STATE_HPP
-

@@ -39,11 +39,15 @@
                 "VCPKG_ROOT": "/opt/vcpkg"
             }
         },
-        {
+
+  {
             "name": "win-dev-user",
             "displayName": "Developer Build (Windows, User)",
             "cacheVariables": {
-                "ENABLE_SANITIZER_ADDRESS": "ON"
+                "ENABLE_SANITIZER_ADDRESS": "ON",
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/x64-windows/debug",
+                "PKG_CONFIG_EXECUTABLE": "${sourceDir}/vcpkg_installed/x64-windows/tools/pkgconf/pkgconf.exe"
             },
             "inherits": [
                 "base-win-dev-user",
@@ -53,6 +57,11 @@
         {
             "name": "win-release-user",
             "displayName": "Release Build (Windows, User)",
+            "cacheVariables": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/x64-windows",
+                "PKG_CONFIG_EXECUTABLE": "${sourceDir}/vcpkg_installed/x64-windows/tools/pkgconf/pkgconf.exe"
+            },
             "inherits": [
                 "base-win-release-user",
                 "win-paths"
@@ -62,7 +71,9 @@
             "name": "linux-dev-user",
             "displayName": "Developer Build (Linux, User)",
             "cacheVariables": {
-                "ENABLE_SANITIZER_ADDRESS": "OFF"
+                "ENABLE_SANITIZER_ADDRESS": "ON",
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/debug",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/x64-linux/"
             },
             "inherits": [
                 "base-linux-dev-user",
@@ -72,8 +83,12 @@
         {
             "name": "linux-release-user",
             "displayName": "Release Build (Linux, User)",
+            "cacheVariables": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/x64-linux"
+            },
             "inherits": [
-                "base-linux-release-user",
+                "release-linux-ninja",
                 "linux-paths"
             ]
         }

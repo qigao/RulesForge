@@ -7,6 +7,7 @@
 #include "engine/knowledge_base.hpp"
 #include "rfl_parser_impl.hpp"
 #include "semantic_analyzer.hpp"
+#include "turboscript_schema_importer.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -63,11 +64,42 @@ parser_state parse_file_to_local_state(std::string const &file_path, ParsingResu
   }
 
   local_state = rfl_parse_lemon(content, file_path, result.errors);
+  for (auto &schema_import : local_state.schema_imports) {
+    if (schema_import.source_name.empty()) {
+      schema_import.source_name = file_path;
+    }
+  }
   if (!result.errors.empty()) {
     result.success = false;
   }
 
   return local_state;
+}
+
+std::vector<std::string> schema_base_dirs_for_source(std::string const &source_name) {
+  std::vector<std::string> base_dirs;
+  std::filesystem::path source_path(source_name);
+  if (source_path.has_parent_path()) {
+    base_dirs.push_back(source_path.parent_path().string());
+  }
+  return base_dirs;
+}
+
+bool resolve_schema_imports(parser_state &state, std::vector<std::string> const &base_dirs,
+                            ParsingResult &result, std::string const &source_name) {
+  if (!state.schema_imports.empty()
+      && (!state.parsed_declarations.empty() || !state.parsed_enums.empty())) {
+    result.errors.push_back({.file_name = source_name,
+                             .message = "RFL declare/enum cannot be mixed with schema file imports; "
+                                        "TurboScript Schema is the schema source in schema file import mode."});
+    result.success = false;
+    return false;
+  }
+  if (rulesforge::import_turboscript_schemas(state, base_dirs, result.errors, source_name)) {
+    return true;
+  }
+  result.success = false;
+  return false;
 }
 
 // Context for multi-file import discovery (not the Lemon parser context)
@@ -105,6 +137,13 @@ void discover_and_merge_files(std::string const &file_path, FileDiscoveryContext
       context.state.parsed_declarations.end(),
       std::make_move_iterator(local_state.parsed_declarations.begin()),
       std::make_move_iterator(local_state.parsed_declarations.end()));
+  context.state.parsed_enums.insert(context.state.parsed_enums.end(),
+                                    std::make_move_iterator(local_state.parsed_enums.begin()),
+                                    std::make_move_iterator(local_state.parsed_enums.end()));
+  context.state.schema_imports.insert(
+      context.state.schema_imports.end(),
+      std::make_move_iterator(local_state.schema_imports.begin()),
+      std::make_move_iterator(local_state.schema_imports.end()));
   context.state.parsed_queries.insert(context.state.parsed_queries.end(),
                                       std::make_move_iterator(local_state.parsed_queries.begin()),
                                       std::make_move_iterator(local_state.parsed_queries.end()));
@@ -185,6 +224,11 @@ std::shared_ptr<KnowledgeBase> build_knowledge_base(std::string const &input, Pa
     return nullptr;
   }
 
+  if (!resolve_schema_imports(state, schema_base_dirs_for_source(source_name), result, source_name)) {
+    if (log_errors) log_parsing_errors(result);
+    return nullptr;
+  }
+
   auto t1 = std::chrono::high_resolution_clock::now();
 
   auto t2 = t1; // No separate AST build phase with Lemon
@@ -251,6 +295,11 @@ std::shared_ptr<KnowledgeBase> build_knowledge_base(std::vector<std::string> con
     }
   }
 
+  if (!resolve_schema_imports(context.state, base_dirs, result, file_paths[0])) {
+    log_parsing_errors(result);
+    return nullptr;
+  }
+
   // Run AST transformations on the unified AST
   AstTransformer transformer(context.state);
   transformer.transform();
@@ -303,19 +352,23 @@ std::shared_ptr<KnowledgeBase> build_knowledge_base_from_csv(std::string const &
   parser_state state = DirectTableCompiler::compile(table, csv_file_path, result.errors);
   {
     auto stats_after = DirectTableCompiler::get_stats();
-    logd("DecisionTableCompiler per-call stats: direct_success={}, fallback_success={}, "
-         "fallback_unknown_preamble={}, fallback_declare_parse={}, "
-         "fallback_query_parse={}, fallback_salience_parse={}, fallback_condition_parse={}",
+    logd("DecisionTableCompiler per-call stats: direct_success={}, parser_path_success={}, "
+         "parser_path_unknown_preamble={}, parser_path_declare_parse={}, "
+         "parser_path_query_parse={}, parser_path_salience_parse={}, parser_path_condition_parse={}",
          stats_after.direct_success - stats_before.direct_success,
-         stats_after.fallback_success - stats_before.fallback_success,
-         stats_after.fallback_unknown_preamble - stats_before.fallback_unknown_preamble,
-         stats_after.fallback_declare_parse - stats_before.fallback_declare_parse,
-         stats_after.fallback_query_parse - stats_before.fallback_query_parse,
-         stats_after.fallback_salience_parse - stats_before.fallback_salience_parse,
-         stats_after.fallback_condition_parse - stats_before.fallback_condition_parse);
+         stats_after.parser_path_success - stats_before.parser_path_success,
+         stats_after.parser_path_unknown_preamble - stats_before.parser_path_unknown_preamble,
+         stats_after.parser_path_declare_parse - stats_before.parser_path_declare_parse,
+         stats_after.parser_path_query_parse - stats_before.parser_path_query_parse,
+         stats_after.parser_path_salience_parse - stats_before.parser_path_salience_parse,
+         stats_after.parser_path_condition_parse - stats_before.parser_path_condition_parse);
   }
   if (!result.errors.empty()) {
     result.success = false;
+    log_parsing_errors(result);
+    return nullptr;
+  }
+  if (!resolve_schema_imports(state, schema_base_dirs_for_source(csv_file_path), result, csv_file_path)) {
     log_parsing_errors(result);
     return nullptr;
   }
@@ -367,19 +420,23 @@ build_knowledge_base_from_csv_string(std::string const &csv_content, ParsingResu
   parser_state state = DirectTableCompiler::compile(table, source_name, result.errors);
   {
     auto stats_after = DirectTableCompiler::get_stats();
-    logd("DecisionTableCompiler per-call stats: direct_success={}, fallback_success={}, "
-         "fallback_unknown_preamble={}, fallback_declare_parse={}, "
-         "fallback_query_parse={}, fallback_salience_parse={}, fallback_condition_parse={}",
+    logd("DecisionTableCompiler per-call stats: direct_success={}, parser_path_success={}, "
+         "parser_path_unknown_preamble={}, parser_path_declare_parse={}, "
+         "parser_path_query_parse={}, parser_path_salience_parse={}, parser_path_condition_parse={}",
          stats_after.direct_success - stats_before.direct_success,
-         stats_after.fallback_success - stats_before.fallback_success,
-         stats_after.fallback_unknown_preamble - stats_before.fallback_unknown_preamble,
-         stats_after.fallback_declare_parse - stats_before.fallback_declare_parse,
-         stats_after.fallback_query_parse - stats_before.fallback_query_parse,
-         stats_after.fallback_salience_parse - stats_before.fallback_salience_parse,
-         stats_after.fallback_condition_parse - stats_before.fallback_condition_parse);
+         stats_after.parser_path_success - stats_before.parser_path_success,
+         stats_after.parser_path_unknown_preamble - stats_before.parser_path_unknown_preamble,
+         stats_after.parser_path_declare_parse - stats_before.parser_path_declare_parse,
+         stats_after.parser_path_query_parse - stats_before.parser_path_query_parse,
+         stats_after.parser_path_salience_parse - stats_before.parser_path_salience_parse,
+         stats_after.parser_path_condition_parse - stats_before.parser_path_condition_parse);
   }
   if (!result.errors.empty()) {
     result.success = false;
+    log_parsing_errors(result);
+    return nullptr;
+  }
+  if (!resolve_schema_imports(state, schema_base_dirs_for_source(source_name), result, source_name)) {
     log_parsing_errors(result);
     return nullptr;
   }

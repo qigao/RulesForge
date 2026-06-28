@@ -49,7 +49,11 @@ class UnnestNode : public ReteNode
 public:
   static constexpr NodeKind Kind = NodeKind::Unnest;
   UnnestNode() : ReteNode(NodeKind::Unnest) {}
-  UnnestNode(ParsedUnnest const&, std::map<std::string, int> const&);
+  UnnestNode(ParsedUnnest const&,
+             std::string target_fact_type,
+             std::map<std::string, int> const&,
+             std::vector<ParsedConstraint> constraints,
+             std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates);
   void left_activate(StatefulSession&, Token const&) override;
 
   void right_activate(StatefulSession&,
@@ -64,18 +68,37 @@ public:
 private:
   // Immutable config
   ParsedUnnest info;
+  std::string target_fact_type_;
   std::map<std::string, int> binding_to_token_idx;
+  std::vector<ParsedConstraint> constraints_;
+  std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates_;
 };
 
 
 class EvalNode : public ReteNode
 {
 public:
+  struct EvalRuntimeArgument {
+    enum class Kind : uint8_t {
+      Variable,
+      Literal,
+      NumericExpression,
+    };
+
+    Kind kind = Kind::Variable;
+    std::string text;
+    ConstraintValue literal = NilValue{};
+    std::size_t expression_id = 0;
+  };
+
   static constexpr NodeKind Kind = NodeKind::Eval;
   EvalNode() : ReteNode(NodeKind::Eval) {}
   EvalNode(std::string expression,
            std::map<std::string, int> bindings,
-           std::map<std::string, std::string> scalar_binding_fields);
+           std::map<std::string, std::string> scalar_binding_fields,
+           std::optional<rulesforge::MirRuntimePredicateRef> mir_eval_expression_predicate = std::nullopt,
+           std::vector<std::string> mir_eval_expression_variables = {},
+           std::vector<EvalRuntimeArgument> runtime_arguments = {});
   void left_activate(StatefulSession& session,
                      Token const& token) override;
 
@@ -99,8 +122,10 @@ private:
   std::string expression;
   std::map<std::string, int> binding_to_token_idx;
   std::map<std::string, std::string> scalar_binding_to_field;
-  std::shared_ptr<rulesforge::ExpressionEvaluator> compiled_expression;
   std::unordered_map<std::string, EvalResolvedVar> resolved_vars_;
+  std::optional<rulesforge::MirRuntimePredicateRef> mir_eval_expression_predicate_;
+  std::vector<std::string> mir_eval_expression_variables_;
+  std::vector<EvalRuntimeArgument> runtime_arguments_;
 };
 
 class WindowNode : public ReteNode

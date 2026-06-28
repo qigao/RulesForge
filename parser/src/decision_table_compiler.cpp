@@ -12,7 +12,7 @@
 #include <sstream>
 
 namespace {
-enum class FallbackReason : uint8_t {
+enum class ParserPathReason : uint8_t {
     UnknownPreamble,
     DeclareParse,
     QueryParse,
@@ -23,27 +23,27 @@ enum class FallbackReason : uint8_t {
 enum class PreambleRecordResult : uint8_t {
     Continue,
     FatalError,
-    FallbackUnknownPreamble,
-    FallbackDeclareParse,
-    FallbackQueryParse
+    ParserPathUnknownPreamble,
+    ParserPathDeclareParse,
+    ParserPathQueryParse
 };
 
 enum class RowCompileResult : uint8_t {
     Continue,
     Skip,
-    FallbackSalienceParse,
-    FallbackConditionParse
+    ParserPathSalienceParse,
+    ParserPathConditionParse
 };
 
 DecisionTableCompileStats g_compile_stats;
 
-void record_fallback_reason(FallbackReason reason) {
+void record_parser_path_reason(ParserPathReason reason) {
     switch (reason) {
-        case FallbackReason::UnknownPreamble: g_compile_stats.fallback_unknown_preamble++; break;
-        case FallbackReason::DeclareParse: g_compile_stats.fallback_declare_parse++; break;
-        case FallbackReason::QueryParse: g_compile_stats.fallback_query_parse++; break;
-        case FallbackReason::SalienceParse: g_compile_stats.fallback_salience_parse++; break;
-        case FallbackReason::ConditionParse: g_compile_stats.fallback_condition_parse++; break;
+        case ParserPathReason::UnknownPreamble: g_compile_stats.parser_path_unknown_preamble++; break;
+        case ParserPathReason::DeclareParse: g_compile_stats.parser_path_declare_parse++; break;
+        case ParserPathReason::QueryParse: g_compile_stats.parser_path_query_parse++; break;
+        case ParserPathReason::SalienceParse: g_compile_stats.parser_path_salience_parse++; break;
+        case ParserPathReason::ConditionParse: g_compile_stats.parser_path_condition_parse++; break;
     }
 }
 
@@ -450,7 +450,7 @@ PreambleRecordResult process_preamble_record(std::vector<std::string> const& rec
     if (directive == "DECLARE") {
         ParsedDeclaration decl;
         if (!parse_declare_record(record, state.package_name, decl)) {
-            return PreambleRecordResult::FallbackDeclareParse;
+            return PreambleRecordResult::ParserPathDeclareParse;
         }
         state.parsed_declarations.push_back(std::move(decl));
         return PreambleRecordResult::Continue;
@@ -458,55 +458,55 @@ PreambleRecordResult process_preamble_record(std::vector<std::string> const& rec
     if (directive == "QUERY") {
         ParsedQuery query;
         if (!parse_query_record(record, state.package_name, query)) {
-            return PreambleRecordResult::FallbackQueryParse;
+            return PreambleRecordResult::ParserPathQueryParse;
         }
         state.parsed_queries.push_back(std::move(query));
         return PreambleRecordResult::Continue;
     }
-    return PreambleRecordResult::FallbackUnknownPreamble;
+    return PreambleRecordResult::ParserPathUnknownPreamble;
 }
 
-std::optional<FallbackReason> to_fallback_reason(PreambleRecordResult result) {
+std::optional<ParserPathReason> to_parser_path_reason(PreambleRecordResult result) {
     switch (result) {
-        case PreambleRecordResult::FallbackUnknownPreamble: return FallbackReason::UnknownPreamble;
-        case PreambleRecordResult::FallbackDeclareParse: return FallbackReason::DeclareParse;
-        case PreambleRecordResult::FallbackQueryParse: return FallbackReason::QueryParse;
+        case PreambleRecordResult::ParserPathUnknownPreamble: return ParserPathReason::UnknownPreamble;
+        case PreambleRecordResult::ParserPathDeclareParse: return ParserPathReason::DeclareParse;
+        case PreambleRecordResult::ParserPathQueryParse: return ParserPathReason::QueryParse;
         case PreambleRecordResult::Continue:
         case PreambleRecordResult::FatalError: return std::nullopt;
     }
     return std::nullopt;
 }
 
-std::optional<FallbackReason> to_fallback_reason(RowCompileResult result) {
+std::optional<ParserPathReason> to_parser_path_reason(RowCompileResult result) {
     switch (result) {
-        case RowCompileResult::FallbackSalienceParse: return FallbackReason::SalienceParse;
-        case RowCompileResult::FallbackConditionParse: return FallbackReason::ConditionParse;
+        case RowCompileResult::ParserPathSalienceParse: return ParserPathReason::SalienceParse;
+        case RowCompileResult::ParserPathConditionParse: return ParserPathReason::ConditionParse;
         case RowCompileResult::Continue:
         case RowCompileResult::Skip: return std::nullopt;
     }
     return std::nullopt;
 }
 
-parser_state execute_fallback_parse(DecisionTable const& table,
+parser_state execute_parser_path_parse(DecisionTable const& table,
                                     std::string const& source_name,
                                     std::vector<StructuredError>& errors,
-                                    FallbackReason reason) {
-    record_fallback_reason(reason);
+                                    ParserPathReason reason) {
+    record_parser_path_reason(reason);
     DecisionTableConverter converter(table);
     std::string generated_rfl = converter.generate_drl();
     parser_state out = generated_rfl.empty() ? parser_state{} : rfl_parse_lemon(generated_rfl, source_name, errors);
     if (errors.empty()) {
-        g_compile_stats.fallback_success++;
+        g_compile_stats.parser_path_success++;
     }
     return out;
 }
 
-std::optional<parser_state> maybe_execute_fallback(DecisionTable const& table,
+std::optional<parser_state> maybe_execute_parser_path(DecisionTable const& table,
                                                    std::string const& source_name,
                                                    std::vector<StructuredError>& errors,
-                                                   std::optional<FallbackReason> maybe_reason) {
+                                                   std::optional<ParserPathReason> maybe_reason) {
     if (!maybe_reason.has_value()) return std::nullopt;
-    return execute_fallback_parse(table, source_name, errors, *maybe_reason);
+    return execute_parser_path_parse(table, source_name, errors, *maybe_reason);
 }
 
 bool parse_constraint_text(std::string const& text, ParsedConstraint& out_constraint) {
@@ -751,7 +751,7 @@ RowCompileResult compile_row(std::vector<std::string> const& row,
             rule.salience = std::stoi(*salience_text);
             rule.salience_explicitly_set = true;
         } catch (...) {
-            return RowCompileResult::FallbackSalienceParse;
+            return RowCompileResult::ParserPathSalienceParse;
         }
     }
     if (auto agenda_group = get_effective_cell(row, agenda_group_col); agenda_group.has_value()) {
@@ -767,7 +767,7 @@ RowCompileResult compile_row(std::vector<std::string> const& row,
         if (col.type == ColumnDefinition::Type::Condition) {
             ParsedPattern p;
             if (!parse_condition_pattern(substitute(col.template_text, val), p)) {
-                return RowCompileResult::FallbackConditionParse;
+                return RowCompileResult::ParserPathConditionParse;
             }
             rule.condition_groups[0].push_back(std::move(p));
         } else if (col.type == ColumnDefinition::Type::Action) {
@@ -790,9 +790,9 @@ parser_state DirectTableCompiler::compile(DecisionTable const& table,
         PreambleRecordResult result = process_preamble_record(record, source_name, state, errors);
         if (result == PreambleRecordResult::Continue) continue;
         if (result == PreambleRecordResult::FatalError) return parser_state{};
-        if (auto fallback_state = maybe_execute_fallback(table, source_name, errors, to_fallback_reason(result));
-            fallback_state.has_value()) {
-            return *fallback_state;
+        if (auto parser_path_state = maybe_execute_parser_path(table, source_name, errors, to_parser_path_reason(result));
+            parser_path_state.has_value()) {
+            return *parser_path_state;
         }
     }
 
@@ -812,9 +812,9 @@ parser_state DirectTableCompiler::compile(DecisionTable const& table,
             row_context,
             rule);
         if (result == RowCompileResult::Skip) continue;
-        if (auto fallback_state = maybe_execute_fallback(table, source_name, errors, to_fallback_reason(result));
-            fallback_state.has_value()) {
-            return *fallback_state;
+        if (auto parser_path_state = maybe_execute_parser_path(table, source_name, errors, to_parser_path_reason(result));
+            parser_path_state.has_value()) {
+            return *parser_path_state;
         }
         state.parsed_rules.push_back(std::move(rule));
     }

@@ -2,40 +2,14 @@
 #define COMPILED_NETWORK_HPP
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <functional>
 #include <algorithm>
+#include <sstream>
 #include <unordered_map>
-#include <turbo_buffer.h>
 #include "rete/rete_node.hpp"
-
-
-// C++ allocator backed by mem_pool_t.
-// allocate() bumps the arena pointer (fast, contiguous).
-// deallocate() is a no-op — the arena frees everything at once on destruction.
-template<typename T>
-struct ArenaAllocator {
-    using value_type = T;
-
-    mem_pool_t* arena;
-
-    explicit ArenaAllocator(mem_pool_t* a) noexcept : arena(a) {}
-
-    template<typename U>
-    ArenaAllocator(ArenaAllocator<U> const& o) noexcept : arena(o.arena) {}
-
-    T* allocate(size_t n) {
-        void* p = mem_alloc(arena, n * sizeof(T));
-        if (!p) throw std::bad_alloc();
-        return static_cast<T*>(p);
-    }
-
-    void deallocate(T*, size_t) noexcept { /* arena frees in bulk */ }
-
-    template<typename U>
-    bool operator==(ArenaAllocator<U> const& o) const noexcept { return arena == o.arena; }
-};
 
 namespace detail {
 
@@ -53,6 +27,9 @@ inline size_t constraint_hash(ParsedConstraint const& c) {
         for (auto const& v : *c.right_value_list) {
             combine(ConstraintValueHasher{}(v));
         }
+    }
+    if (c.right_arith_expr) {
+        combine(std::hash<std::string>{}(*c.right_arith_expr));
     }
     if (c.left_binding) {
         combine(std::hash<std::string>{}(*c.left_binding));
@@ -169,10 +146,6 @@ struct CompiledNetwork {
         uint64_t dirty_segments_mask = 0;
     };
 
-    // Arena MUST be declared before all_nodes so it outlives the shared_ptrs.
-    // Destruction order: caches -> all_nodes -> arena_
-    mem_pool_t arena_;
-
     std::vector<std::shared_ptr<ReteNode>> all_nodes;
     std::vector<ReteNode*> node_index;
     std::vector<ReteNode*> beta_root_nodes; // Optimization: only iterate these for priming
@@ -180,6 +153,7 @@ struct CompiledNetwork {
     std::map<std::string, std::map<std::string, std::shared_ptr<ReteNode>>> named_entry_points;
     std::map<std::string, std::shared_ptr<QueryTerminalNode>> query_nodes;
     std::map<std::string, std::shared_ptr<QueryInputNode>> parameterized_query_inputs;
+    std::vector<QueryCallNode*> query_call_nodes;
     std::vector<SegmentDescriptor> segment_descriptors;
     std::vector<PathDescriptor> path_descriptors;
     std::vector<std::vector<int>> segment_to_paths;
@@ -190,17 +164,14 @@ struct CompiledNetwork {
     MemSlotCounts mem_slot_counts;
     int next_node_id = 0;
 
-    CompiledNetwork() {
-        // 4MB initial arena — enough for ~10K nodes without realloc
-        mem_init(&arena_, 4 * 1024 * 1024);
-    }
+    CompiledNetwork() = default;
 
     ~CompiledNetwork() {
-        // Clear all shared_ptrs first (runs destructors while arena memory is still valid)
         alpha_cache_.clear();
         beta_cache_.clear();
         parameterized_query_inputs.clear();
         query_nodes.clear();
+        query_call_nodes.clear();
         named_entry_points.clear();
         alpha_entry_points.clear();
         node_index.clear();
@@ -212,8 +183,6 @@ struct CompiledNetwork {
         node_to_segment_id.clear();
         terminal_to_path_id.clear();
         all_nodes.clear();
-        // Now safe to free the arena
-        mem_destroy(&arena_);
     }
 
     CompiledNetwork(CompiledNetwork const&) = delete;
@@ -221,10 +190,33 @@ struct CompiledNetwork {
     CompiledNetwork(CompiledNetwork&&) = delete;
     CompiledNetwork& operator=(CompiledNetwork&&) = delete;
 
+    std::string to_dot() const {
+        std::ostringstream os;
+        os << "digraph ReteNetwork {\n";
+        for (auto const& node : all_nodes) {
+            if (node) {
+                node->print_node(os);
+                os << "\n";
+            }
+        }
+        for (auto const& node : all_nodes) {
+            if (!node) {
+                continue;
+            }
+            for (auto const& child_ref : node->get_children()) {
+                auto child = child_ref.lock();
+                if (child) {
+                    os << "  \"" << node->id << "\" -> \"" << child->id << "\";\n";
+                }
+            }
+        }
+        os << "}\n";
+        return os.str();
+    }
+
     template<typename T, typename... Args>
     std::shared_ptr<T> create_node(Args&&... args) {
-        ArenaAllocator<T> alloc(&arena_);
-        auto node = std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
+        auto node = std::make_shared<T>(std::forward<Args>(args)...);
         node->id = next_node_id++;
         assign_mem_slot(*node);
         all_nodes.push_back(node);
@@ -246,8 +238,15 @@ struct CompiledNetwork {
         node_to_segment_id.clear();
         terminal_to_path_id.clear();
 
+        if (all_nodes.empty()) {
+            return;
+        }
+
         // 1) Build segment descriptors for beta nodes.
         for (auto const& node : all_nodes) {
+            if (!node) {
+                continue;
+            }
             if (!node->is_beta_node()) {
                 continue;
             }
@@ -261,6 +260,9 @@ struct CompiledNetwork {
 
         // 2) Build path descriptors for each terminal.
         for (auto const& node : all_nodes) {
+            if (!node) {
+                continue;
+            }
             if (node->kind != NodeKind::Terminal && node->kind != NodeKind::QueryTerminal) {
                 continue;
             }
@@ -350,14 +352,17 @@ struct CompiledNetwork {
     // Alpha node deduplication via structural hash — O(1) lookup
     std::shared_ptr<AlphaNode> find_or_create_alpha(
             std::shared_ptr<ReteNode> const& parent,
-            ParsedConstraint const& constraint) {
+            ParsedConstraint const& constraint,
+            std::optional<rulesforge::MirRuntimePredicateRef> mir_runtime_predicate = std::nullopt) {
         size_t ch = detail::constraint_hash(constraint);
         detail::AlphaCacheKey key{parent->id, ch, &constraint};
         auto it = alpha_cache_.find(key);
         if (it != alpha_cache_.end()) {
             return it->second;
         }
-        auto node = create_node<AlphaNode>(constraint);
+        auto node = create_node<AlphaNode>(
+            constraint,
+            mir_runtime_predicate);
         parent->add_child(node);
         // Store key with pointer to the node's own constraint (stable address)
         detail::AlphaCacheKey stored_key{parent->id, ch, &node->constraint};
@@ -429,6 +434,9 @@ private:
                 break;
             case NodeKind::QueryTerminal:
                 node.mem_slot = mem_slot_counts.query_terminal++;
+                break;
+            case NodeKind::QueryCall:
+                node.mem_slot = mem_slot_counts.query_call++;
                 break;
             case NodeKind::Eval:
                 node.mem_slot = mem_slot_counts.eval++;

@@ -1,17 +1,17 @@
 #ifndef COMPILED_EXPRESSION_HPP
 #define COMPILED_EXPRESSION_HPP
 
-#include "expression_evaluator.hpp"
+#include "expression_descriptor.hpp"
 
 namespace rulesforge {
 
 /**
- * @brief Backward-compatible name for ExpressionEvaluator.
+ * @brief Backward-compatible name for the expression descriptor.
  *
- * New code should include/use ExpressionEvaluator directly. This alias keeps
+ * Runtime execution is owned by MIR/TurboScript backends. This alias only keeps
  * older includes and type names working during migration.
  */
-using CompiledExpression = ExpressionEvaluator;
+using CompiledExpression = ExpressionDescriptor;
 
 } // namespace rulesforge
 

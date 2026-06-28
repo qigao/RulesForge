@@ -27,6 +27,15 @@ static std::string strip_quotes(std::string_view sv) {
     return std::string(sv);
 }
 
+static bool has_schema_extension(std::string const& path) {
+    std::string lower;
+    lower.reserve(path.size());
+    for (char ch : path) {
+        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+    return lower.size() >= 7 && lower.compare(lower.size() - 7, 7, ".schema") == 0;
+}
+
 // Helper struct for generic type parsing (e.g., List<String>, Map<String, int>)
 struct GenericType {
     std::string base;
@@ -254,11 +263,18 @@ import_stmt ::= IMPORT qualified_name(N) DOTSTAR opt_semi. {
     ctx->state.parsed_imports.push_back(*N + ".*");
     delete N;
 }
-import_stmt ::= IMPORT BINARY CODEC STRING(T) FROM STRING(P) opt_semi. {
-    // Import binary codec: import binary codec "TypeName" from "path/to/codec.dll"
-    std::string type_name = strip_quotes(T.text);
-    std::string dll_path = strip_quotes(P.text);
-    ctx->state.binary_codec_imports.push_back({type_name, dll_path});
+import_stmt ::= IMPORT STRING(P) opt_semi. {
+    std::string path = strip_quotes(P.as_sv());
+    if (has_schema_extension(path)) {
+        ctx->state.schema_imports.push_back(
+            {.path = std::move(path),
+             .source_name = ctx->source_name,
+             .line = P.line,
+             .column = P.column});
+    } else {
+        ctx->add_error(P.line, P.column,
+            "Unsupported string import '" + path + "'. Expected a .schema file.");
+    }
 }
 
 opt_semi ::= .
@@ -763,6 +779,7 @@ eval_content(A) ::= eval_content(B) STAR. { A = B; A->append(" * "); }
 eval_content(A) ::= eval_content(B) SLASH. { A = B; A->append(" / "); }
 eval_content(A) ::= eval_content(B) AND_AND. { A = B; A->append(" && "); }
 eval_content(A) ::= eval_content(B) OR_OR. { A = B; A->append(" || "); }
+eval_content(A) ::= eval_content(B) BANG. { A = B; A->append("!"); }
 eval_content(A) ::= eval_content(B) COMMA. { A = B; A->append(", "); }
 eval_content(A) ::= eval_content(B) LPAREN eval_content(C) RPAREN. {
     A = B; A->append("("); A->append(*C); A->append(")"); delete C;
@@ -885,6 +902,22 @@ constraint_item(A) ::= VARIABLE(VB) COLON field_ref(F) cmp_op(OP) primary_expr_v
     set_rhs_value(A->constraint, *V);
     delete F; delete OP; delete V;
 }
+constraint_item(A) ::= VARIABLE(VB) COLON field_ref(F) cmp_op(OP) LPAREN arith_expr_str(E) RPAREN. {
+    A = new ConstraintNode(NodeType::LEAF);
+    A->constraint.field_binding = VB.as_string();
+    A->constraint.left_field = *F;
+    A->constraint.op = *OP;
+    A->constraint.right_arith_expr = *E;
+    delete F; delete OP; delete E;
+}
+constraint_item(A) ::= VARIABLE(VB) COLON field_ref(F) cmp_op(OP) IDENTIFIER(FN) LPAREN RPAREN. {
+    A = new ConstraintNode(NodeType::LEAF);
+    A->constraint.field_binding = VB.as_string();
+    A->constraint.left_field = *F;
+    A->constraint.op = *OP;
+    A->constraint.right_arith_expr = FN.as_string() + "()";
+    delete F; delete OP;
+}
 
 // Relational without inline binding
 constraint_item(A) ::= field_ref(F) cmp_op(OP) primary_expr_val(V). {
@@ -893,6 +926,20 @@ constraint_item(A) ::= field_ref(F) cmp_op(OP) primary_expr_val(V). {
     A->constraint.op = *OP;
     set_rhs_value(A->constraint, *V);
     delete F; delete OP; delete V;
+}
+constraint_item(A) ::= field_ref(F) cmp_op(OP) LPAREN arith_expr_str(E) RPAREN. {
+    A = new ConstraintNode(NodeType::LEAF);
+    A->constraint.left_field = *F;
+    A->constraint.op = *OP;
+    A->constraint.right_arith_expr = *E;
+    delete F; delete OP; delete E;
+}
+constraint_item(A) ::= field_ref(F) cmp_op(OP) IDENTIFIER(FN) LPAREN RPAREN. {
+    A = new ConstraintNode(NodeType::LEAF);
+    A->constraint.left_field = *F;
+    A->constraint.op = *OP;
+    A->constraint.right_arith_expr = FN.as_string() + "()";
+    delete F; delete OP;
 }
 
 // In clause: field in (values) / field not in (values)
@@ -998,12 +1045,6 @@ primary_expr_val(A) ::= field_ref(F). {
     }
     delete F;
 }
-// Arithmetic in parens: (expr)
-primary_expr_val(A) ::= LPAREN arith_expr_str(E) RPAREN. {
-    A = new ConstraintValue(*E);
-    delete E;
-}
-
 // --- Arithmetic expression (as string for arith_expr support) ---
 %type arith_expr_str { std::string* }
 %destructor arith_expr_str { delete $$; }
@@ -1011,6 +1052,33 @@ primary_expr_val(A) ::= LPAREN arith_expr_str(E) RPAREN. {
 arith_expr_str(A) ::= field_ref(F). { A = F; }
 arith_expr_str(A) ::= INTEGER(T). { A = new std::string(T.as_string()); }
 arith_expr_str(A) ::= DOUBLE(T). { A = new std::string(T.as_string()); }
+arith_expr_str(A) ::= LPAREN arith_expr_str(E) RPAREN. {
+    A = new std::string("(");
+    A->append(*E);
+    A->append(")");
+    delete E;
+}
+arith_expr_str(A) ::= IDENTIFIER(FN) LPAREN RPAREN. {
+    A = new std::string(FN.as_string());
+    A->append("()");
+}
+arith_expr_str(A) ::= IDENTIFIER(FN) LPAREN arith_expr_str(E) RPAREN. {
+    A = new std::string(FN.as_string());
+    A->append("(");
+    A->append(*E);
+    A->append(")");
+    delete E;
+}
+arith_expr_str(A) ::= IDENTIFIER(FN) LPAREN arith_expr_str(L) COMMA arith_expr_str(R) RPAREN. {
+    A = new std::string(FN.as_string());
+    A->append("(");
+    A->append(*L);
+    A->append(", ");
+    A->append(*R);
+    A->append(")");
+    delete L;
+    delete R;
+}
 arith_expr_str(A) ::= arith_expr_str(L) PLUS arith_expr_str(R). {
     A = L; A->append(" + "); A->append(*R); delete R;
 }
@@ -1125,6 +1193,27 @@ opt_accum_ref(A) ::= accum_ref(R). { A = R; }
 // Simple field, variable, integer, or arithmetic expression
 accum_ref(A) ::= field_ref(F). { A = F; }
 accum_ref(A) ::= INTEGER(T). { A = new std::string(T.as_string()); }
+accum_ref(A) ::= DOUBLE(T). { A = new std::string(T.as_string()); }
+accum_ref(A) ::= IDENTIFIER(FN) LPAREN RPAREN. {
+    A = new std::string(FN.as_string());
+    A->append("()");
+}
+accum_ref(A) ::= IDENTIFIER(FN) LPAREN accum_ref(E) RPAREN. {
+    A = new std::string(FN.as_string());
+    A->append("(");
+    A->append(*E);
+    A->append(")");
+    delete E;
+}
+accum_ref(A) ::= IDENTIFIER(FN) LPAREN accum_ref(L) COMMA accum_ref(R) RPAREN. {
+    A = new std::string(FN.as_string());
+    A->append("(");
+    A->append(*L);
+    A->append(", ");
+    A->append(*R);
+    A->append(")");
+    delete L; delete R;
+}
 accum_ref(A) ::= accum_ref(L) PLUS accum_ref(R). {
     A = L; A->append(" + "); A->append(*R); delete R;
 }

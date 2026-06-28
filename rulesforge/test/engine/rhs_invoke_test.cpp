@@ -41,6 +41,11 @@ int metric_native(void* ctx, int argc, const char** argv, char** out_result) {
     if (out_result) *out_result = nullptr;
     return 0;
 }
+
+int failing_native(void*, int, const char**, char** out_result) {
+    if (out_result) *out_result = nullptr;
+    return 7;
+}
 }  // namespace
 
 suite("RHS Invoke") {
@@ -90,5 +95,79 @@ suite("RHS Invoke") {
         check(g_captured_args[0] == "12.500000");
         check(g_captured_args[1] == "\"hot\"");
         check(g_captured_args[2] == "1");
+    }
+
+    it("hard-fails when RHS native function is not registered") {
+        ParsingResult result;
+        auto kb = build_knowledge_base(R"(
+            declare Sensor
+                value: double
+            end
+
+            rule "Missing Native"
+            when
+                $s: Sensor(value > 10)
+            then
+                invoke capture($s.value)
+            end
+        )", result);
+
+        check(result.success);
+        check(kb != nullptr);
+
+        auto session = kb->create_session();
+        check(session != nullptr);
+
+        auto sensor = std::make_shared<Fact>();
+        sensor->type = "Sensor";
+        sensor->fields["value"] = 12.5;
+        session->add_fact(sensor);
+
+        bool threw = false;
+        try {
+            (void)session->fire_all_rules();
+        } catch (std::runtime_error const& e) {
+            threw = std::string(e.what()).find("not registered") != std::string::npos;
+        }
+        check(threw);
+    }
+
+    it("hard-fails when RHS native function callback returns an error") {
+        ParsingResult result;
+        auto kb = build_knowledge_base(R"(
+            declare Sensor
+                value: double
+            end
+            declare Alert
+                score: double
+            end
+
+            rule "Failing Native"
+            when
+                $s: Sensor(value > 10)
+            then
+                insert Alert { score = metric($s.value) }
+            end
+        )", result);
+
+        check(result.success);
+        check(kb != nullptr);
+        kb->register_native_function("metric", failing_native, nullptr);
+
+        auto session = kb->create_session();
+        check(session != nullptr);
+
+        auto sensor = std::make_shared<Fact>();
+        sensor->type = "Sensor";
+        sensor->fields["value"] = 12.5;
+        session->add_fact(sensor);
+
+        bool threw = false;
+        try {
+            (void)session->fire_all_rules();
+        } catch (std::runtime_error const& e) {
+            threw = std::string(e.what()).find("failed with status 7") != std::string::npos;
+        }
+        check(threw);
     }
 }

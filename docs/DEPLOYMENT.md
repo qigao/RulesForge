@@ -1,16 +1,16 @@
 # RulesForge Deployment Guide
 
-This guide focuses on what the current code supports, not on theoretical architecture.
+This guide focuses on the supported product shape: a RETE-based rule engine with dynamic schema/data binding and JIT execution.
 
 ## 1. Build Once, Reuse Often
 
 The intended production shape is:
 
 - compile rules into one `KnowledgeBase`
-- register native functions and codecs during setup
+- register host callbacks during setup only when rules need external side effects
 - create many short-lived or pooled `StatefulSession` instances from that knowledge base
 
-Do not recompile the same rules for every request unless you enjoy burning CPU for no reason.
+Do not recompile the same rules for every request.
 
 ## 2. Thread Safety
 
@@ -21,17 +21,18 @@ Current contract:
 
 Practical rule:
 
-- one session per worker thread, request, or message flow
+- use one session per worker thread, request, or message flow
 
 ## 3. Data Ingestion Choices
 
-Choose one boring path for each boundary:
+Choose one simple path for each integration boundary:
 
 - JSON for general service integrations
 - CSV for batch/offline loads
-- binary only when you already control codecs and care about throughput
+- XML when upstream systems already publish XML payloads
+- binary TBE payloads when you control the schema/payload and need throughput
 
-If your integration does not need all three, do not document or ship all three.
+RulesForge engine sessions receive facts. Schema-aware C API helpers can use `TurboScript::DataBind` to bind JSON, CSV, XML, or binary payloads into session-owned facts before insertion.
 
 ## 4. Validation And Failure Mode
 
@@ -45,18 +46,18 @@ Production advice:
 
 The right failure mode is usually “fail fast during load or test”, not “invent magic defaults”.
 
-## 5. Native Extensions
+## 5. Host Callback Boundary
 
-There are two extension surfaces:
+RulesForge keeps extension code behind explicit host callback boundaries:
 
-- native RHS functions loaded into a knowledge base
-- source/sink plugins following [`include/rule_forge_plugin.h`](/C:/projects/cpp/rulesforge/include/rule_forge_plugin.h)
+- RHS host callbacks registered directly into a knowledge base
+- helper predicates registered for supported `eval(native.name(...))` expressions
 
 Operational rules:
 
 - keep callbacks deterministic
 - limit external I/O in rule-triggered code
-- version your plugin binaries with the rule pack that needs them
+- version callback code with the rule pack that needs it
 
 ## 6. Observability
 
@@ -76,20 +77,20 @@ Public install surface from this repo includes:
 - `rule_forge` shared library from `capi/`
 - exported CMake package files under `lib/cmake/RulesForge`
 
-If you are shipping RulesForge as a product dependency, treat that surface as the contract and keep private headers out of your downstream integration docs.
+If you are shipping RulesForge as a product dependency, treat that surface as the contract and keep private headers out of downstream integration docs.
 
 ## 8. Recommended Release Checklist
 
-- confirm build inputs for `TurboNet`, `TurboScript`, `TurboNet`, and `vcpkg`
+- confirm build inputs for `TurboNet`, `TurboScript`, and `vcpkg`
 - compile rules in CI
 - run `ctest --output-on-failure`
-- exercise one JSON example and one CSV example
-- verify plugin binaries load if your rules depend on them
-- document the exact rule pack, plugin pack, and app version together
+- exercise at least one schema-bound JSON or CSV example
+- verify host callback registration if your rules depend on callbacks
+- document the exact rule pack, callback implementation, and app version together
 
 ## 9. Related Docs
 
 - onboarding: [`QUICKSTART.md`](/C:/projects/cpp/rulesforge/docs/QUICKSTART.md)
 - product guide: [`USER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/USER_GUIDE.md)
 - exact DSL reference: [`dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md)
-- data loading practices: [`PRODUCTION_DATABIND_BEST_PRACTICES.md`](/C:/projects/cpp/rulesforge/docs/PRODUCTION_DATABIND_BEST_PRACTICES.md)
+- data binding ownership: [`TURBOSCRIPT_DATABIND_PARSER_COMPARISON.md`](/C:/projects/cpp/rulesforge/docs/TURBOSCRIPT_DATABIND_PARSER_COMPARISON.md)

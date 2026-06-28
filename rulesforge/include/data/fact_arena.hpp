@@ -1,9 +1,9 @@
 #ifndef FACT_ARENA_HPP
 #define FACT_ARENA_HPP
 
-#include <turbo_buffer.h>
 #include "core/fact.hpp"
 #include <new>
+#include <memory>
 #include <vector>
 
 namespace rulesforge {
@@ -13,21 +13,19 @@ namespace rulesforge {
 // This is typically tied to the lifecycle of a Session.
 class FactArena {
 public:
-    explicit FactArena(size_t size = 64 * 1024 * 1024) { // 64MB default
-        mem_init(&arena_, size);
+    explicit FactArena(size_t size = 64 * 1024 * 1024) : reserved_size_(size) { // 64MB default
         extra_facts_.reserve(4);
+        owned_facts_.reserve(16);
     }
 
-    ~FactArena() {
-        destroy_tracked_facts();
-        mem_destroy(&arena_);
-    }
+    ~FactArena() = default;
 
     template<typename... Args>
     Fact* create_fact(Args&&... args) {
-        void* p = mem_alloc(&arena_, sizeof(Fact));
-        if (!p) throw std::bad_alloc();
-        Fact* fact = new (p) Fact(std::forward<Args>(args)...);
+        auto owned = std::make_unique<Fact>(std::forward<Args>(args)...);
+        Fact* fact = owned.get();
+        owned_facts_.push_back(std::move(owned));
+        bytes_used_ += sizeof(Fact);
         if (first_fact_ == nullptr) {
             first_fact_ = fact;
         } else {
@@ -42,30 +40,23 @@ public:
     }
 
     void reset() {
-        destroy_tracked_facts();
-        mem_reset(&arena_);
+        owned_facts_.clear();
+        first_fact_ = nullptr;
+        extra_facts_.clear();
+        bytes_used_ = 0;
     }
 
     Fact* get_first_fact() const { return first_fact_; }
     std::vector<Fact*> const& get_extra_facts() const { return extra_facts_; }
 
     size_t memory_usage() const {
-        return arena_.total_used.load(std::memory_order_relaxed);
+        return bytes_used_;
     }
 
 private:
-    void destroy_tracked_facts() {
-        if (first_fact_ != nullptr) {
-            first_fact_->~Fact();
-            first_fact_ = nullptr;
-        }
-        for (auto* fact : extra_facts_) {
-            fact->~Fact();
-        }
-        extra_facts_.clear();
-    }
-
-    mem_pool_t arena_;
+    size_t reserved_size_ = 0;
+    size_t bytes_used_ = 0;
+    std::vector<std::unique_ptr<Fact>> owned_facts_;
     Fact* first_fact_ = nullptr;
     std::vector<Fact*> extra_facts_;
 };
