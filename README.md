@@ -1,8 +1,8 @@
 # RulesForge
 
-RulesForge is a RETE-based rule engine for C/C++ embedding. It supports dynamic schema and data binding, then executes rules through a JIT-backed runtime.
+RulesForge is a Drools-like rule scripting engine for C/C++ embedding. It combines RETE-based inference, dynamic schema/data binding, and JIT-backed dynamic script execution.
 
-Internally, RFL describes rules and working memory, TurboScript::DataBind handles schema-aware data binding, RETE plans rule propagation, and supported rule kernels run through the JIT execution path.
+Internally, RFL describes facts, rules, queries, and RHS actions; TurboScript::DataBind handles schema-aware data binding; RETE plans rule propagation; and supported predicates, rule kernels, and dynamic script paths run through the JIT-backed runtime.
 
 English: `README.md`
 简体中文: `docs/zh-CN/README.md`

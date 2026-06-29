@@ -1,8 +1,8 @@
 # RulesForge Product Readiness
 
-RulesForge is positioned as a RETE-based rule engine: it supports dynamic schema/data binding and executes supported rule kernels through a JIT-backed runtime.
+RulesForge is positioned as a Drools-like rule scripting engine: it supports RETE-based inference, dynamic schema/data binding, and JIT-backed dynamic script execution.
 
-Architecture details remain layered: RFL describes rule semantics, TurboScript::DataBind handles schema-aware data binding, RETE owns propagation planning, and the JIT path owns supported execution kernels.
+Architecture details remain layered: RFL describes facts, rules, queries, and RHS actions; TurboScript::DataBind handles schema-aware data binding; RETE owns propagation planning; and the JIT-backed runtime owns supported predicates, rule kernels, and dynamic script paths.
 
 This document defines what must be true before a RulesForge build can be described as product-ready.
 
@@ -26,7 +26,7 @@ This document defines what must be true before a RulesForge build can be describ
 
 ### LOW
 
-- Product-facing docs consistently describe RulesForge as a RETE-based rule engine with dynamic data binding and JIT execution.
+- Product-facing docs consistently describe RulesForge as a Drools-like rule scripting engine with RETE inference, dynamic data binding, and JIT-backed dynamic script execution.
 - Debug and explain output identify which predicates and RHS actions are compiled, which fail, and why.
 - Examples are checked against current parser/runtime syntax.
 
@@ -36,7 +36,7 @@ This document defines what must be true before a RulesForge build can be describ
 - `KnowledgeBase::build()` derives the runtime predicate plan, RHS backend plan, and RETE network from that source.
 - RETE owns fact/token/window/query/accumulate orchestration and lifecycle.
 - TurboScript owns RHS command/event execution, RHS expressions, control flow, and external side-effect boundaries.
-- JIT execution owns supported predicate, filter, projection, comparison, collection, temporal, query, and aggregation kernels.
+- JIT-backed execution owns supported predicate, filter, projection, comparison, collection, temporal, query, aggregation, and dynamic script kernels.
 - Host callbacks exist as an integration boundary and must be explicitly registered.
 
 ## Data Binding Contract

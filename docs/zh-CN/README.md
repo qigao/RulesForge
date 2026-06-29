@@ -1,8 +1,8 @@
 # RulesForge
 
-RulesForge 是面向 C/C++ 嵌入式集成的基于 RETE 的规则引擎。它支持动态 schema 和数据绑定，并通过 JIT 后端运行规则。
+RulesForge 是面向 C/C++ 嵌入式集成的类 Drools 规则脚本引擎。它支持基于 RETE 的规则推理、动态 schema/data binding，以及基于 JIT 的动态脚本执行。
 
-内部实现上，RFL 描述规则与 working memory，TurboScript::DataBind 负责 schema-aware 数据绑定，RETE 负责规则传播规划，已支持的规则 kernel 通过 JIT 路径运行。
+内部实现上，RFL 描述事实、规则、查询与 RHS 动作，TurboScript::DataBind 负责 schema-aware 数据绑定，RETE 负责规则传播规划，已支持的谓词、规则 kernel 与动态脚本路径通过 JIT 后端运行。
 
 English: [`README.md`](/C:/projects/cpp/rulesforge/README.md)
 

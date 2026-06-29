@@ -269,6 +269,91 @@ end
             ruleforge_cleanup();
         }
 
+        it("adds schema-bound extended scalar facts through TurboScript DataBind") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+
+            auto schema_path = std::filesystem::temp_directory_path()
+                / "rulesforge_capi_databind_scalars.schema";
+            {
+                std::ofstream schema(schema_path, std::ios::binary);
+                schema << "schema Market [id(12), version(1), byte_order(little)]; "
+                          "message ScalarFact { "
+                          "uuid id; date trade_date; time trade_time; duration latency; "
+                          "decimal price; bigint sequence; money total; bool active; "
+                          "}";
+            }
+
+            std::string drl = std::string("import \"")
+                + schema_path.generic_string()
+                + R"(";
+                    query "FindScalar"
+                        $s : ScalarFact(
+                            id == "01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001",
+                            trade_date == "2026-06-28",
+                            trade_time == "09:30:05.123",
+                            latency == 5405250,
+                            price == "123.45",
+                            sequence == "123456789012345678901234567890",
+                            total == "USD 123.45"
+                        )
+                    end
+                )";
+            check_int_eq(ruleforge_kb_load_drl(kb, drl.c_str()), RULES_FORGE_OK);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            check_not_null(session);
+
+            ruleforge_fact_t fact = nullptr;
+            check_int_eq(
+                ruleforge_session_add_fact_json_schema(
+                    session,
+                    schema_path.string().c_str(),
+                    "ScalarFact",
+                    R"({
+                        "id":"01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001",
+                        "trade_date":"2026-06-28",
+                        "trade_time":"09:30:05.123",
+                        "latency":"1h30m5s250ms",
+                        "price":"123.4500",
+                        "sequence":"000123456789012345678901234567890",
+                        "total":{"amount":"123.4500","currency":"USD"},
+                        "active":true
+                    })",
+                    &fact),
+                RULES_FORGE_OK);
+            check_not_null(fact);
+
+            int64_t latency = 0;
+            check_int_eq(ruleforge_fact_get_field_as_int(fact, "latency", &latency), RULES_FORGE_OK);
+            check_int_eq((int)latency, 5405250);
+
+            int active = 0;
+            check_int_eq(ruleforge_fact_get_field_as_bool(fact, "active", &active), RULES_FORGE_OK);
+            check_int_eq(active, 1);
+
+            char text_buffer[96] = {0};
+            size_t actual_length = 0;
+            check_int_eq(
+                ruleforge_fact_get_field_as_string(
+                    fact, "total", text_buffer, sizeof(text_buffer), &actual_length),
+                RULES_FORGE_OK);
+            check_str_eq(text_buffer, "USD 123.45");
+
+            ruleforge_query_result_t query_result = nullptr;
+            check_int_eq(ruleforge_session_query(session, "FindScalar", &query_result), RULES_FORGE_OK);
+            check_not_null(query_result);
+            check_int_eq(ruleforge_query_result_get_size(query_result), 1);
+
+            check_int_eq(ruleforge_query_result_destroy(query_result), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            std::filesystem::remove(schema_path);
+            ruleforge_cleanup();
+        }
+
         it("resolves short fact names against packaged declarations") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;

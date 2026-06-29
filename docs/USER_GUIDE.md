@@ -2,7 +2,7 @@
 
 This document is the product guide. For exact language support, use [`dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md). If this guide and code ever disagree, code wins.
 
-RulesForge is a RETE-based rule engine. It supports dynamic schema/data binding and executes supported rule kernels through a JIT-backed runtime.
+RulesForge is a Drools-like rule scripting engine. It supports RETE-based inference, dynamic schema/data binding, and JIT-backed dynamic script execution.
 
 ## 1. Choose The Right API Surface
 
@@ -10,7 +10,7 @@ RulesForge exposes three practical integration layers:
 
 - C API in [`include/rule_forge.h`](/C:/projects/cpp/rulesforge/include/rule_forge.h)
 - C++ engine API in `rulesforge/include` plus parser API in `parser/include`
-- explicit host callback boundary through the C API
+- RFL/TurboScript script execution with an explicit host callback boundary through the C API
 
 Recommendation:
 

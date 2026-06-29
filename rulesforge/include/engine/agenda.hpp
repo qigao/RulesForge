@@ -290,6 +290,19 @@ public:
         focus_stack_.push_back(group_name);
     }
 
+    // Pop the current focus group and return to the previous one.
+    // Returns the popped name, or empty string if the stack was already empty.
+    std::string pop_focus() {
+        if (focus_stack_.empty()) return {};
+        std::string top = std::move(focus_stack_.back());
+        focus_stack_.pop_back();
+        return top;
+    }
+
+    bool has_focus_override() const {
+        return !focus_stack_.empty();
+    }
+
     std::string get_focus() const {
         return focus_stack_.empty() ? "MAIN" : focus_stack_.back();
     }

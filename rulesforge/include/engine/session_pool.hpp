@@ -37,16 +37,14 @@ public:
      * @param kb Knowledge base (shared across all sessions)
      * @param pool_size Number of sessions to pre-allocate
      */
-    explicit SessionPool(std::shared_ptr<KnowledgeBase const> kb, size_t pool_size = 10)
+    explicit SessionPool(std::shared_ptr<KnowledgeBase> kb, size_t pool_size = 10)
         : kb_(std::move(kb)) {
 
         // Pre-allocate sessions
         pool_.reserve(pool_size);
         for (size_t i = 0; i < pool_size; ++i) {
             try {
-                // Need to cast away const to call create_session()
-                auto* mutable_kb = const_cast<KnowledgeBase*>(kb_.get());
-                auto session = mutable_kb->create_session();
+                auto session = kb_->create_session();
                 if (session) {
                     available_.push(session.get());
                     pool_.push_back(std::move(session));
@@ -101,8 +99,7 @@ public:
         // Prefer replacing with a fresh session to guarantee zero cross-request state leakage.
         std::shared_ptr<StatefulSession> replacement;
         try {
-            auto* mutable_kb = const_cast<KnowledgeBase*>(kb_.get());
-            auto fresh_session = mutable_kb->create_session();
+            auto fresh_session = kb_->create_session();
             if (fresh_session) {
                 replacement = std::shared_ptr<StatefulSession>(std::move(fresh_session));
             }
@@ -165,7 +162,7 @@ private:
         session->reset();
     }
 
-    std::shared_ptr<KnowledgeBase const> kb_;
+    std::shared_ptr<KnowledgeBase> kb_;
     std::vector<std::shared_ptr<StatefulSession>> pool_;
     std::queue<StatefulSession*> available_;
     mutable std::mutex mutex_;

@@ -194,6 +194,10 @@ static char const *data_bind_error_detail(DataBindStatus status, DataBindError c
   return status_name ? status_name : "unknown DataBind error";
 }
 
+static ConstraintValue data_bind_text_or_nil(char const *text) {
+  return text ? ConstraintValue(std::string(text)) : ConstraintValue(NilValue{});
+}
+
 static ruleforge_status_t map_session_inconsistent(SessionInconsistentException const &e) {
   set_error(e.what());
   return RULES_FORGE_ERROR_SESSION_INCONSISTENT;
@@ -259,6 +263,8 @@ static ConstraintValue data_bind_value_to_constraint(DataBindValue const *value)
     return data_bind_value_as_int64(value);
   case DATA_BIND_VALUE_DOUBLE:
     return data_bind_value_as_double(value);
+  case DATA_BIND_VALUE_BOOL:
+    return static_cast<int64_t>(data_bind_value_as_bool(value) ? 1 : 0);
   case DATA_BIND_VALUE_STRING: {
     char const *text = data_bind_value_as_string(value);
     return text ? std::string(text) : std::string();
@@ -312,6 +318,34 @@ static ConstraintValue data_bind_value_to_constraint(DataBindValue const *value)
       }
     }
     return map;
+  }
+  case DATA_BIND_VALUE_UUID: {
+    char text[64] = {0};
+    return data_bind_text_or_nil(data_bind_value_as_uuid_string(value, text, sizeof(text)));
+  }
+  case DATA_BIND_VALUE_DATETIME: {
+    char text[64] = {0};
+    return data_bind_text_or_nil(data_bind_value_as_datetime_string(value, text, sizeof(text)));
+  }
+  case DATA_BIND_VALUE_DATE: {
+    char text[32] = {0};
+    return data_bind_text_or_nil(data_bind_value_as_date_string(value, text, sizeof(text)));
+  }
+  case DATA_BIND_VALUE_TIME: {
+    char text[32] = {0};
+    return data_bind_text_or_nil(data_bind_value_as_time_string(value, text, sizeof(text)));
+  }
+  case DATA_BIND_VALUE_DURATION:
+    return data_bind_value_as_duration_milliseconds(value);
+  case DATA_BIND_VALUE_DECIMAL: {
+    char text[128] = {0};
+    return data_bind_text_or_nil(data_bind_value_as_decimal_string(value, text, sizeof(text)));
+  }
+  case DATA_BIND_VALUE_BIGINT:
+    return data_bind_text_or_nil(data_bind_value_as_bigint_string(value));
+  case DATA_BIND_VALUE_MONEY: {
+    char text[128] = {0};
+    return data_bind_text_or_nil(data_bind_value_as_money_string(value, text, sizeof(text)));
   }
   }
 
@@ -379,13 +413,22 @@ static ruleforge_status_t insert_data_bind_fact_list(StatefulSession &session,
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
 
-  std::vector<ruleforge_fact_t> inserted;
   size_t count = data_bind_value_count(value);
-  inserted.reserve(count);
+
+  // Phase 1: validate all items and build fact objects BEFORE inserting any.
+  // This ensures we do not leave the session with partially inserted facts if
+  // a later item is invalid.
+  struct BuiltFact {
+    Fact *fact;
+  };
+  std::vector<BuiltFact> built;
+  built.reserve(count);
   for (size_t i = 0; i < count; ++i) {
     DataBindValue const *item = data_bind_value_at(value, i);
     if (!item || data_bind_value_kind(item) != DATA_BIND_VALUE_OBJECT) {
       set_error("TurboScript DataBind list item is not an object fact");
+      // Facts created so far are arena-owned; they will be freed with the session.
+      // They have NOT been add_fact'd yet, so working memory is still clean.
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
     Fact *fact = session.create_fact(fact_type);
@@ -393,8 +436,15 @@ static ruleforge_status_t insert_data_bind_fact_list(StatefulSession &session,
       set_error("Failed to convert TurboScript DataBind list item to fact");
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
-    session.add_fact(fact);
-    inserted.push_back(reinterpret_cast<ruleforge_fact_t>(fact));
+    built.push_back({fact});
+  }
+
+  // Phase 2: all items are valid – insert them atomically.
+  std::vector<ruleforge_fact_t> inserted;
+  inserted.reserve(built.size());
+  for (auto const &bf : built) {
+    session.add_fact(bf.fact);
+    inserted.push_back(reinterpret_cast<ruleforge_fact_t>(bf.fact));
   }
 
   if (out_facts && !inserted.empty()) {
@@ -585,6 +635,147 @@ static ruleforge_status_t load_csv_facts_into_session(StatefulSession *session_p
   turbo_free_csv(&doc);
   return RULES_FORGE_OK;
 }
+
+// Bridge to call exprtk function from ruleforge native callback
+struct TsFuncBridge {
+  exprtk_builtin_fn fn;
+  void *env;
+};
+
+struct RuleForgeExprtkEnv {
+  uint64_t magic;
+  KnowledgeBase *kb;
+  std::vector<TsFuncBridge *> bridges;
+};
+
+constexpr uint64_t kRuleForgeExprtkEnvMagic = 0x5246454558544B31ULL;
+
+static bool is_ruleforge_exprtk_env(const void *env) {
+  if (!env) {
+    return false;
+  }
+
+  auto magic = *reinterpret_cast<const uint64_t *>(env);
+  return magic == kRuleForgeExprtkEnvMagic;
+}
+
+int ts_func_callback_bridge(void *ctx, int argc, const char **argv, char **out_result) {
+  auto *bridge = static_cast<TsFuncBridge *>(ctx);
+  if (!bridge || !bridge->fn)
+    return RULES_FORGE_ERROR_GENERIC;
+
+  std::vector<exprtk_value_t> expr_args;
+  expr_args.reserve(argc);
+  auto free_expr_args = [&]() {
+    for (auto &arg : expr_args) {
+      if (arg.type == EXPRTK_VAL_STRING) {
+        free((void *)arg.data.string.data);
+      }
+    }
+  };
+
+  for (int i = 0; i < argc; ++i) {
+    auto json = parse_turbo_json_or_null(argv[i], argv[i] ? std::strlen(argv[i]) : 0);
+    if (!json) {
+      expr_args.push_back(exprtk_val_num(0.0));
+      continue;
+    }
+
+    switch (turbo_json_type(json.get())) {
+    case TURBO_JSON_NUMBER:
+      expr_args.push_back(exprtk_val_num(turbo_json_number(json.get())));
+      break;
+    case TURBO_JSON_STRING: {
+      size_t const len = turbo_json_string_len(json.get());
+      char const *text = turbo_json_string(json.get());
+      char *internal_s = static_cast<char *>(std::calloc(len + 1, sizeof(char)));
+      if (!internal_s) {
+        expr_args.push_back(exprtk_val_num(0.0));
+        break;
+      }
+      if (text && len > 0) {
+        std::memcpy(internal_s, text, len);
+      }
+      tstr_v tv;
+      tv.data = internal_s;
+      tv.len = len;
+      expr_args.push_back(exprtk_val_str(tv));
+      break;
+    }
+    case TURBO_JSON_BOOL:
+      expr_args.push_back(exprtk_val_num(turbo_json_bool(json.get()) ? 1.0 : 0.0));
+      break;
+    default:
+      expr_args.push_back(exprtk_val_num(0.0));
+      break;
+    }
+  }
+
+  // Call the function
+  exprtk_value_t res =
+      bridge->fn(expr_args.size(), expr_args.data(), (exprtk_env_t *)bridge->env, nullptr);
+
+  json_value_t *json_result = nullptr;
+  if (res.type == EXPRTK_VAL_NUMBER) {
+    json_result = turbo_json_create_number(res.data.number);
+  } else if (res.type == EXPRTK_VAL_STRING) {
+    std::string text(res.data.string.data, res.data.string.len);
+    json_result = turbo_json_create_string(text.c_str());
+  } else {
+    json_result = turbo_json_create_number(0.0);
+  }
+
+  TurboJsonHandle result_handle(json_result);
+  if (!result_handle) {
+    free_expr_args();
+    return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
+  }
+  size_t result_len = 0;
+  TurboJsonStringHandle serialized(turbo_json_serialize(result_handle.get(), &result_len));
+  if (!serialized) {
+    free_expr_args();
+    return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
+  }
+  *out_result = static_cast<char *>(std::calloc(result_len + 1, sizeof(char)));
+  if (!*out_result) {
+    free_expr_args();
+    return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
+  }
+  std::memcpy(*out_result, serialized.get(), result_len);
+
+  free_expr_args();
+
+  return RULES_FORGE_OK;
+}
+
+struct TsPluginRecord {
+  // Owning pointer to the plugin environment (bridges live inside it)
+  RuleForgeExprtkEnv *env = nullptr;
+  // Plugin descriptor returned by ts_api_create (lifetime tied to DLL)
+  const void         *plugin = nullptr;
+  // Plugin instance returned by plugin->load() (may be null for stateless plugins)
+  void               *instance = nullptr;
+};
+
+struct KnowledgeBaseWrapper {
+  std::shared_ptr<KnowledgeBase> kb;
+  std::map<std::string, NativeFunction> native_functions;
+  std::map<std::string, NativeFunction> native_predicates;
+  std::vector<void *> extension_handles;
+  // Tracks every loaded ts_plugin so we can call unload() and delete env on destroy.
+  std::vector<TsPluginRecord> ts_plugin_records;
+};
+
+static void replay_native_extensions(KnowledgeBaseWrapper const *kb_wrapper,
+                                     std::shared_ptr<KnowledgeBase> const &compiled_kb) {
+  for (auto const &[name, func] : kb_wrapper->native_functions) {
+    compiled_kb->register_native_function(name, func.callback, func.user_data);
+  }
+  for (auto const &[name, func] : kb_wrapper->native_predicates) {
+    compiled_kb->register_native_predicate(name, func.callback, func.user_data);
+  }
+}
+
 } // namespace
 
 ruleforge_status_t ruleforge_init() {
@@ -603,22 +794,6 @@ const char *ruleforge_get_version() { return RULEFORGE_VERSION_STRING; }
 
 // Knowledge Base functions
 // Helper function for crossing C++/pure C boundaries safely
-struct KnowledgeBaseWrapper {
-  std::shared_ptr<KnowledgeBase> kb;
-  std::map<std::string, NativeFunction> native_functions;
-  std::map<std::string, NativeFunction> native_predicates;
-  std::vector<void *> extension_handles;
-};
-
-static void replay_native_extensions(KnowledgeBaseWrapper const *kb_wrapper,
-                                     std::shared_ptr<KnowledgeBase> const &compiled_kb) {
-  for (auto const &[name, func] : kb_wrapper->native_functions) {
-    compiled_kb->register_native_function(name, func.callback, func.user_data);
-  }
-  for (auto const &[name, func] : kb_wrapper->native_predicates) {
-    compiled_kb->register_native_predicate(name, func.callback, func.user_data);
-  }
-}
 
 ruleforge_status_t ruleforge_kb_create(ruleforge_knowledge_base_t *out_kb) {
   if (!out_kb) {
@@ -834,6 +1009,30 @@ ruleforge_status_t ruleforge_kb_destroy(ruleforge_knowledge_base_t kb) {
   }
   try {
     auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
+
+    // Unload ts_plugins first: call unload(), then free bridges, then delete env.
+    // This must happen before the KnowledgeBase itself is destroyed so that any
+    // callbacks still registered on it are not called after the env is freed.
+    for (auto &rec : kb_wrapper->ts_plugin_records) {
+      if (rec.plugin && rec.instance) {
+        // Cast back through the original ts_plugin_t* to call unload
+        auto const *plugin = static_cast<const ts_plugin_t *>(rec.plugin);
+        if (plugin->unload) {
+          plugin->unload(rec.instance);
+        }
+      }
+      if (rec.env) {
+        // Free all bridges owned by this env
+        for (auto *bridge : rec.env->bridges) {
+          delete bridge;
+        }
+        rec.env->bridges.clear();
+        delete rec.env;
+        rec.env = nullptr;
+      }
+    }
+    kb_wrapper->ts_plugin_records.clear();
+
     for (void *handle : kb_wrapper->extension_handles) {
       close_library(handle);
     }
@@ -957,14 +1156,20 @@ ruleforge_status_t ruleforge_kb_load_native_function_table(ruleforge_knowledge_b
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
 
+  // Validate all entries before registering any to avoid partial-registration
+  // with a subsequently closed DLL (which would leave dangling callbacks).
+  for (uint32_t i = 0; i < table.function_count; ++i) {
+    auto const &entry = table.functions[i];
+    if (!entry.name || !entry.callback) {
+      close_library(handle);
+      set_error("Function table entry has NULL name or callback");
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+  }
+
   try {
     for (uint32_t i = 0; i < table.function_count; ++i) {
       auto const &entry = table.functions[i];
-      if (!entry.name || !entry.callback) {
-        close_library(handle);
-        set_error("Function table entry has NULL name or callback");
-        return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-      }
       kb_wrapper->native_functions[entry.name] = {
           reinterpret_cast<NativeFunctionCallback>(entry.callback), entry.user_data};
       if (kb_wrapper->kb) {
@@ -983,120 +1188,6 @@ ruleforge_status_t ruleforge_kb_load_native_function_table(ruleforge_knowledge_b
   return RULES_FORGE_OK;
 }
 
-namespace {
-// Bridge to call exprtk function from ruleforge native callback
-struct TsFuncBridge {
-  exprtk_builtin_fn fn;
-  void *env;
-};
-
-int ts_func_callback_bridge(void *ctx, int argc, const char **argv, char **out_result) {
-  auto *bridge = static_cast<TsFuncBridge *>(ctx);
-  if (!bridge || !bridge->fn)
-    return RULES_FORGE_ERROR_GENERIC;
-
-  std::vector<exprtk_value_t> expr_args;
-  expr_args.reserve(argc);
-  auto free_expr_args = [&]() {
-    for (auto &arg : expr_args) {
-      if (arg.type == EXPRTK_VAL_STRING) {
-        free((void *)arg.data.string.data);
-      }
-    }
-  };
-
-  for (int i = 0; i < argc; ++i) {
-    auto json = parse_turbo_json_or_null(argv[i], argv[i] ? std::strlen(argv[i]) : 0);
-    if (!json) {
-      expr_args.push_back(exprtk_val_num(0.0));
-      continue;
-    }
-
-    switch (turbo_json_type(json.get())) {
-    case TURBO_JSON_NUMBER:
-      expr_args.push_back(exprtk_val_num(turbo_json_number(json.get())));
-      break;
-    case TURBO_JSON_STRING: {
-      size_t const len = turbo_json_string_len(json.get());
-      char const *text = turbo_json_string(json.get());
-      char *internal_s = static_cast<char *>(std::calloc(len + 1, sizeof(char)));
-      if (!internal_s) {
-        expr_args.push_back(exprtk_val_num(0.0));
-        break;
-      }
-      if (text && len > 0) {
-        std::memcpy(internal_s, text, len);
-      }
-      tstr_v tv;
-      tv.data = internal_s;
-      tv.len = len;
-      expr_args.push_back(exprtk_val_str(tv));
-      break;
-    }
-    case TURBO_JSON_BOOL:
-      expr_args.push_back(exprtk_val_num(turbo_json_bool(json.get()) ? 1.0 : 0.0));
-      break;
-    default:
-      expr_args.push_back(exprtk_val_num(0.0));
-      break;
-    }
-  }
-
-  // Call the function
-  exprtk_value_t res =
-      bridge->fn(expr_args.size(), expr_args.data(), (exprtk_env_t *)bridge->env, nullptr);
-
-  json_value_t *json_result = nullptr;
-  if (res.type == EXPRTK_VAL_NUMBER) {
-    json_result = turbo_json_create_number(res.data.number);
-  } else if (res.type == EXPRTK_VAL_STRING) {
-    std::string text(res.data.string.data, res.data.string.len);
-    json_result = turbo_json_create_string(text.c_str());
-  } else {
-    json_result = turbo_json_create_number(0.0);
-  }
-
-  TurboJsonHandle result_handle(json_result);
-  if (!result_handle) {
-    free_expr_args();
-    return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
-  }
-  size_t result_len = 0;
-  TurboJsonStringHandle serialized(turbo_json_serialize(result_handle.get(), &result_len));
-  if (!serialized) {
-    free_expr_args();
-    return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
-  }
-  *out_result = static_cast<char *>(std::calloc(result_len + 1, sizeof(char)));
-  if (!*out_result) {
-    free_expr_args();
-    return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
-  }
-  std::memcpy(*out_result, serialized.get(), result_len);
-
-  free_expr_args();
-
-  return RULES_FORGE_OK;
-}
-
-struct RuleForgeExprtkEnv {
-  uint64_t magic;
-  KnowledgeBase *kb;
-  std::vector<TsFuncBridge *> bridges;
-};
-
-constexpr uint64_t kRuleForgeExprtkEnvMagic = 0x5246454558544B31ULL;
-
-static bool is_ruleforge_exprtk_env(const void *env) {
-  if (!env) {
-    return false;
-  }
-
-  auto magic = *reinterpret_cast<const uint64_t *>(env);
-  return magic == kRuleForgeExprtkEnvMagic;
-}
-
-} // namespace
 
 extern "C" void exprtk_env_add_module(exprtk_env_t *env, const exprtk_module_t *mod) {
   if (!env || !mod)
@@ -1142,11 +1233,18 @@ ruleforge_status_t ruleforge_kb_load_ts_plugin(ruleforge_knowledge_base_t kb,
     return RULES_FORGE_ERROR_GENERIC;
   }
 
+  // Allocate the env and call the plugin load function.
+  // env and all TsFuncBridge objects it owns are tracked in ts_plugin_records
+  // so that ruleforge_kb_destroy() can correctly call unload() and release them.
   auto *rfe = new RuleForgeExprtkEnv{kRuleForgeExprtkEnvMagic, kb_wrapper->kb.get()};
   void *instance = plugin->load(rfe, nullptr);
-  if (!instance) {
-    // Plugin load failed or just stateless
-  }
+  // Note: a null instance means the plugin is stateless; that is acceptable.
+
+  TsPluginRecord record;
+  record.env      = rfe;
+  record.plugin   = static_cast<const void *>(plugin);
+  record.instance = instance;
+  kb_wrapper->ts_plugin_records.push_back(record);
 
   kb_wrapper->extension_handles.push_back(handle);
   last_error[0] = '\0';

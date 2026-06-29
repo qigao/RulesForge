@@ -45,6 +45,13 @@ FieldType tbe_type_to_field_type(std::string_view type)
   if (type == "double") {
     return FT_Double;
   }
+  if (type == "uuid" || type == "datetime" || type == "date" || type == "time"
+      || type == "decimal" || type == "bigint" || type == "money") {
+    return FT_String;
+  }
+  if (type == "duration") {
+    return FT_Long;
+  }
   if (type == "int64" || type == "int64_t" || type == "uint64" || type == "uint64_t") {
     return FT_Long;
   }

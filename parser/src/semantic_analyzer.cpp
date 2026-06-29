@@ -61,6 +61,12 @@ bool is_accumulate_expression_text(std::string const& text)
 {
   return text.find_first_of("+-*/(") != std::string::npos;
 }
+
+std::string short_type_name(std::string const& type_name)
+{
+  auto const dot_pos = type_name.find_last_of('.');
+  return dot_pos == std::string::npos ? type_name : type_name.substr(dot_pos + 1);
+}
 }  // anonymous namespace
 
 void analyze_constraint_node_recursive(ConstraintNode* node,
@@ -230,9 +236,30 @@ void SemanticAnalyzer::build_schema()
   // Number supports intValue, doubleValue, longValue, floatValue accessors
   type_schemas_["Number"] = {"intValue", "doubleValue", "longValue", "floatValue", "value"};
 
+  std::unordered_set<std::string> enum_type_names;
+  enum_type_names.reserve(state_.parsed_enums.size() * 2);
+  for (auto const& enum_decl : state_.parsed_enums) {
+    enum_type_names.insert(enum_decl.enum_name);
+    enum_type_names.insert(short_type_name(enum_decl.enum_name));
+    if (!enum_decl.source_package.empty()
+        && enum_decl.enum_name.find('.') == std::string::npos)
+    {
+      enum_type_names.insert(enum_decl.source_package + "." + enum_decl.enum_name);
+    }
+  }
+
   for (auto& decl : state_.parsed_declarations) {
     std::set<std::string> fields;
-    for (auto const& field : decl.fields) {
+    for (auto& field : decl.fields) {
+      if (field.type == FT_Object && field.type_params.size() == 1) {
+        auto const& custom_type = field.type_params.front().custom_type;
+        if (enum_type_names.count(custom_type) != 0
+            || enum_type_names.count(short_type_name(custom_type)) != 0)
+        {
+          field.type = FT_String;
+          field.type_params.clear();
+        }
+      }
       fields.insert(field.name);
     }
 

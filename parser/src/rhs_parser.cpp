@@ -2,6 +2,7 @@
 #include "core/logging_control.hpp"
 #include "expression_descriptor.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <regex>
 #include <unordered_set>
@@ -786,6 +787,14 @@ FieldAssignment RhsParser::Parser::parse_value() {
     assign.has_precomputed_literal = true;
     assign.precomputed_literal = int64_t(0);
     advance();
+  } else if (check(Token::TOK_IDENTIFIER) && lexer_.peek().type != Token::TOK_DOT &&
+             std::all_of(current_.text.begin(), current_.text.end(), [](unsigned char ch) {
+               return std::isupper(ch) || std::isdigit(ch) || ch == '_';
+             })) {
+    assign.type = RhsValueType::STRING;
+    assign.string_literal = advance().text;
+    assign.has_precomputed_literal = true;
+    assign.precomputed_literal = assign.string_literal;
   } else if (check(Token::TOK_INTEGER)) {
     assign.type = RhsValueType::NUMERIC;
     Token num = advance();

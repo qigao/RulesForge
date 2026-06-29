@@ -1,6 +1,6 @@
 # RulesForge Deployment Guide
 
-This guide focuses on the supported product shape: a RETE-based rule engine with dynamic schema/data binding and JIT execution.
+This guide focuses on the supported product shape: a Drools-like rule scripting engine with RETE inference, dynamic schema/data binding, and JIT-backed dynamic script execution.
 
 ## 1. Build Once, Reuse Often
 

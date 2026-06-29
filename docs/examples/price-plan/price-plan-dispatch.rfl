@@ -16,9 +16,28 @@ declare QuantityInput
     quantity: int
 end
 
+enum Currency
+    CNY
+    USD
+end
+
+declare DiscountTier
+    currency: Currency
+    unitPrice: double
+    minQuantity: int
+    discountRate: double
+end
+
+declare SelectedDiscountTier
+    currency: Currency
+    quantity: int
+    unitPrice: double
+    minQuantity: int
+    discountRate: double
+end
+
 declare CurrencyPriceResult
-    activePlan: String
-    currency: String
+    currency: Currency
     quantity: int
     unitPrice: double
     discountRate: double
@@ -26,109 +45,50 @@ declare CurrencyPriceResult
     totalPrice: double
 end
 
-// Generated from CNY discount_rules. Highest min_quantity rules have higher salience.
+// Discount tiers are configuration facts. Load them from JSON/DataBind or host code
+// before firing rules.
 
-rule "standard CNY price for quantity >= 5"
+rule "select discount tier per currency"
     salience 100
     when
-        $input : QuantityInput(quantity >= 5)
-        not CurrencyPriceResult(currency == "CNY")
+        $input : QuantityInput($quantity : quantity, quantity >= 1)
+        $tier : DiscountTier($currency : currency,
+                             $unitPrice : unitPrice,
+                             $minQuantity : minQuantity,
+                             minQuantity <= $quantity,
+                             $discountRate : discountRate)
+        not DiscountTier(currency == $currency,
+                         minQuantity > $minQuantity,
+                         minQuantity <= $quantity)
+        not SelectedDiscountTier(currency == $currency,
+                                 quantity == $quantity)
     then
-        insert CurrencyPriceResult {
-            activePlan = "standard",
-            currency = "CNY",
+        insert SelectedDiscountTier {
+            currency = $tier.currency,
             quantity = $input.quantity,
-            unitPrice = 6.5,
-            discountRate = 0.75,
-            totalBeforeDiscount = $input.quantity * 6.5,
-            totalPrice = $input.quantity * 6.5 * 0.75
+            unitPrice = $tier.unitPrice,
+            minQuantity = $tier.minQuantity,
+            discountRate = $tier.discountRate
         }
 end
 
-rule "standard CNY price for quantity 3 to 4"
-    salience 99
+rule "calculate selected currency price"
+    salience 90
     when
-        $input : QuantityInput(quantity >= 3, quantity < 5)
-        not CurrencyPriceResult(currency == "CNY")
+        $tier : SelectedDiscountTier($currency : currency,
+                                     $quantity : quantity,
+                                     $unitPrice : unitPrice,
+                                     $discountRate : discountRate)
+        not CurrencyPriceResult(currency == $currency,
+                                quantity == $quantity)
     then
         insert CurrencyPriceResult {
-            activePlan = "standard",
-            currency = "CNY",
-            quantity = $input.quantity,
-            unitPrice = 6.5,
-            discountRate = 0.9,
-            totalBeforeDiscount = $input.quantity * 6.5,
-            totalPrice = $input.quantity * 6.5 * 0.9
-        }
-end
-
-rule "standard CNY price for quantity 1 to 2"
-    salience 98
-    when
-        $input : QuantityInput(quantity >= 1, quantity < 3)
-        not CurrencyPriceResult(currency == "CNY")
-    then
-        insert CurrencyPriceResult {
-            activePlan = "standard",
-            currency = "CNY",
-            quantity = $input.quantity,
-            unitPrice = 6.5,
-            discountRate = 1.0,
-            totalBeforeDiscount = $input.quantity * 6.5,
-            totalPrice = $input.quantity * 6.5
-        }
-end
-
-// Generated from USD discount_rules. Highest min_quantity rules have higher salience.
-
-rule "standard USD price for quantity >= 5"
-    salience 100
-    when
-        $input : QuantityInput(quantity >= 5)
-        not CurrencyPriceResult(currency == "USD")
-    then
-        insert CurrencyPriceResult {
-            activePlan = "standard",
-            currency = "USD",
-            quantity = $input.quantity,
-            unitPrice = 1.25,
-            discountRate = 0.7,
-            totalBeforeDiscount = $input.quantity * 1.25,
-            totalPrice = $input.quantity * 1.25 * 0.7
-        }
-end
-
-rule "standard USD price for quantity 3 to 4"
-    salience 99
-    when
-        $input : QuantityInput(quantity >= 3, quantity < 5)
-        not CurrencyPriceResult(currency == "USD")
-    then
-        insert CurrencyPriceResult {
-            activePlan = "standard",
-            currency = "USD",
-            quantity = $input.quantity,
-            unitPrice = 1.25,
-            discountRate = 0.85,
-            totalBeforeDiscount = $input.quantity * 1.25,
-            totalPrice = $input.quantity * 1.25 * 0.85
-        }
-end
-
-rule "standard USD price for quantity 1 to 2"
-    salience 98
-    when
-        $input : QuantityInput(quantity >= 1, quantity < 3)
-        not CurrencyPriceResult(currency == "USD")
-    then
-        insert CurrencyPriceResult {
-            activePlan = "standard",
-            currency = "USD",
-            quantity = $input.quantity,
-            unitPrice = 1.25,
-            discountRate = 1.0,
-            totalBeforeDiscount = $input.quantity * 1.25,
-            totalPrice = $input.quantity * 1.25
+            currency = $tier.currency,
+            quantity = $tier.quantity,
+            unitPrice = $tier.unitPrice,
+            discountRate = $tier.discountRate,
+            totalBeforeDiscount = $tier.quantity * $tier.unitPrice,
+            totalPrice = $tier.quantity * $tier.unitPrice * $tier.discountRate
         }
 end
 

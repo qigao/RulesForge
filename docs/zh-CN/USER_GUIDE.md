@@ -2,7 +2,7 @@
 
 此文是产品层指南；精确语法以 [`../dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md) 为准。若本文与代码不一致，以代码为准。
 
-RulesForge 是基于 RETE 的规则引擎。它支持动态 schema 和数据绑定，并通过 JIT 后端运行已支持的规则 kernel。
+RulesForge 是类 Drools 的规则脚本引擎。它支持基于 RETE 的规则推理、动态 schema/data binding，以及基于 JIT 的动态脚本执行。
 
 ## 1. 先选对 API 面
 
@@ -10,7 +10,7 @@ RulesForge 当前有三层可实际集成的接口：
 
 - 公开 C API：[`include/rule_forge.h`](/C:/projects/cpp/rulesforge/include/rule_forge.h)
 - C++ 引擎 API：`rulesforge/include` 與 `parser/include`
-- 通过 C API 暴露的显式 host callback 边界
+- RFL/TurboScript 脚本执行，以及通过 C API 暴露的显式 host callback 边界
 
 建议：
 

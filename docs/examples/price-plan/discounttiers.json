@@ -1,0 +1,21 @@
+{
+  "note": "默认方案",
+  "currencies": {
+    "CNY": {
+      "price": 6.5,
+      "discount_rules": [
+        { "min_quantity": 1, "discount_rate": 1 },
+        { "min_quantity": 3, "discount_rate": 0.9 },
+        { "min_quantity": 5, "discount_rate": 0.75 }
+      ]
+    },
+    "USD": {
+      "price": 1.25,
+      "discount_rules": [
+        { "min_quantity": 1, "discount_rate": 1 },
+        { "min_quantity": 3, "discount_rate": 0.85 },
+        { "min_quantity": 5, "discount_rate": 0.7 }
+      ]
+    }
+  }
+}

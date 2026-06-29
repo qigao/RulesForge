@@ -440,6 +440,11 @@ int StatefulSession::fire_all_rules(int max_rules) {
     agenda_.clear_noloop();  // Reset no-loop blocking for next fire_all_rules cycle
     agenda_.clear_lock_on_active();  // P1 FIX: Reset lock-on-active blocking
     agenda_.clear_activation_groups();  // P1 FIX: Clear activation group tracking
+    // Clear the focus stack so the next fire_all_rules() cycle starts from MAIN.
+    // Callers who want persistent focus must call set_focus() again before the next cycle.
+    while (agenda_.has_focus_override()) {
+        agenda_.pop_focus();
+    }
 
     return total_fired_count;
 }
@@ -873,6 +878,8 @@ void StatefulSession::end_rhs_transaction(bool commit) {
             validate_fact_for_insert(*fact);
         } catch (...) {
             rollback_ok = false;
+            loge("Rollback: fact ID {} failed schema re-validation; rollback aborted for this fact.",
+                 *it);
             continue;
         }
         fact->fields = snapshot_it->second;
@@ -880,6 +887,7 @@ void StatefulSession::end_rhs_transaction(bool commit) {
             propagate_modify(fact, nullptr);
         } catch (...) {
             rollback_ok = false;
+            loge("Rollback: propagate_modify failed for fact ID {}.", *it);
         }
     }
 
@@ -893,6 +901,7 @@ void StatefulSession::end_rhs_transaction(bool commit) {
             retract_fact(inserted);
         } catch (...) {
             rollback_ok = false;
+            loge("Rollback: failed to retract inserted fact ID {}.", *it);
         }
     }
 
@@ -909,6 +918,7 @@ void StatefulSession::end_rhs_transaction(bool commit) {
             add_fact(retracted);
         } catch (...) {
             rollback_ok = false;
+            loge("Rollback: failed to re-insert retracted fact ID {}.", retracted->id);
         }
     }
 

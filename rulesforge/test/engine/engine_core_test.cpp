@@ -247,6 +247,54 @@ suite("RFL Engine") {
             }
             check(kb->get_parser_state().parsed_enums.size() == 1);
         }
+
+    }
+
+    group("Enums") {
+        it("uses bare enum symbols as string-compatible rule values") {
+            auto session = build_session(R"(
+                enum Currency
+                    CNY
+                    USD
+                end
+
+                declare Price
+                    currency: Currency
+                end
+
+                declare Result
+                    currency: Currency
+                end
+
+                rule "Seed CNY"
+                when
+                    not Price(currency == CNY)
+                then
+                    insert Price { currency = CNY }
+                end
+
+                rule "Copy CNY"
+                when
+                    $price : Price(currency == CNY)
+                    not Result(currency == CNY)
+                then
+                    insert Result { currency = $price.currency }
+                end
+
+                query "Results"
+                    $result : Result()
+                end
+            )");
+
+            check(session->fire_all_rules() == 2);
+            auto results = session->execute_query("Results");
+            check(results.size() == 1);
+            if (!results.empty()) {
+                auto currency = results.single().getFieldAs<std::string>("$result", "currency");
+                check(currency.has_value());
+                check(*currency == "CNY");
+            }
+        }
     }
 
     group("MIR execution plan") {

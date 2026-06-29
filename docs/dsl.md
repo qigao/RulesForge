@@ -146,12 +146,12 @@ Enum values can be used in constraints and assignments:
 declare Order
     id: int
     status: String
-    priority: String
+    priority: Priority
 end
 
 rule "HighPriorityOrders"
 when
-    $o: Order(priority == "HIGH", status == "PENDING")
+    $o: Order(priority == HIGH, status == "PENDING")
 then
     update $o { status = "CONFIRMED" }
 end
@@ -161,7 +161,7 @@ Notes:
 - Enum values are symbolic names (identifiers)
 - Trailing commas are optional
 - Enums are registered as types in the semantic analyzer
-- Currently treated as String values at runtime
+- Currently stored as String-compatible values at runtime
 
 ## 3. Rule Definition
 
