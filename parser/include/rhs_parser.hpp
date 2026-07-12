@@ -49,7 +49,7 @@ private:
     struct Token {
         enum Type {
             TOK_UPDATE, TOK_INSERT, TOK_INSERT_LOGICAL, TOK_RETRACT, TOK_HALT, TOK_SET_FOCUS,
-            TOK_INVOKE, TOK_IF, TOK_ELSE, TOK_FOR, TOK_IN,
+            TOK_IF, TOK_ELSE, TOK_FOR, TOK_IN,
             TOK_WHILE, TOK_SWITCH, TOK_CASE, TOK_DEFAULT, TOK_BREAK, TOK_CONTINUE,
             TOK_IDENTIFIER, TOK_VARIABLE, TOK_STRING, TOK_INTEGER, TOK_DOUBLE, TOK_TRUE, TOK_FALSE,
             TOK_LBRACE, TOK_RBRACE, TOK_LPAREN, TOK_RPAREN, TOK_COMMA, TOK_DOT, TOK_ASSIGN,
@@ -96,7 +96,6 @@ private:
         CompiledAction parse_retract();
         CompiledAction parse_halt();
         CompiledAction parse_set_focus();
-        CompiledAction parse_invoke();
         CompiledAction parse_if();
         CompiledAction parse_for();
         CompiledAction parse_while();
@@ -104,7 +103,6 @@ private:
         CompiledAction parse_break();
         CompiledAction parse_continue();
         FieldAssignment parse_value();
-        FieldAssignment parse_native_call_value();
         std::vector<FieldAssignment> parse_field_assignments();
         FieldAssignment parse_field_assignment();
         std::string parse_expression();

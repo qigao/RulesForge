@@ -2,8 +2,8 @@
 #include "core/logging_control.hpp"
 
 #include "engine/rfl_accumulators.hpp"
-#include "engine/mir_execution_plan.hpp"
 #include "engine/rhs_backend_plan.hpp"
+#include "engine/runtime_predicate.hpp"
 #include "rete/beta_builder.hpp"
 #include "rete/compiled_network.hpp"
 #include "rete/rete_node.hpp"
@@ -20,19 +20,6 @@
 using namespace rulesforge;
 
 namespace {
-std::unique_ptr<rulesforge::MirExecutionPlan>
-default_mir_execution_plan_compiler(std::vector<ParsedRule> const& rules,
-                                    std::vector<ParsedQuery> const& queries,
-                                    std::vector<ParsedDeclaration> const& declarations,
-                                    std::string* error_out) {
-    return rulesforge::MirExecutionPlan::compile(rules, queries, declarations, error_out);
-}
-
-KnowledgeBase::MirExecutionPlanCompiler& mir_execution_plan_compiler() {
-    static KnowledgeBase::MirExecutionPlanCompiler compiler = default_mir_execution_plan_compiler;
-    return compiler;
-}
-
 std::string trim_ascii(std::string value) {
     auto not_space = [](unsigned char c) { return std::isspace(c) == 0; };
     value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
@@ -73,112 +60,6 @@ std::string native_predicate_arg_to_string(ConstraintValue const& value) {
         value);
 }
 
-bool default_mir_execution_plan_self_check(rulesforge::MirExecutionPlan const& plan,
-                                           std::vector<ParsedRule> const& processed_rules,
-                                           std::string* error_out) {
-    std::int64_t const mir_count = plan.run_rule_count();
-    if (mir_count != static_cast<std::int64_t>(processed_rules.size())) {
-        if (error_out) {
-            *error_out = "MIR execution plan rule count self-check mismatch";
-        }
-        return false;
-    }
-
-    for (std::size_t index = 0; index < processed_rules.size(); ++index) {
-        if (plan.run_rule_salience(index) != processed_rules[index].salience
-            || plan.run_rule_enabled(index) != processed_rules[index].enabled) {
-            if (error_out) {
-                *error_out = "MIR execution plan rule metadata self-check failed";
-            }
-            return false;
-        }
-    }
-
-    auto runtime_compare = [&](CompareOp op, ConstraintValue lhs, ConstraintValue rhs) {
-        auto predicate_id = plan.compare_predicate_id(op);
-        if (!predicate_id) {
-            return false;
-        }
-        auto result = plan.run_runtime_predicate(
-            rulesforge::MirRuntimePredicateRef{rulesforge::MirRuntimePredicateKind::Compare, *predicate_id},
-            {std::move(lhs), std::move(rhs)});
-        return result.value_or(false);
-    };
-
-    if (!runtime_compare(CompareOp::GE, ConstraintValue{std::int64_t{2}}, ConstraintValue{std::int64_t{2}})
-        || runtime_compare(CompareOp::LT, ConstraintValue{std::int64_t{2}}, ConstraintValue{std::int64_t{2}})
-        || !runtime_compare(CompareOp::GT, ConstraintValue{2.5}, ConstraintValue{2.0})
-        || runtime_compare(CompareOp::LE, ConstraintValue{2.5}, ConstraintValue{2.0})
-        || !runtime_compare(CompareOp::EQ, ConstraintValue{std::string{"gold"}}, ConstraintValue{std::string{"gold"}})
-        || !runtime_compare(CompareOp::NE, ConstraintValue{std::string{"gold"}}, ConstraintValue{std::string{"silver"}})
-        || !runtime_compare(CompareOp::GT, ConstraintValue{std::string{"silver"}}, ConstraintValue{std::string{"gold"}})
-        || !runtime_compare(CompareOp::LE, ConstraintValue{std::string{"gold"}}, ConstraintValue{std::string{"silver"}})
-        || runtime_compare(CompareOp::EQ, ConstraintValue{std::string{"gold"}}, ConstraintValue{std::string{"silver"}})) {
-        if (error_out) {
-            *error_out = "MIR execution plan compare self-check failed";
-        }
-        return false;
-    }
-
-    return true;
-}
-
-KnowledgeBase::MirExecutionPlanSelfCheck& mir_execution_plan_self_check() {
-    static KnowledgeBase::MirExecutionPlanSelfCheck self_check = default_mir_execution_plan_self_check;
-    return self_check;
-}
-
-rulesforge::MirExecutionPlanSummary make_unavailable_mir_summary(
-    std::vector<ParsedRule> const& processed_rules,
-    std::vector<ParsedQuery> const& parsed_queries) {
-    rulesforge::MirExecutionPlanSummary summary;
-    summary.rule_count = processed_rules.size();
-    summary.query_count = parsed_queries.size();
-    summary.rule_graph_count = processed_rules.size();
-    summary.query_coverage_count = parsed_queries.size();
-    summary.query_graph_count = parsed_queries.size();
-    summary.lowering_errors.emplace_back("mir_unavailable");
-    return summary;
-}
-
-std::string format_unavailable_mir_summary(rulesforge::MirExecutionPlanSummary const& s) {
-    std::ostringstream out;
-    out << "MIR summary: available=false"
-        << ", rules=" << s.rule_count
-        << ", queries=" << s.query_count
-        << ", fixed_i64_compare=0"
-        << ", fixed_double_compare=0"
-        << ", fixed_string_compare=0"
-        << ", compare_predicates=0"
-        << ", numeric_literal_predicates=0"
-        << ", numeric_expression_predicates=0"
-        << ", value_list_predicates=0"
-        << ", eval_expression_predicates=0"
-        << ", generic_i64_compare=false"
-        << ", generic_double_compare=false"
-        << ", numeric_compare_predicates=false"
-        << ", string_compare_predicates=false"
-        << ", string_compare_support=false"
-        << ", string_contains_support=false"
-        << ", string_matches_support=false"
-        << ", string_affix_support=false"
-        << ", string_length_is_support=false"
-        << ", numeric_literal_support=false"
-        << ", rule_coverage=0"
-        << ", query_coverage=" << s.query_coverage_count
-        << ", rule_graphs=" << s.rule_graph_count
-        << ", rule_graph_predicates=0"
-        << ", query_graphs=" << s.query_graph_count
-        << ", query_graph_predicates=0"
-        << ", lowering_errors=";
-    for (std::size_t index = 0; index < s.lowering_errors.size(); ++index) {
-        if (index != 0) {
-            out << "|";
-        }
-        out << s.lowering_errors[index];
-    }
-    return out.str();
-}
 } // namespace
 
 KnowledgeBase::KnowledgeBase(private_key) {
@@ -194,22 +75,6 @@ KnowledgeBase::KnowledgeBase(private_key) {
 }
 
 KnowledgeBase::~KnowledgeBase() {}
-
-KnowledgeBase::MirExecutionPlanCompiler KnowledgeBase::set_mir_execution_plan_compiler_for_testing(
-    MirExecutionPlanCompiler compiler) {
-    auto& current = mir_execution_plan_compiler();
-    auto previous = current;
-    current = compiler ? compiler : default_mir_execution_plan_compiler;
-    return previous;
-}
-
-KnowledgeBase::MirExecutionPlanSelfCheck KnowledgeBase::set_mir_execution_plan_self_check_for_testing(
-    MirExecutionPlanSelfCheck self_check) {
-    auto& current = mir_execution_plan_self_check();
-    auto previous = current;
-    current = self_check ? self_check : default_mir_execution_plan_self_check;
-    return previous;
-}
 
 std::shared_ptr<KnowledgeBase> KnowledgeBase::create(parser_state&& state) {
     logd("KnowledgeBase::create -> Creating new knowledge base from parser state with {} rules.",
@@ -240,59 +105,6 @@ FactTypeRegistry& KnowledgeBase::get_fact_type_registry() { return fact_type_reg
 
 FactTypeRegistry const& KnowledgeBase::get_fact_type_registry() const { return fact_type_registry_; }
 
-rulesforge::MirExecutionPlanSummary KnowledgeBase::mir_summary() const {
-    return mir_execution_plan_
-        ? mir_execution_plan_->summary()
-        : make_unavailable_mir_summary(processed_rules_, parser_state_.parsed_queries);
-}
-
-std::string KnowledgeBase::mir_summary_text() const {
-    if (mir_execution_plan_) {
-        return mir_execution_plan_->format_summary();
-    }
-    return format_unavailable_mir_summary(mir_summary());
-}
-
-std::string KnowledgeBase::mir_debug_dump() const {
-    if (mir_execution_plan_) {
-        return mir_execution_plan_->format_debug_dump();
-    }
-    return mir_summary_text()
-        + "\nMIR rule coverage:\n  none\nMIR query coverage:\n  none\nMIR rule graphs:\n  none\nMIR query graphs:\n  none\n";
-}
-
-std::int64_t KnowledgeBase::mir_rule_count() const {
-    return mir_execution_plan_ ? mir_execution_plan_->run_rule_count() : -1;
-}
-
-std::int64_t KnowledgeBase::mir_rule_salience(std::size_t rule_index) const {
-    return mir_execution_plan_ ? mir_execution_plan_->run_rule_salience(rule_index) : 0;
-}
-
-bool KnowledgeBase::mir_rule_enabled(std::size_t rule_index) const {
-    return mir_execution_plan_ ? mir_execution_plan_->run_rule_enabled(rule_index) : false;
-}
-
-std::vector<rulesforge::MirRuleCoverage> const& KnowledgeBase::mir_rule_coverages() const {
-    static std::vector<rulesforge::MirRuleCoverage> const empty;
-    return mir_execution_plan_ ? mir_execution_plan_->rule_coverages() : empty;
-}
-
-std::vector<rulesforge::MirQueryCoverage> const& KnowledgeBase::mir_query_coverages() const {
-    static std::vector<rulesforge::MirQueryCoverage> const empty;
-    return mir_execution_plan_ ? mir_execution_plan_->query_coverages() : empty;
-}
-
-std::vector<rulesforge::MirRuleGraph> const& KnowledgeBase::mir_rule_graphs() const {
-    static std::vector<rulesforge::MirRuleGraph> const empty;
-    return mir_execution_plan_ ? mir_execution_plan_->rule_graphs() : empty;
-}
-
-std::vector<rulesforge::MirQueryGraph> const& KnowledgeBase::mir_query_graphs() const {
-    static std::vector<rulesforge::MirQueryGraph> const empty;
-    return mir_execution_plan_ ? mir_execution_plan_->query_graphs() : empty;
-}
-
 rulesforge::RhsBackendPlanSummary KnowledgeBase::rhs_backend_summary() const {
     return rhs_backend_plan_ ? rhs_backend_plan_->summary() : rulesforge::RhsBackendPlanSummary{};
 }
@@ -301,7 +113,7 @@ std::string KnowledgeBase::rhs_backend_summary_text() const {
     if (rhs_backend_plan_) {
         return rhs_backend_plan_->format_summary();
     }
-    return "RHS backend summary: turboscript_available=false, rule_coverage=0, turboscript_mir_rules=0, compile_error_rules=0, commands=0, conditions=0, external_side_effects=0, external_side_effect_names=none, lowering_errors=rhs_backend_plan_unavailable";
+    return "RHS backend summary: cpp_action_plan_available=false, rule_coverage=0, cpp_action_plan_rules=0, compile_error_rules=0, commands=0, conditions=0, lowering_errors=rhs_backend_plan_unavailable";
 }
 
 std::string KnowledgeBase::rhs_backend_debug_dump() const {
@@ -316,68 +128,10 @@ std::vector<rulesforge::RhsBackendCoverage> const& KnowledgeBase::rhs_backend_co
     return rhs_backend_plan_ ? rhs_backend_plan_->coverages() : empty;
 }
 
-std::optional<std::size_t> KnowledgeBase::mir_compare_predicate_id(CompareOp op) const {
-    return mir_execution_plan_ ? mir_execution_plan_->compare_predicate_id(op) : std::nullopt;
-}
-
-std::optional<std::size_t> KnowledgeBase::mir_numeric_compare_predicate_id(CompareOp op) const {
-    return mir_compare_predicate_id(op);
-}
-
-std::optional<std::size_t> KnowledgeBase::mir_numeric_literal_predicate_id(CompareOp op,
-                                                                           ConstraintValue const& literal) const {
-    return mir_execution_plan_ ? mir_execution_plan_->numeric_literal_predicate_id(op, literal) : std::nullopt;
-}
-
-std::optional<std::size_t> KnowledgeBase::mir_numeric_expression_predicate_id(CompareOp op,
-                                                                              std::string const& expression) const {
-    return mir_execution_plan_ ? mir_execution_plan_->numeric_expression_predicate_id(op, expression) : std::nullopt;
-}
-
-std::vector<std::string> const* KnowledgeBase::mir_numeric_expression_predicate_variables(
-    std::size_t predicate_id) const {
-    return mir_execution_plan_ ? mir_execution_plan_->numeric_expression_predicate_variables(predicate_id) : nullptr;
-}
-
-std::optional<std::size_t> KnowledgeBase::mir_numeric_value_expression_id(
-    std::string const& expression) const {
-    return mir_execution_plan_ ? mir_execution_plan_->numeric_value_expression_id(expression) : std::nullopt;
-}
-
-std::vector<std::string> const* KnowledgeBase::mir_numeric_value_expression_variables(
-    std::size_t expression_id) const {
-    return mir_execution_plan_ ? mir_execution_plan_->numeric_value_expression_variables(expression_id) : nullptr;
-}
-
-std::optional<double> KnowledgeBase::mir_runtime_numeric_value_expression(
-    std::size_t expression_id,
-    std::vector<ConstraintValue> const& args) const {
-    return mir_execution_plan_ ? mir_execution_plan_->run_runtime_numeric_value_expression(expression_id, args)
-                               : std::nullopt;
-}
-
-std::optional<std::size_t> KnowledgeBase::mir_value_list_predicate_id(
-    CompareOp op,
-    std::vector<ConstraintValue> const& values) const {
-    return mir_execution_plan_ ? mir_execution_plan_->value_list_predicate_id(op, values) : std::nullopt;
-}
-
-std::optional<std::size_t> KnowledgeBase::mir_eval_expression_predicate_id(
-    std::string const& expression) const {
-    return mir_execution_plan_ ? mir_execution_plan_->eval_expression_predicate_id(expression) : std::nullopt;
-}
-
-std::vector<std::string> const* KnowledgeBase::mir_eval_expression_predicate_variables(
-    std::size_t predicate_id) const {
-    return mir_execution_plan_ ? mir_execution_plan_->eval_expression_predicate_variables(predicate_id) : nullptr;
-}
-
 std::optional<bool> KnowledgeBase::runtime_predicate(
     rulesforge::RuntimePredicateRef predicate,
     std::vector<ConstraintValue> const& args) const {
     switch (predicate.backend) {
-        case rulesforge::RuntimePredicateBackend::MirJit:
-            return mir_execution_plan_ ? mir_execution_plan_->run_runtime_predicate(predicate, args) : std::nullopt;
         case rulesforge::RuntimePredicateBackend::Native:
             if (!predicate.external_name.empty()) {
                 auto id = native_predicate_id(predicate.external_name);
@@ -391,71 +145,9 @@ std::optional<bool> KnowledgeBase::runtime_predicate(
     return std::nullopt;
 }
 
-std::optional<bool> KnowledgeBase::mir_runtime_predicate(
-    rulesforge::MirRuntimePredicateRef predicate,
-    std::vector<ConstraintValue> const& args) const {
-    return runtime_predicate(predicate, args);
-}
-
-std::optional<std::int64_t> KnowledgeBase::mir_runtime_count_aggregate(
-    std::int64_t current,
-    std::int64_t direction) const {
-    return mir_execution_plan_ ? mir_execution_plan_->run_runtime_count_aggregate(current, direction) : std::nullopt;
-}
-
-std::optional<double> KnowledgeBase::mir_runtime_sum_aggregate(
-    double current,
-    ConstraintValue const& value,
-    std::int64_t direction) const {
-    return mir_execution_plan_ ? mir_execution_plan_->run_runtime_sum_aggregate(current, value, direction) : std::nullopt;
-}
-
-std::optional<double> KnowledgeBase::mir_runtime_min_aggregate(
-    double current,
-    ConstraintValue const& value) const {
-    return mir_execution_plan_ ? mir_execution_plan_->run_runtime_min_aggregate(current, value) : std::nullopt;
-}
-
-std::optional<double> KnowledgeBase::mir_runtime_max_aggregate(
-    double current,
-    ConstraintValue const& value) const {
-    return mir_execution_plan_ ? mir_execution_plan_->run_runtime_max_aggregate(current, value) : std::nullopt;
-}
-
-std::optional<bool> KnowledgeBase::mir_runtime_collect_list_update(
-    std::vector<Fact*>& facts,
-    Fact* fact,
-    std::int64_t direction) const {
-    return mir_execution_plan_ ? mir_execution_plan_->run_runtime_collect_list_update(facts, fact, direction)
-                               : std::nullopt;
-}
-
-std::optional<bool> KnowledgeBase::mir_runtime_collect_set_update(
-    std::unordered_set<Fact*>& facts,
-    Fact* fact,
-    std::int64_t direction) const {
-    return mir_execution_plan_ ? mir_execution_plan_->run_runtime_collect_set_update(facts, fact, direction)
-                               : std::nullopt;
-}
-
-std::optional<FactList> KnowledgeBase::mir_runtime_collect_list_result(
-    std::vector<Fact*> const& facts) const {
-    return mir_execution_plan_ ? mir_execution_plan_->run_runtime_collect_list_result(facts) : std::nullopt;
-}
-
-std::optional<FactList> KnowledgeBase::mir_runtime_collect_set_result(
-    std::unordered_set<Fact*> const& facts) const {
-    return mir_execution_plan_ ? mir_execution_plan_->run_runtime_collect_set_result(facts) : std::nullopt;
-}
-
 void KnowledgeBase::register_accumulator(std::string const& name, std::unique_ptr<IAccumulator> prototype) {
     logd("KnowledgeBase::register_accumulator -> Registering custom accumulator '{}'", name);
     accumulator_registry_->register_accumulator(name, std::move(prototype));
-}
-
-void KnowledgeBase::register_native_function(std::string const& name, NativeFunctionCallback callback, void* user_data) {
-    logd("KnowledgeBase::register_native_function -> Registering native function '{}'", name);
-    native_functions_[name] = NativeFunction{callback, user_data};
 }
 
 std::size_t KnowledgeBase::register_native_predicate(std::string const& name,
@@ -584,56 +276,30 @@ void KnowledgeBase::build(parser_state&& state) {
         }
     }
 
-    std::string mir_error;
-    mir_execution_plan_ = mir_execution_plan_compiler()(
-        processed_rules_, parser_state_.parsed_queries, parser_state_.parsed_declarations, &mir_error);
-    if (!mir_execution_plan_) {
-        throw std::runtime_error("MIR execution plan unavailable: " + mir_error);
-    } else {
-        std::string self_check_error;
-        if (!mir_execution_plan_self_check()(*mir_execution_plan_, processed_rules_, &self_check_error)) {
-            throw std::runtime_error(self_check_error);
-        } else {
-            for (auto const& coverage : mir_execution_plan_->rule_coverages()) {
-                if (coverage.lowering_errors.empty()) {
-                    continue;
-                }
-                std::ostringstream message;
-                message << "MIR lowering failed for rule '" << coverage.rule_name << "'";
-                message << ": ";
-                for (std::size_t index = 0; index < coverage.lowering_errors.size(); ++index) {
-                    if (index != 0) {
-                        message << "|";
-                    }
-                    message << coverage.lowering_errors[index];
-                }
-                throw std::runtime_error(message.str());
-            }
-            for (auto const& coverage : mir_execution_plan_->query_coverages()) {
-                if (coverage.lowering_errors.empty()) {
-                    continue;
-                }
-                std::ostringstream message;
-                message << "MIR lowering failed for query '" << coverage.query_name << "'";
-                message << ": ";
-                for (std::size_t index = 0; index < coverage.lowering_errors.size(); ++index) {
-                    if (index != 0) {
-                        message << "|";
-                    }
-                    message << coverage.lowering_errors[index];
-                }
-                throw std::runtime_error(message.str());
-            }
-            logd("KnowledgeBase::build -> MIR execution plan ready for {} rules and {} queries.",
-                 mir_execution_plan_->rule_count(),
-                 mir_execution_plan_->query_count());
-        }
-    }
-
     compile_network();
 }
 
 namespace {
+bool expression_references_dotted_binding(std::string const& expression) {
+    for (std::size_t pos = 0; pos < expression.size(); ++pos) {
+        if (expression[pos] != '$') {
+            continue;
+        }
+        ++pos;
+        while (pos < expression.size()) {
+            unsigned char const ch = static_cast<unsigned char>(expression[pos]);
+            if (!std::isalnum(ch) && expression[pos] != '_') {
+                break;
+            }
+            ++pos;
+        }
+        if (pos < expression.size() && expression[pos] == '.') {
+            return true;
+        }
+    }
+    return false;
+}
+
 void partition_constraints(ConstraintNode const* node,
                            ConstraintNode& alpha_root,
                            std::vector<ParsedConstraint>& out_join) {
@@ -641,7 +307,8 @@ void partition_constraints(ConstraintNode const* node,
     if (node->type == NodeType::LEAF) {
         if (node->constraint.right_bound_field
             || node->constraint.temporal_constraint
-            || node->constraint.right_arith_expr) {
+            || (node->constraint.right_arith_expr
+                && expression_references_dotted_binding(*node->constraint.right_arith_expr))) {
             out_join.push_back(node->constraint);
         } else {
             alpha_root.children.push_back(std::make_unique<ConstraintNode>(*node));

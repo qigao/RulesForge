@@ -12,18 +12,25 @@ using namespace rulesforge;
 
 suite("TokenPool Benchmarks") {
     bench("Performance Comparison") {
-        benchmark("TokenPool: 10k alloc/free", 1, 1.0) {
-            TokenPool pool(10000);
+        constexpr size_t kTokenCount = 10000;
+        constexpr size_t kFactCount = 1000;
+        constexpr size_t kCycleCount = 100;
+        constexpr size_t kTokensPerCycle = 10;
+        constexpr size_t kBenchmarkSamples = 10;
 
-            std::vector<Fact> facts(10000);
-            for (size_t i = 0; i < 10000; ++i) {
+        benchmark("TokenPool: 10k alloc/free", kBenchmarkSamples,
+                  static_cast<double>(kTokenCount)) {
+            TokenPool pool(kTokenCount);
+
+            std::vector<Fact> facts(kTokenCount);
+            for (size_t i = 0; i < kTokenCount; ++i) {
                 facts[i].id = static_cast<int64_t>(i);
             }
 
             std::vector<TokenWME*> tokens;
-            tokens.reserve(10000);
+            tokens.reserve(kTokenCount);
 
-            for (size_t i = 0; i < 10000; ++i) {
+            for (size_t i = 0; i < kTokenCount; ++i) {
                 tokens.push_back(pool.create_token(nullptr, &facts[i]));
             }
 
@@ -32,22 +39,24 @@ suite("TokenPool Benchmarks") {
             }
         }
 
-        benchmark("TokenArena: 10k alloc", 1, 1.0) {
+        benchmark("TokenArena: 10k alloc", kBenchmarkSamples,
+                  static_cast<double>(kTokenCount)) {
             TokenArena arena(64 * 1024 * 1024);
 
-            std::vector<Fact> facts(10000);
-            for (size_t i = 0; i < 10000; ++i) {
+            std::vector<Fact> facts(kTokenCount);
+            for (size_t i = 0; i < kTokenCount; ++i) {
                 facts[i].id = static_cast<int64_t>(i);
             }
 
-            for (size_t i = 0; i < 10000; ++i) {
+            for (size_t i = 0; i < kTokenCount; ++i) {
                 arena.create_token(nullptr, &facts[i]);
             }
 
             // Cannot free individual tokens
         }
 
-        benchmark("TokenPool: ASSERT/RETRACT pattern", 1, 1.0) {
+        benchmark("TokenPool: ASSERT/RETRACT pattern", kBenchmarkSamples,
+                  static_cast<double>(kCycleCount * kTokensPerCycle)) {
             TokenPool pool(1000);
 
             std::vector<Fact> facts(100);
@@ -55,10 +64,11 @@ suite("TokenPool Benchmarks") {
                 facts[i].id = static_cast<int64_t>(i);
             }
 
-            for (int cycle = 0; cycle < 100; ++cycle) {
+            for (size_t cycle = 0; cycle < kCycleCount; ++cycle) {
                 std::vector<TokenWME*> tokens;
+                tokens.reserve(kTokensPerCycle);
 
-                for (size_t i = 0; i < 10; ++i) {
+                for (size_t i = 0; i < kTokensPerCycle; ++i) {
                     tokens.push_back(pool.create_token(nullptr, &facts[i]));
                 }
 
@@ -68,7 +78,8 @@ suite("TokenPool Benchmarks") {
             }
         }
 
-        benchmark("TokenArena: ASSERT/RETRACT pattern", 1, 1.0) {
+        benchmark("TokenArena: ASSERT/RETRACT pattern", kBenchmarkSamples,
+                  static_cast<double>(kCycleCount * kTokensPerCycle)) {
             TokenArena arena(64 * 1024 * 1024);
 
             std::vector<Fact> facts(100);
@@ -76,8 +87,8 @@ suite("TokenPool Benchmarks") {
                 facts[i].id = static_cast<int64_t>(i);
             }
 
-            for (int cycle = 0; cycle < 100; ++cycle) {
-                for (size_t i = 0; i < 10; ++i) {
+            for (size_t cycle = 0; cycle < kCycleCount; ++cycle) {
+                for (size_t i = 0; i < kTokensPerCycle; ++i) {
                     arena.create_token(nullptr, &facts[i]);
                 }
 
@@ -85,11 +96,12 @@ suite("TokenPool Benchmarks") {
             }
         }
 
-        benchmark("TokenPool: random depth tokens", 1, 1.0) {
-            TokenPool pool(10000);
+        benchmark("TokenPool: random depth tokens", kBenchmarkSamples,
+                  static_cast<double>(kTokenCount)) {
+            TokenPool pool(kTokenCount);
 
-            std::vector<Fact> facts(1000);
-            for (size_t i = 0; i < 1000; ++i) {
+            std::vector<Fact> facts(kFactCount);
+            for (size_t i = 0; i < kFactCount; ++i) {
                 facts[i].id = static_cast<int64_t>(i);
             }
 
@@ -99,7 +111,7 @@ suite("TokenPool Benchmarks") {
             std::vector<TokenWME*> tokens;
             tokens.push_back(pool.create_token(nullptr, &facts[0]));
 
-            for (int i = 1; i < 10000; ++i) {
+            for (size_t i = 1; i < kTokenCount; ++i) {
                 size_t parent_idx = dist(rng) % tokens.size();
                 TokenWME* parent = tokens[parent_idx];
                 size_t fact_idx = dist(rng);
@@ -112,11 +124,12 @@ suite("TokenPool Benchmarks") {
             }
         }
 
-        benchmark("TokenArena: random depth tokens", 1, 1.0) {
+        benchmark("TokenArena: random depth tokens", kBenchmarkSamples,
+                  static_cast<double>(kTokenCount)) {
             TokenArena arena(64 * 1024 * 1024);
 
-            std::vector<Fact> facts(1000);
-            for (size_t i = 0; i < 1000; ++i) {
+            std::vector<Fact> facts(kFactCount);
+            for (size_t i = 0; i < kFactCount; ++i) {
                 facts[i].id = static_cast<int64_t>(i);
             }
 
@@ -126,7 +139,7 @@ suite("TokenPool Benchmarks") {
             std::vector<TokenWME*> tokens;
             tokens.push_back(arena.create_token(nullptr, &facts[0]));
 
-            for (int i = 1; i < 10000; ++i) {
+            for (size_t i = 1; i < kTokenCount; ++i) {
                 size_t parent_idx = dist(rng) % tokens.size();
                 TokenWME* parent = tokens[parent_idx];
                 size_t fact_idx = dist(rng);
@@ -135,13 +148,14 @@ suite("TokenPool Benchmarks") {
             }
         }
 
-        benchmark("TokenPool: statistics overhead", 1, 1.0) {
-            TokenPool pool(10000);
+        benchmark("TokenPool: statistics overhead", kBenchmarkSamples,
+                  static_cast<double>(kTokenCount)) {
+            TokenPool pool(kTokenCount);
 
             Fact fact;
             fact.id = 1;
 
-            for (int i = 0; i < 10000; ++i) {
+            for (size_t i = 0; i < kTokenCount; ++i) {
                 TokenWME* token = pool.create_token(nullptr, &fact);
 
                 // Access statistics

@@ -12,6 +12,7 @@
 #include "rfl_parser.hpp"
 #include "engine/knowledge_base.hpp"
 #include "engine/stateful_session.hpp"
+#include "engine/rhs_executor.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -21,6 +22,7 @@
 
 using Clock = std::chrono::high_resolution_clock;
 using Microseconds = std::chrono::microseconds;
+static constexpr size_t kBenchmarkSamples = 10;
 
 static std::string generate_rules(int count, std::string const& fact_type = "TestFact") {
     std::ostringstream oss;
@@ -121,6 +123,18 @@ static std::vector<std::shared_ptr<Fact>> create_order_facts(int count) {
     return facts;
 }
 
+static std::vector<std::shared_ptr<Fact>> create_processed_facts(int count) {
+    std::vector<std::shared_ptr<Fact>> facts;
+    facts.reserve(count);
+    for (int i = 0; i < count; ++i) {
+        auto fact = std::make_shared<Fact>();
+        fact->type = "benchmark.ProcessedFact";
+        fact->fields["factId"] = static_cast<int64_t>(i * 2);
+        facts.push_back(std::move(fact));
+    }
+    return facts;
+}
+
 static std::string decision_table_csv() {
     return R"CSV(PACKAGE,benchmark.dt
 DECLARE,Customer,"name: String, balance: double, status: String"
@@ -133,12 +147,12 @@ Gold Status Offer,*,GOLD,Gold status,20
 }
 
 suite("Fact/Rule Benchmarks") {
-    group("MIR Migration Baselines") {
+    group("Runtime Migration Baselines") {
         bench("benchmarks KB build and session creation") {
             std::string drl = simple_drl();
             auto kb = build_simple_kb();
 
-            benchmark("build simple KB x100", 3, 100.0) {
+            benchmark("build simple KB x100", kBenchmarkSamples, 100.0) {
                 for (int i = 0; i < 100; ++i) {
                     ParsingResult result;
                     auto built = build_knowledge_base(drl, result);
@@ -148,7 +162,7 @@ suite("Fact/Rule Benchmarks") {
                 }
             }
 
-            benchmark("create session x10K", 5, 10000.0) {
+            benchmark("create session x10K", kBenchmarkSamples, 10000.0) {
                 for (int i = 0; i < 10000; ++i) {
                     auto session = kb->create_session();
                     if (!session) {
@@ -159,26 +173,65 @@ suite("Fact/Rule Benchmarks") {
         }
 
         bench("benchmarks expression and RHS-heavy firing") {
+            constexpr int kFiringFactCount = 1000;
+            constexpr int kMemoryFactCount = 2000;
+
             auto expression_kb = build_expression_kb();
             auto rhs_kb = build_rhs_kb();
-            auto orders = create_order_facts(5000);
-            auto facts = create_facts(5000);
+            auto orders = create_order_facts(kFiringFactCount);
+            auto facts = create_facts(kFiringFactCount);
 
-            benchmark("fire 5K alpha expression facts", 5, 1.0) {
+            benchmark("fire 1K alpha expression facts", kBenchmarkSamples,
+                      static_cast<double>(kFiringFactCount)) {
                 auto s = expression_kb->create_session();
                 s->add_facts(orders);
                 s->fire_all_rules();
             }
 
-            benchmark("fire 5K RHS insert facts", 5, 1.0) {
+            rulesforge::rhs_prof::reset_stats();
+            benchmark("fire 1K RHS insert facts", kBenchmarkSamples,
+                      static_cast<double>(kFiringFactCount)) {
                 auto s = rhs_kb->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
             }
+            {
+                auto st = rulesforge::rhs_prof::get_stats();
+                uint64_t const activations = st.cpp_action_plan_exec_count > 0
+                    ? st.cpp_action_plan_exec_count : 1;
+                printf("\n--- RHS insert prof  [iters=%d  samples=%d  activations=%llu] ---\n",
+                       kFiringFactCount, (int)kBenchmarkSamples,
+                       (unsigned long long)st.cpp_action_plan_exec_count);
+                printf("  insert_action_us             = %llu  (%.2f us/activation)\n",
+                       (unsigned long long)st.insert_action_us,
+                       (double)st.insert_action_us / activations);
+                printf("  evaluate_assignment_us       = %llu  (%.2f us/activation)\n",
+                       (unsigned long long)st.evaluate_assignment_us,
+                       (double)st.evaluate_assignment_us / activations);
+                printf("  condition_eval_us            = %llu\n",
+                       (unsigned long long)st.condition_eval_us);
+                printf("  cpp_action_exec / error      = %llu / %llu\n",
+                       (unsigned long long)st.cpp_action_plan_exec_count,
+                       (unsigned long long)st.cpp_action_plan_error_count);
+                printf("  expr_exec / error            = %llu / %llu\n",
+                       (unsigned long long)st.expression_exec_count,
+                       (unsigned long long)st.expression_error_count);
+                printf("  execution_mutex_wait_us      = %llu  (%.3f us/activation)\n",
+                       (unsigned long long)st.execution_mutex_wait_us,
+                       (double)st.execution_mutex_wait_us / activations);
+                printf("  api_mutex_wait_us            = %llu  (%.3f us/expr-eval)\n",
+                       (unsigned long long)st.api_mutex_wait_us,
+                       st.expression_exec_count > 0
+                           ? (double)st.api_mutex_wait_us / st.expression_exec_count
+                           : 0.0);
+                printf("---\n");
+                fflush(stdout);
+            }
 
-            benchmark("session memory metrics after 10K facts", 3, 1.0) {
+            auto many_facts = create_facts(kMemoryFactCount);
+            benchmark("session memory metrics after 2K facts", kBenchmarkSamples,
+                      static_cast<double>(kMemoryFactCount)) {
                 auto s = rhs_kb->create_session();
-                auto many_facts = create_facts(10000);
                 s->add_facts(many_facts);
                 s->fire_all_rules();
                 auto metrics = s->get_metrics();
@@ -197,7 +250,7 @@ suite("Fact/Rule Benchmarks") {
         bench("benchmarks decision-table parse and compile") {
             auto csv = decision_table_csv();
 
-            benchmark("decision table parse+compile x100", 3, 100.0) {
+            benchmark("decision table parse+compile x100", kBenchmarkSamples, 100.0) {
                 for (int i = 0; i < 100; ++i) {
                     ParsingResult parse_result;
                     DecisionTable table = DecisionTableParser::parse_string(
@@ -219,6 +272,8 @@ suite("Fact/Rule Benchmarks") {
 
     group("Rule Complexity vs Firing") {
         bench("benchmarks firing cost by rule complexity") {
+            constexpr int kComplexityFactCount = 1000;
+
             // Simple: single field condition
             std::string drl_simple = R"(
 package benchmark
@@ -241,7 +296,6 @@ when
     $f : TestFact(value > 50)
     not ProcessedFact(factId == $f.id)
 then
-    insert ProcessedFact { factId = $f.id }
 end
 )";
 
@@ -253,22 +307,27 @@ end
             auto kb_complex = build_knowledge_base(drl_complex, result);
             check(result.success);
 
-            auto facts = create_facts(10000);
+            auto facts = create_facts(kComplexityFactCount);
+            auto processed_facts = create_processed_facts(kComplexityFactCount / 2);
 
-            benchmark("fire 10K simple rule", 5, 1.0) {
+            benchmark("fire 1K simple rule", kBenchmarkSamples,
+                      static_cast<double>(kComplexityFactCount)) {
                 auto s = kb_simple->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
             }
 
-            benchmark("fire 10K medium rule", 5, 1.0) {
+            benchmark("fire 1K medium rule", kBenchmarkSamples,
+                      static_cast<double>(kComplexityFactCount)) {
                 auto s = kb_medium->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
             }
 
-            benchmark("fire 10K complex rule", 5, 1.0) {
+            benchmark("fire 1K complex rule", kBenchmarkSamples,
+                      static_cast<double>(kComplexityFactCount)) {
                 auto s = kb_complex->create_session();
+                s->add_facts(processed_facts);
                 s->add_facts(facts);
                 s->fire_all_rules();
             }
@@ -282,7 +341,7 @@ end
             check(result.success);
             auto facts = create_facts(1000);
 
-            benchmark("fire 1K facts / 10 rules", 10, 1.0) {
+            benchmark("fire 1K facts / 10 rules", kBenchmarkSamples, 1000.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
@@ -295,7 +354,7 @@ end
             check(result.success);
             auto facts = create_facts(1000);
 
-            benchmark("fire 1K facts / 50 rules", 10, 1.0) {
+            benchmark("fire 1K facts / 50 rules", kBenchmarkSamples, 1000.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
@@ -308,7 +367,7 @@ end
             check(result.success);
             auto facts = create_facts(1000);
 
-            benchmark("fire 1K facts / 100 rules", 5, 1.0) {
+            benchmark("fire 1K facts / 100 rules", kBenchmarkSamples, 1000.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
@@ -321,7 +380,7 @@ end
             check(result.success);
             auto facts = create_facts(200);
 
-            benchmark("fire 200 facts / 500 rules", 3, 1.0) {
+            benchmark("fire 200 facts / 500 rules", kBenchmarkSamples, 200.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
@@ -334,7 +393,7 @@ end
             check(result.success);
             auto facts = create_facts(100);
 
-            benchmark("fire 100 facts / 1000 rules", 2, 1.0) {
+            benchmark("fire 100 facts / 1000 rules", kBenchmarkSamples, 100.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts);
                 s->fire_all_rules();
@@ -347,7 +406,7 @@ end
             auto kb = build_simple_kb();
             auto facts = create_facts(10000);
 
-            benchmark("stream 1K insert+fire", 5, 1.0) {
+            benchmark("stream 1K insert+fire", kBenchmarkSamples, 1000.0) {
                 auto s = kb->create_session();
                 for (int i = 0; i < 1000; ++i) {
                     s->add_fact(facts[i]);
@@ -355,7 +414,7 @@ end
                 }
             }
 
-            benchmark("stream 10K insert+fire", 2, 1.0) {
+            benchmark("stream 10K insert+fire", kBenchmarkSamples, 10000.0) {
                 auto s = kb->create_session();
                 for (int i = 0; i < 10000; ++i) {
                     s->add_fact(facts[i]);
@@ -416,7 +475,7 @@ end
             auto facts_1k = create_facts(1000);
             auto facts_10k = create_facts(10000);
 
-            benchmark("retract 1K facts", 10, 1.0) {
+            benchmark("retract 1K facts", kBenchmarkSamples, 1000.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts_1k);
                 s->fire_all_rules();
@@ -426,7 +485,7 @@ end
                 s->fire_all_rules();
             }
 
-            benchmark("retract 10K facts", 3, 1.0) {
+            benchmark("retract 10K facts", kBenchmarkSamples, 10000.0) {
                 auto s = kb->create_session();
                 s->add_facts(facts_10k);
                 s->fire_all_rules();

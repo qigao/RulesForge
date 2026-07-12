@@ -53,7 +53,7 @@ public:
              std::string target_fact_type,
              std::map<std::string, int> const&,
              std::vector<ParsedConstraint> constraints,
-             std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates);
+             std::vector<std::optional<rulesforge::RuntimePredicateRef>> runtime_predicates);
   void left_activate(StatefulSession&, Token const&) override;
 
   void right_activate(StatefulSession&,
@@ -71,7 +71,7 @@ private:
   std::string target_fact_type_;
   std::map<std::string, int> binding_to_token_idx;
   std::vector<ParsedConstraint> constraints_;
-  std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates_;
+  std::vector<std::optional<rulesforge::RuntimePredicateRef>> runtime_predicates_;
 };
 
 
@@ -96,8 +96,8 @@ public:
   EvalNode(std::string expression,
            std::map<std::string, int> bindings,
            std::map<std::string, std::string> scalar_binding_fields,
-           std::optional<rulesforge::MirRuntimePredicateRef> mir_eval_expression_predicate = std::nullopt,
-           std::vector<std::string> mir_eval_expression_variables = {},
+           std::optional<rulesforge::RuntimePredicateRef> eval_runtime_predicate = std::nullopt,
+           std::vector<std::string> eval_runtime_variables = {},
            std::vector<EvalRuntimeArgument> runtime_arguments = {});
   void left_activate(StatefulSession& session,
                      Token const& token) override;
@@ -123,8 +123,8 @@ private:
   std::map<std::string, int> binding_to_token_idx;
   std::map<std::string, std::string> scalar_binding_to_field;
   std::unordered_map<std::string, EvalResolvedVar> resolved_vars_;
-  std::optional<rulesforge::MirRuntimePredicateRef> mir_eval_expression_predicate_;
-  std::vector<std::string> mir_eval_expression_variables_;
+  std::optional<rulesforge::RuntimePredicateRef> eval_runtime_predicate_;
+  std::vector<std::string> eval_runtime_variables_;
   std::vector<EvalRuntimeArgument> runtime_arguments_;
 };
 
@@ -141,12 +141,12 @@ public:
                       Fact* fact,
                       PropagationType p_type) override;
 
+  std::size_t evaluate_expiration(StatefulSession& session);
+
   void print_node(std::ostream& os) const override;
   friend class ReteSerializer;
 
 private:
-  void evaluate_expiration(StatefulSession& session);
-
   // Immutable config
   ParsedWindow info;
 };

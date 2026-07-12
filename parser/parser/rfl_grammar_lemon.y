@@ -36,6 +36,29 @@ static bool has_schema_extension(std::string const& path) {
     return lower.size() >= 7 && lower.compare(lower.size() - 7, 7, ".schema") == 0;
 }
 
+static bool is_schema_import_qualifier(std::string const& qualifier) {
+    std::string lower;
+    lower.reserve(qualifier.size());
+    for (char ch : qualifier) {
+        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+    return lower == "schema";
+}
+
+static void append_schema_import(RflParserContext* ctx, RflLemonToken const& path_token) {
+    std::string path = strip_quotes(path_token.as_sv());
+    if (has_schema_extension(path)) {
+        ctx->state.schema_imports.push_back(
+            {.path = std::move(path),
+             .source_name = ctx->source_name,
+             .line = path_token.line,
+             .column = path_token.column});
+    } else {
+        ctx->add_error(path_token.line, path_token.column,
+            "Unsupported schema import '" + path + "'. Expected a .schema file.");
+    }
+}
+
 // Helper struct for generic type parsing (e.g., List<String>, Map<String, int>)
 struct GenericType {
     std::string base;
@@ -263,18 +286,17 @@ import_stmt ::= IMPORT qualified_name(N) DOTSTAR opt_semi. {
     ctx->state.parsed_imports.push_back(*N + ".*");
     delete N;
 }
-import_stmt ::= IMPORT STRING(P) opt_semi. {
-    std::string path = strip_quotes(P.as_sv());
-    if (has_schema_extension(path)) {
-        ctx->state.schema_imports.push_back(
-            {.path = std::move(path),
-             .source_name = ctx->source_name,
-             .line = P.line,
-             .column = P.column});
+import_stmt ::= IMPORT IDENTIFIER(K) STRING(P) opt_semi. {
+    std::string qualifier = K.as_string();
+    if (is_schema_import_qualifier(qualifier)) {
+        append_schema_import(ctx, P);
     } else {
-        ctx->add_error(P.line, P.column,
-            "Unsupported string import '" + path + "'. Expected a .schema file.");
+        ctx->add_error(K.line, K.column,
+            "Unsupported import qualifier '" + qualifier + "'. Expected 'schema'.");
     }
+}
+import_stmt ::= IMPORT STRING(P) opt_semi. {
+    append_schema_import(ctx, P);
 }
 
 opt_semi ::= .

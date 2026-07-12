@@ -288,7 +288,7 @@ suite("Parser") {
             check(state.parsed_imports[0] == "com.example.model.Person");
         }
 
-        it("parses TurboScript schema imports") {
+        it("parses implicit schema imports") {
             std::string drl = R"(
                 import "market.schema";
                 rule "schema import only"
@@ -303,9 +303,27 @@ suite("Parser") {
             check(state.schema_imports[0].source_name == "rules.rfl");
         }
 
-        it("rejects legacy import schema syntax") {
+        it("parses explicit schema imports") {
             std::string drl = R"(
                 import schema "market.schema";
+                import schema "orders.schema";
+                rule "schema import only"
+                when
+                then
+                end
+            )";
+
+            auto state = parse_success(drl, "rules.rfl");
+            check(state.schema_imports.size() == 2);
+            check(state.schema_imports[0].path == "market.schema");
+            check(state.schema_imports[0].source_name == "rules.rfl");
+            check(state.schema_imports[1].path == "orders.schema");
+            check(state.schema_imports[1].source_name == "rules.rfl");
+        }
+
+        it("rejects tbe schema imports") {
+            std::string drl = R"(
+                import "market.tbe";
                 rule "schema import only"
                 when
                 then
@@ -314,6 +332,21 @@ suite("Parser") {
 
             auto errors = parse_expect_errors(drl, "rules.rfl");
             check(!errors.empty());
+            check_str_contains(errors.front().message.c_str(), ".schema");
+        }
+
+        it("rejects implementation-specific schema import qualifiers") {
+            std::string drl = R"(
+                import databind "market.schema";
+                rule "schema import only"
+                when
+                then
+                end
+            )";
+
+            auto errors = parse_expect_errors(drl, "rules.rfl");
+            check(!errors.empty());
+            check_str_contains(errors.front().message.c_str(), "Expected 'schema'");
         }
 
         it("rejects string imports that are not schema files") {

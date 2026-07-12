@@ -145,9 +145,9 @@ BookingDecision (derived)
 
 ## Running the Example
 
-### Quick Run with capi_demo
+### capi_demo Status
 
-This example is runnable after one preprocessing step.
+This example needs schema migration and one preprocessing step before it can use the current public C API.
 
 Flatten the nested scenario file:
 
@@ -158,20 +158,7 @@ python tools/flatten_example_data.py \
   docs/examples/travel-booking/travel-flat.json
 ```
 
-Then run:
-
-```bash
-./build/bin/capi_demo \
-  -r docs/examples/travel-booking/travel-booking.rfl \
-  -j docs/examples/travel-booking/travel-flat.json \
-  -m visaRequirements:com.travel.VisaRequirement \
-  -m flightOptions:com.travel.FlightOption \
-  -m hotelOptions:com.travel.HotelOption \
-  -m travelRequests:com.travel.TravelRequest \
-  -q PackageQuotes \
-  -b quote \
-  -f requestId,grandTotal,totalPointsEarned
-```
+Then add a `.schema` file for the external input facts, import it from the RFL file with `import schema "...schema"`, and pass the same schema with `capi_demo -s`.
 
 Why preprocessing is required:
 

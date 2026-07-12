@@ -32,25 +32,20 @@ endif()
 # Set the features of the project
 include(ProjectOptions.cmake)
 
-# Option to use high-performance Agenda (AgendaV2)
+# Option to use high-performance Agenda (AgendaV2, fixed-priority BucketQueue)
 option(RULESFORGE_USE_AGENDA_V2
        "Use high-performance AgendaV2 (10x faster, MQTT optimized)" OFF
 )
 if(RULESFORGE_USE_AGENDA_V2)
-    message(STATUS "Using AgendaV2 (high-performance, MQTT optimized)")
+    message(STATUS "Using AgendaV2 (fixed-priority bucket queue, MQTT optimized)")
     add_compile_definitions(RULESFORGE_USE_AGENDA_V2)
 else()
     message(STATUS "Using original Agenda (precise salience)")
 endif()
 
-find_package(c-ares CONFIG REQUIRED)
-find_package(base64 CONFIG REQUIRED)
-find_package(zstd CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 
-find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
-find_package(TurboScript CONFIG REQUIRED PATHS "${TURBOSCRIPT_ROOT}")
-
+find_package(TurboUtils CONFIG REQUIRED PATHS "${TURBO_UTILS_ROOT}")
 # Output files directory
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_EXECUTABLE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -74,7 +69,7 @@ if(BUILD_TESTING OR ENABLE_TESTS)
             ${CMAKE_CTEST_COMMAND}
             --test-dir ${CMAKE_BINARY_DIR}
             -R
-            "^(engine_core_test\\.RulesForge|rhs_control_flow_test\\.RulesForge|rhs_invoke_test\\.RulesForge|parser_test\\.parser|parser_semantic_test\\.parser|rhs_parser_test\\.parser|expression_descriptor_test\\.parser|compiled_expression_compat_test\\.parser|capi_test|test_value_bridge|capi_demo_.*_smoke)$"
+            "^(engine_core_test\\.RulesForge|rhs_control_flow_test\\.RulesForge|parser_test\\.parser|parser_semantic_test\\.parser|rhs_parser_test\\.parser|expression_descriptor_test\\.parser|compiled_expression_compat_test\\.parser|capi_test|test_value_bridge|capi_demo_.*_smoke)$"
             --output-on-failure
         USES_TERMINAL
         VERBATIM
@@ -83,7 +78,6 @@ if(BUILD_TESTING OR ENABLE_TESTS)
     foreach(release_smoke_dep
             engine_core_test.RulesForge
             rhs_control_flow_test.RulesForge
-            rhs_invoke_test.RulesForge
             parser_test.parser
             parser_semantic_test.parser
             rhs_parser_test.parser

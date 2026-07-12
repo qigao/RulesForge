@@ -353,7 +353,7 @@ struct CompiledNetwork {
     std::shared_ptr<AlphaNode> find_or_create_alpha(
             std::shared_ptr<ReteNode> const& parent,
             ParsedConstraint const& constraint,
-            std::optional<rulesforge::MirRuntimePredicateRef> mir_runtime_predicate = std::nullopt) {
+            std::optional<rulesforge::RuntimePredicateRef> runtime_predicate_ref = std::nullopt) {
         size_t ch = detail::constraint_hash(constraint);
         detail::AlphaCacheKey key{parent->id, ch, &constraint};
         auto it = alpha_cache_.find(key);
@@ -362,7 +362,7 @@ struct CompiledNetwork {
         }
         auto node = create_node<AlphaNode>(
             constraint,
-            mir_runtime_predicate);
+            runtime_predicate_ref);
         parent->add_child(node);
         // Store key with pointer to the node's own constraint (stable address)
         detail::AlphaCacheKey stored_key{parent->id, ch, &node->constraint};

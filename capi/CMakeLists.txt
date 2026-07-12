@@ -1,8 +1,9 @@
 include(GenerateExportHeader)
 
-# Version information (keep in sync with rule_forge.h)
+# Version information (keep in sync with rule_forge.h). 0.5 removes deprecated
+# schema-less input APIs and all rule-side external-call registration APIs.
 set(RULEFORGE_VERSION_MAJOR 0)
-set(RULEFORGE_VERSION_MINOR 3)
+set(RULEFORGE_VERSION_MINOR 5)
 set(RULEFORGE_VERSION_PATCH 0)
 
 # Define the target name for the shared library
@@ -31,8 +32,8 @@ target_include_directories(
 
 target_link_libraries(
     ${CAPI_TARGET_NAME}
-    PRIVATE rfl_parser RulesForge TurboNet::Parser ${CMAKE_DL_LIBS}
-    PUBLIC TurboNet::Utils TurboScript::DataBind
+    PRIVATE rfl_parser RulesForge TurboUtils::Parser
+    PUBLIC TurboUtils::Core TurboUtils::DataBind
 )
 set_target_properties(${CAPI_TARGET_NAME} PROPERTIES FOLDER capi/)
 
@@ -42,9 +43,6 @@ if(WIN32)
         POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_RUNTIME_DLLS:${CAPI_TARGET_NAME}>
-                $<TARGET_FILE_DIR:${CAPI_TARGET_NAME}>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:TurboScript::TurboScript>
                 $<TARGET_FILE_DIR:${CAPI_TARGET_NAME}>
         COMMAND_EXPAND_LISTS
     )

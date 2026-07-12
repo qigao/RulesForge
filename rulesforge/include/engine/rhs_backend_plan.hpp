@@ -1,11 +1,10 @@
 #ifndef RHS_BACKEND_PLAN_HPP
 #define RHS_BACKEND_PLAN_HPP
 
-#include "engine/turboscript_rhs_adapter.hpp"
+#include "engine/cpp_rhs_action_plan_builder.hpp"
 
 #include <cstddef>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -15,7 +14,7 @@ namespace rulesforge {
 
 enum class RhsBackendKind {
     None,
-    TurboScriptMir,
+    CppActionPlan,
     CompileError
 };
 
@@ -26,31 +25,23 @@ struct RhsBackendCoverage {
     std::size_t action_count = 0;
     std::size_t command_count = 0;
     std::size_t condition_count = 0;
-    std::size_t external_side_effect_count = 0;
-    std::vector<std::string> external_side_effect_names;
-    bool turboscript_available = false;
+    bool cpp_action_plan_available = false;
     bool command_adapter_ready = false;
     std::vector<std::string> lowering_errors;
 };
 
 struct RhsBackendPlanSummary {
-    bool turboscript_available = false;
+    bool cpp_action_plan_available = false;
     std::size_t rule_coverage_count = 0;
-    std::size_t turboscript_mir_rule_count = 0;
+    std::size_t cpp_action_plan_rule_count = 0;
     std::size_t compile_error_rule_count = 0;
     std::size_t command_count = 0;
     std::size_t condition_count = 0;
-    std::size_t external_side_effect_count = 0;
-    std::vector<std::string> external_side_effect_names;
     std::vector<std::string> lowering_errors;
 };
 
 struct RhsCompiledCommandProgram {
-    TurboScriptRhsCommandScript script;
-    std::unique_ptr<TurboScriptRhsProgram> program;
-    std::vector<std::unique_ptr<RhsCompiledCommandProgram>> for_body_programs;
-    std::vector<std::unique_ptr<RhsCompiledCommandProgram>> while_body_programs;
-    mutable std::mutex execution_mutex;
+    CppRhsActionScript script;
 };
 
 class RhsBackendPlan {
@@ -72,7 +63,7 @@ public:
 private:
     RhsBackendPlan() = default;
 
-    bool turboscript_available_ = false;
+    bool cpp_action_plan_available_ = true;
     std::vector<RhsBackendCoverage> coverages_;
     std::vector<std::unique_ptr<RhsCompiledCommandProgram>> command_programs_;
 };

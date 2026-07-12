@@ -13,7 +13,7 @@
 
 #include "core/parsed_rule.hpp"
 #include "core/token.hpp"
-#include "engine/mir_execution_plan.hpp"
+#include "engine/runtime_predicate.hpp"
 #include "engine/rfl_accumulators.hpp"
 #include "rete/network_memory.hpp"
 
@@ -153,7 +153,8 @@ public:
   BetaConditionNode(NodeKind k) : ReteNode(k) {}
   BetaConditionNode(NodeKind k, std::vector<ParsedConstraint> const& joins,
                     std::map<std::string, int> const& bindings,
-                    std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates = {});
+                    std::map<std::string, std::string> scalar_binding_fields = {},
+                    std::vector<std::optional<rulesforge::RuntimePredicateRef>> runtime_predicates = {});
   void left_activate(StatefulSession& session,
                      Token const& token) override;
   void right_activate(StatefulSession& session,
@@ -177,7 +178,18 @@ protected:
   // Immutable config (set at build time)
   std::vector<ParsedConstraint> join_constraints;
   std::map<std::string, int> binding_to_token_idx;
-  std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates;
+  std::map<std::string, std::string> scalar_binding_to_field;
+  std::vector<std::optional<rulesforge::RuntimePredicateRef>> runtime_predicates;
+  std::optional<std::pair<std::string, int>> left_hash_key_;
+  std::string right_hash_key_;
+
+private:
+  std::optional<ConstraintValue> get_hash_key(Token const& token) const;
+  std::optional<ConstraintValue> get_hash_key(Fact const* fact) const;
+  void propagate_condition_transition(StatefulSession& session,
+                                      TokenWME const* wme,
+                                      size_t old_match_count,
+                                      size_t new_match_count);
 };
 
 // =========================================================================
@@ -189,7 +201,8 @@ class BaseJoinNode : public ReteNode
 public:
   BaseJoinNode(NodeKind k, std::vector<ParsedConstraint> joins,
                std::map<std::string, int> bindings,
-               std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates = {});
+               std::map<std::string, std::string> scalar_binding_fields = {},
+               std::vector<std::optional<rulesforge::RuntimePredicateRef>> runtime_predicates = {});
   void left_activate(StatefulSession& session,
                      Token const& token) override = 0;
   void right_activate(StatefulSession& session,
@@ -216,7 +229,8 @@ protected:
   // Immutable config
   std::vector<ParsedConstraint> join_constraints_;
   std::map<std::string, int> binding_to_token_idx_;
-  std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates_;
+  std::map<std::string, std::string> scalar_binding_to_field_;
+  std::vector<std::optional<rulesforge::RuntimePredicateRef>> runtime_predicates_;
 };
 
 #endif  // RETE_NODE_BASE_HPP

@@ -556,19 +556,7 @@ std::optional<ConstraintValue> Fact::get_field(std::vector<PathSegment> const& s
                 return make_typed_list();
             }
             if (fl.facts.size() != 1) {
-                std::vector<PathSegment> remaining(segments.begin() + static_cast<std::ptrdiff_t>(i + 1),
-                                                   segments.end());
-                auto projected = std::make_shared<TypedList>();
-                for (auto const* fact : fl.facts) {
-                    if (fact == nullptr) {
-                        continue;
-                    }
-                    auto value = fact->get_field(remaining);
-                    if (value) {
-                        projected->values.push_back(std::move(*value));
-                    }
-                }
-                return projected;
+                return std::nullopt;
             }
             current_fact = fl.facts[0];
             if (!current_fact) {
@@ -700,7 +688,7 @@ ParsedAccumulate::ParsedAccumulate() {}
 
 ParsedAccumulate::ParsedAccumulate(ParsedAccumulate const& other) :
     function(other.function), field(other.field), accumulate_field_name(other.accumulate_field_name),
-    uses_mir_value_expression(other.uses_mir_value_expression),
+    uses_runtime_value_expression(other.uses_runtime_value_expression),
     inline_binding_to_field(other.inline_binding_to_field) {
     if (other.source_pattern) { source_pattern = std::make_unique<ParsedPattern>(*other.source_pattern); }
 }
@@ -710,7 +698,7 @@ ParsedAccumulate& ParsedAccumulate::operator=(ParsedAccumulate const& other) {
     function = other.function;
     field = other.field;
     accumulate_field_name = other.accumulate_field_name;
-    uses_mir_value_expression = other.uses_mir_value_expression;
+    uses_runtime_value_expression = other.uses_runtime_value_expression;
     inline_binding_to_field = other.inline_binding_to_field;
     source_pattern = other.source_pattern ? std::make_unique<ParsedPattern>(*other.source_pattern) : nullptr;
     return *this;

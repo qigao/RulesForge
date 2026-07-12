@@ -169,7 +169,7 @@ struct ParsedConstraint {
     std::vector<PathSegment> cached_right_field_path; // Optimization: parsed path for RHS binding
     std::optional<std::vector<ConstraintValue>> right_value_list;
     std::optional<ParsedTemporalConstraint> temporal_constraint;
-    std::optional<std::string> right_arith_expr;  // Original expression string for MIR lowering
+    std::optional<std::string> right_arith_expr;  // Original expression string for runtime evaluation
     ParsedConstraint() = default;
     ParsedConstraint(ParsedConstraint&&) = default;
     ParsedConstraint& operator=(ParsedConstraint&&) = default;
@@ -263,5 +263,6 @@ struct ParsedEnum {
     std::string enum_name;
     std::string underlying_type = "int";  /* default int32 */
     std::vector<std::string> values;
+    std::map<std::string, std::string> annotations;
     std::string source_package;
 };

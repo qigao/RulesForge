@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-// Priority enum is now in TurboNet's bucket_priority_queue.h
+// Priority enum is now in TurboUtils's bucket_priority_queue.h
 #include "bucket_priority_queue.h"
 
 // C++ enum class wrapper for type safety

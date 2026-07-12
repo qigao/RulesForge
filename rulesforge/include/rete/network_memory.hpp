@@ -85,10 +85,22 @@ struct NetworkMemory {
     struct BetaConditionMem {
         struct LeftMemoryItem {
             TokenWME const* wme;
-            size_t match_count = 0;
+            std::unordered_set<int64_t> matched_fact_ids;
         };
         std::unordered_map<TokenWME const*, LeftMemoryItem> left;
         std::unordered_map<int64_t, Fact*> right;
+        std::unordered_map<ConstraintValue,
+            std::vector<TokenWME const*>,
+            ConstraintValueHasher,
+            ConstraintValueEquals> left_index;
+        std::unordered_map<ConstraintValue,
+            std::vector<Fact*>,
+            ConstraintValueHasher,
+            ConstraintValueEquals> right_index;
+        std::unordered_map<TokenWME const*, ConstraintValue> left_keys;
+        std::unordered_map<int64_t, ConstraintValue> right_keys;
+        std::vector<TokenWME const*> left_unindexed;
+        std::vector<Fact*> right_unindexed;
         // Deferred evaluation pending queue
         std::vector<Fact*> pending_facts;
         bool dirty = false;
@@ -100,11 +112,11 @@ struct NetworkMemory {
             TokenWME const* wme;
             Fact* result_fact;
             std::unique_ptr<IAccumulator> accumulator;
-            double mir_numeric_sum = 0.0;
-            double mir_numeric_extreme = 0.0;
-            int64_t mir_count = 0;
-            bool mir_sum_is_double = false;
-            std::multiset<double> mir_numeric_values;
+            double numeric_sum = 0.0;
+            double numeric_extreme = 0.0;
+            int64_t aggregate_count = 0;
+            bool sum_is_double = false;
+            std::multiset<double> numeric_values;
             std::vector<Fact*> contributing_facts_list;
             std::unordered_set<Fact*> contributing_facts_set;
 

@@ -1,10 +1,6 @@
 package com.example.pricing
 
-declare Order
-    quantity: int
-    unitPrice: double
-    finalPrice: double
-end
+import schema "payments.schema"
 
 // Rule 1: No discount (1-2 items)
 rule "No Discount"

@@ -1,14 +1,14 @@
-ARG TURBONET_SDK_IMAGE=turbonet-sdk:bookworm
+ARG TurboUtils_SDK_IMAGE=TurboUtils-sdk:bookworm
 ARG TURBOSCRIPT_SDK_IMAGE=turboscript-sdk:bookworm
 
 FROM ${TURBOSCRIPT_SDK_IMAGE} AS turboscript-sdk
-FROM ${TURBONET_SDK_IMAGE}
+FROM ${TurboUtils_SDK_IMAGE}
 
-ENV CMAKE_PREFIX_PATH=/opt/turbonet
-ENV TURBONET_ROOT=/opt/turbonet
+ENV CMAKE_PREFIX_PATH=/opt/TurboUtils
+ENV TurboUtils_ROOT=/opt/TurboUtils
 ENV TURBOSCRIPT_ROOT=/opt/turboscript
 ENV VCPKG_ROOT=/opt/vcpkg
-ENV LD_LIBRARY_PATH=/opt/turboscript/lib:/opt/turbonet/lib
+ENV LD_LIBRARY_PATH=/opt/turboscript/lib:/opt/TurboUtils/lib
 
 WORKDIR /src/rulesforge
 
@@ -20,8 +20,8 @@ COPY . ./
 
 RUN cmake -S . -B build -G Ninja \
     -D CMAKE_BUILD_TYPE=Release \
-    -D CMAKE_PREFIX_PATH=/opt/turbonet\;/opt/turboscript \
-    -D TURBONET_ROOT=/opt/turbonet \
+    -D CMAKE_PREFIX_PATH=/opt/TurboUtils\;/opt/turboscript \
+    -D TurboUtils_ROOT=/opt/TurboUtils \
     -D TURBOSCRIPT_ROOT=/opt/turboscript \
     -D CMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
     -D VCPKG_TARGET_TRIPLET=x64-linux \

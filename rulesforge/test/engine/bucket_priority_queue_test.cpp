@@ -52,7 +52,7 @@ suite("BucketPriorityQueue") {
             queue.push(Priority::HIGH, 2);
             queue.push(Priority::HIGH, 3);
 
-            // FIFO: first pushed is first popped (TurboNet uses ring buffer = FIFO)
+            // FIFO: first pushed is first popped (TurboUtils uses ring buffer = FIFO)
             check(*queue.pop() == 1);
             check(*queue.pop() == 2);
             check(*queue.pop() == 3);

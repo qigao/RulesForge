@@ -61,6 +61,16 @@ public:
         return facts_.size();
     }
 
+    std::vector<Fact*> snapshot() const {
+        std::vector<Fact*> result;
+        result.reserve(facts_.size());
+        for (auto const& [id, fact] : facts_) {
+            (void)id;
+            result.push_back(fact);
+        }
+        return result;
+    }
+
     void clear(bool reset_next_id = true) {
         facts_.clear();
         if (reset_next_id) {

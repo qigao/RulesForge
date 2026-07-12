@@ -14,7 +14,7 @@
 #include "engine/priority_types.hpp"
 
 /**
- * @brief High-performance Agenda using TurboNet ring buffer
+ * @brief High-performance Agenda using TurboUtils ring buffer
  *
  * IMPROVEMENTS over original Agenda:
  * - ✅ 10x faster: 20M+ ops/sec vs 2M ops/sec
@@ -329,6 +329,17 @@ public:
 
     void set_focus(std::string const& group_name) {
         focus_stack_.push_back(group_name);
+    }
+
+    std::string pop_focus() {
+        if (focus_stack_.empty()) return {};
+        std::string top = std::move(focus_stack_.back());
+        focus_stack_.pop_back();
+        return top;
+    }
+
+    bool has_focus_override() const {
+        return !focus_stack_.empty();
     }
 
     std::string get_focus() const {

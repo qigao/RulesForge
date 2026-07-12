@@ -1,4 +1,4 @@
-file(GLOB_RECURSE TEST_SOURCES engine/*_test.cpp data/*_test.cpp api/*_test.cpp codec/*.cpp)
+file(GLOB_RECURSE TEST_SOURCES engine/*_test.cpp data/*_test.cpp core/*_test.cpp api/*_test.cpp codec/*.cpp)
 
 set(folder_name ${TARGET_NAME}/test)
 
@@ -9,7 +9,7 @@ foreach(test_source ${TEST_SOURCES})
     add_executable(${executable_name} ${test_source})
     target_link_libraries(
         ${executable_name}
-        PRIVATE TurboNet::TinyTest rfl_parser ${TARGET_NAME} Threads::Threads
+        PRIVATE TurboUtils::TinyTest rfl_parser ${TARGET_NAME} Threads::Threads
     )
     target_compile_definitions(
         ${executable_name}

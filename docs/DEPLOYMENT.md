@@ -1,96 +1,81 @@
 # RulesForge Deployment Guide
 
-This guide focuses on the supported product shape: a Drools-like rule scripting engine with RETE inference, dynamic schema/data binding, and JIT-backed dynamic script execution.
+RulesForge is an embedded library, not a network service. The embedding process
+owns isolation, scheduling, durable state, and delivery to external systems.
 
-## 1. Build Once, Reuse Often
+## Build and Package
 
-The intended production shape is:
+The supported installed surface is:
 
-- compile rules into one `KnowledgeBase`
-- register host callbacks during setup only when rules need external side effects
-- create many short-lived or pooled `StatefulSession` instances from that knowledge base
+- `include/rule_forge.h` for the C ABI;
+- the `rule_forge` shared library;
+- exported CMake package files under `lib/cmake/RulesForge`.
 
-Do not recompile the same rules for every request.
+Build and test with the repository CMake presets. Package the header and binary
+from the same build; verify `ruleforge_get_version()` during startup when the
+host has a strict version requirement.
 
-## 2. Thread Safety
+## Lifecycle
 
-Current contract:
+Compile each rule pack into a knowledge base once. Configure execution mode and
+native predicates before sharing it, then stop mutating it. Create separate
+stateful or continuous sessions for independent workloads.
 
-- `KnowledgeBase`: safe to share only after setup is complete
-- `StatefulSession`: not thread-safe
+Never share a mutable session concurrently. If an async framework moves work
+between threads, serialize all calls for a session and its DataBind streams on
+one executor.
 
-Practical rule:
+## Input Boundary
 
-- use one session per worker thread, request, or message flow
+Treat `.schema` and RFL files as one versioned rule pack. Validate both during
+CI using representative JSON/CSV/XML/binary payloads. Reject a deployment when
+schema imports, rule compilation, or sample binding fails.
 
-## 3. Data Ingestion Choices
+Choose complete-document APIs for bounded payloads already in memory. Choose
+incremental streams for chunked input. The stream API does not provide an event
+loop; see [Data ingestion](./DATA_INGESTION.md).
 
-Choose one simple path for each integration boundary:
+## Capacity and Backpressure
 
-- JSON for general service integrations
-- CSV for batch/offline loads
-- XML when upstream systems already publish XML payloads
-- binary TBE payloads when you control the schema/payload and need throughput
+For stateful sessions, bound `fire_all_rules` and the number of inserted facts
+at the host boundary. Destroy or explicitly clear sessions according to the
+application lifecycle.
 
-RulesForge engine sessions receive facts. Schema-aware C API helpers can use `TurboScript::DataBind` to bind JSON, CSV, XML, or binary payloads into session-owned facts before insertion.
+For continuous sessions, configure all capacity fields from expected event and
+output rates. A `DRAIN_REQUIRED` result is backpressure: drain before accepting
+more input. Acknowledge result batches in order so pending-result capacity is
+released.
 
-## 4. Validation And Failure Mode
+## Failure Model
 
-RulesForge exposes session validation mode and per-call status results through the C API.
+- Check every returned status and capture the last error before another API call.
+- Treat compilation and schema errors as deployment failures.
+- Destroy failed DataBind streams; do not retry them in place.
+- Recreate an inconsistent session from authoritative input.
+- Persist continuous input outside RulesForge when restart recovery is required.
+- Do not introduce fallback parsing with a different schema or semantics.
 
-Production advice:
+## External Side Effects
 
-- reject malformed facts early
-- keep representative sample payloads in CI
-- do not hide rule compilation errors behind fallback behavior
+Rules filter and derive facts; they do not call external services. Read queries
+or continuous output snapshots after a successful commit, then perform side
+effects in host code. Use result batch IDs or domain IDs as idempotency keys
+when delivery may be retried.
 
-The right failure mode is usually “fail fast during load or test”, not “invent magic defaults”.
+## Release Verification
 
-## 5. Host Callback Boundary
+- build the installable library and examples from a clean preset;
+- run focused parser, engine, C API, DataBind, and continuous tests;
+- compile a pure C consumer against the installed header;
+- run every shipped example command;
+- validate rule packs and representative payloads in CI;
+- verify resource limits with peak-sized inputs;
+- run sanitizer builds for changes touching ownership or stream lifecycle;
+- record the RulesForge version, rule-pack version, and schema version together.
 
-RulesForge keeps extension code behind explicit host callback boundaries:
+## Related Documents
 
-- RHS host callbacks registered directly into a knowledge base
-- helper predicates registered for supported `eval(native.name(...))` expressions
-
-Operational rules:
-
-- keep callbacks deterministic
-- limit external I/O in rule-triggered code
-- version callback code with the rule pack that needs it
-
-## 6. Observability
-
-The C++ runtime exposes:
-
-- rule execution tracing
-- rule performance summaries
-- session metrics exporters
-
-Use them for diagnostics and profiling, not as an excuse to leave noisy tracing enabled in normal production traffic.
-
-## 7. Packaging
-
-Public install surface from this repo includes:
-
-- C headers under `include/`
-- `rule_forge` shared library from `capi/`
-- exported CMake package files under `lib/cmake/RulesForge`
-
-If you are shipping RulesForge as a product dependency, treat that surface as the contract and keep private headers out of downstream integration docs.
-
-## 8. Recommended Release Checklist
-
-- confirm build inputs for `TurboNet`, `TurboScript`, and `vcpkg`
-- compile rules in CI
-- run `ctest --output-on-failure`
-- exercise at least one schema-bound JSON or CSV example
-- verify host callback registration if your rules depend on callbacks
-- document the exact rule pack, callback implementation, and app version together
-
-## 9. Related Docs
-
-- onboarding: [`QUICKSTART.md`](/C:/projects/cpp/rulesforge/docs/QUICKSTART.md)
-- product guide: [`USER_GUIDE.md`](/C:/projects/cpp/rulesforge/docs/USER_GUIDE.md)
-- exact DSL reference: [`dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md)
-- data binding ownership: [`TURBOSCRIPT_DATABIND_PARSER_COMPARISON.md`](/C:/projects/cpp/rulesforge/docs/TURBOSCRIPT_DATABIND_PARSER_COMPARISON.md)
+- [User guide](./USER_GUIDE.md)
+- [Data ingestion](./DATA_INGESTION.md)
+- [Continuous engine](./CONTINUOUS_RULE_ENGINE_DESIGN.md)
+- [DSL reference](./dsl.md)

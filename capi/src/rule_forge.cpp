@@ -2,183 +2,32 @@
 #include "rule_forge.h"
 
 // Include C string handling
-#include <cctype>
-#include <charconv>
-#include <cmath>
 #include <cstdlib>
 #include <cstdint>
+#include <climits>
 #include <cstring>
 #include <fmt.h>
 #include <fstream>
-#include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 // Include C++ backend
 #include "core/errors.hpp"
 #include "core/exceptions.hpp"
+#include "engine/continuous_session.hpp"
 #include "engine/knowledge_base.hpp"
 #include "engine/query_result.hpp"
 #include "engine/stateful_session.hpp"
 #include "rfl_parser.hpp"
 
-#include <turbo_parser.h>
 #include <data_bind.h>
-
-#if defined(_WIN32)
-  #include <windows.h>
-#else
-  #include <dlfcn.h>
-#endif
 
 using namespace rulesforge;
 
 namespace {
 thread_local char last_error[1024] = "";
-
-struct exprtk_env_t;
-struct mem_pool_t;
-
-struct tstr_v {
-  char *data;
-  size_t len;
-};
-
-enum exprtk_value_type_t {
-  EXPRTK_VAL_NUMBER = 0,
-  EXPRTK_VAL_STRING = 1,
-  EXPRTK_VAL_INTEGER = 2,
-  EXPRTK_VAL_VECTOR = 3,
-  EXPRTK_VAL_MAP = 4,
-  EXPRTK_VAL_OBJECT = 5,
-  EXPRTK_VAL_NULL = 6,
-  EXPRTK_VAL_LIST = 7,
-  EXPRTK_VAL_FUNCTION = 8,
-  EXPRTK_VAL_COROUTINE = 9,
-  EXPRTK_VAL_CLASS = 10,
-  EXPRTK_VAL_INSTANCE = 11,
-  EXPRTK_VAL_BOUND_METHOD = 12,
-};
-
-struct exprtk_value_t {
-  exprtk_value_type_t type;
-  union {
-    double number;
-    tstr_v string;
-    int64_t integer;
-    struct {
-      double *data;
-      size_t size;
-    } vector;
-    struct {
-      void *htab;
-    } map;
-    struct {
-      exprtk_value_t *items;
-      size_t count;
-      size_t capacity;
-      int heap_owned;
-    } list;
-    struct {
-      void *arg_params;
-      size_t arg_count;
-      void *body;
-      void *closure_env;
-      void *owner_class;
-      int is_static_method;
-      int access_level;
-      int is_override;
-      int is_final;
-    } function;
-    struct {
-      void *coro;
-    } coroutine;
-    struct {
-      void *klass;
-    } class_val;
-    struct {
-      void *instance;
-    } instance_val;
-    struct {
-      void *instance;
-      void *method;
-    } bound_method_val;
-  } data;
-};
-
-using exprtk_builtin_fn =
-    exprtk_value_t (*)(size_t argc, exprtk_value_t *args, exprtk_env_t *env, mem_pool_t *arena);
-
-struct exprtk_func_entry_t {
-  const char *name;
-  exprtk_builtin_fn fn;
-};
-
-struct exprtk_module_t {
-  const char *module_name;
-  const exprtk_func_entry_t *entries;
-  size_t count;
-};
-
-struct ts_plugin_t {
-  const char *name;
-  uint32_t version;
-  void *(*load)(void *env, void *scratch);
-  void (*unload)(void *instance);
-};
-
-using ts_api_create_fn = const ts_plugin_t *(*)(void);
-
-static exprtk_value_t exprtk_val_num(double value) {
-  exprtk_value_t result{};
-  result.type = EXPRTK_VAL_NUMBER;
-  result.data.number = value;
-  return result;
-}
-
-static exprtk_value_t exprtk_val_str(tstr_v value) {
-  exprtk_value_t result{};
-  result.type = EXPRTK_VAL_STRING;
-  result.data.string = value;
-  return result;
-}
-
-static bool is_integral_double(double value) {
-  return std::isfinite(value)
-      && std::floor(value) == value
-      && value >= static_cast<double>(std::numeric_limits<int64_t>::min())
-      && value <= static_cast<double>(std::numeric_limits<int64_t>::max());
-}
-
-#if defined(_WIN32)
-static void *open_library(const char *path) {
-  HMODULE h = LoadLibraryA(path);
-  return reinterpret_cast<void *>(h);
-}
-
-static void *load_symbol(void *handle, const char *symbol_name) {
-  return reinterpret_cast<void *>(GetProcAddress(reinterpret_cast<HMODULE>(handle), symbol_name));
-}
-
-static void close_library(void *handle) {
-  if (handle) {
-    FreeLibrary(reinterpret_cast<HMODULE>(handle));
-  }
-}
-#else
-static void *open_library(const char *path) { return dlopen(path, RTLD_NOW | RTLD_LOCAL); }
-
-static void *load_symbol(void *handle, const char *symbol_name) {
-  return dlsym(handle, symbol_name);
-}
-
-static void close_library(void *handle) {
-  if (handle) {
-    dlclose(handle);
-  }
-}
-#endif
 
 static void set_error(const char *msg) { fmt(last_error, sizeof(last_error), "{}", msg); }
 
@@ -203,6 +52,82 @@ static ruleforge_status_t map_session_inconsistent(SessionInconsistentException 
   return RULES_FORGE_ERROR_SESSION_INCONSISTENT;
 }
 
+static std::optional<rulesforge::AgendaImplementation>
+map_execution_mode(ruleforge_execution_mode_t mode) {
+  switch (mode) {
+  case RULES_FORGE_EXECUTION_MODE_DEFAULT:
+    return rulesforge::default_agenda_implementation();
+  case RULES_FORGE_EXECUTION_MODE_V1_STANDARD:
+    return rulesforge::AgendaImplementation::Agenda;
+  case RULES_FORGE_EXECUTION_MODE_V2_HIGH_PERFORMANCE:
+    return rulesforge::AgendaImplementation::AgendaV2;
+  }
+  return std::nullopt;
+}
+
+static std::string unqualified_type_name(std::string const &type_name) {
+  auto const dot = type_name.find_last_of('.');
+  return dot == std::string::npos ? type_name : type_name.substr(dot + 1);
+}
+
+static bool is_schema_imported_fact_type(StatefulSession const &session, char const *fact_type) {
+  if (!fact_type) {
+    return false;
+  }
+  auto const kb = session.get_knowledge_base();
+  if (!kb) {
+    return false;
+  }
+  std::string const requested(fact_type);
+  for (auto const &decl : kb->get_parser_state().parsed_declarations) {
+    if (decl.annotations.find("schema_source") == decl.annotations.end()) {
+      continue;
+    }
+    if (decl.type_name == requested || unqualified_type_name(decl.type_name) == requested) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool is_schema_imported_fact_type(KnowledgeBase const &kb, char const *fact_type) {
+  if (!fact_type) {
+    return false;
+  }
+  std::string const requested(fact_type);
+  for (auto const &decl : kb.get_parser_state().parsed_declarations) {
+    if (decl.annotations.find("schema_source") == decl.annotations.end()) {
+      continue;
+    }
+    if (decl.type_name == requested || unqualified_type_name(decl.type_name) == requested) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static ruleforge_status_t require_schema_imported_fact_type(StatefulSession const &session,
+                                                            char const *fact_type) {
+  if (is_schema_imported_fact_type(session, fact_type)) {
+    return RULES_FORGE_OK;
+  }
+  fmt(last_error, sizeof(last_error),
+      "External input fact type '{}' must be imported into the knowledge base from a .schema file.",
+      fact_type ? fact_type : "<null>");
+  return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+}
+
+static ruleforge_status_t require_schema_imported_fact_type(KnowledgeBase const &kb,
+                                                            char const *fact_type) {
+  if (is_schema_imported_fact_type(kb, fact_type)) {
+    return RULES_FORGE_OK;
+  }
+  fmt(last_error, sizeof(last_error),
+      "External input fact type '{}' must be imported into the knowledge base from a .schema file.",
+      fact_type ? fact_type : "<null>");
+  return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+}
+
 struct DataBindHandleDeleter {
   void operator()(DataBind *codec) const { data_bind_free(codec); }
 };
@@ -211,43 +136,13 @@ struct DataBindValueDeleter {
   void operator()(DataBindValue *value) const { data_bind_value_free(value); }
 };
 
+struct DataBindStreamDeleter {
+  void operator()(data_bind_stream_t *stream) const { data_bind_stream_destroy(stream); }
+};
+
 using DataBindHandle = std::unique_ptr<DataBind, DataBindHandleDeleter>;
 using DataBindValueHandle = std::unique_ptr<DataBindValue, DataBindValueDeleter>;
-
-struct TurboJsonDeleter {
-  void operator()(json_value_t *value) const {
-    if (value) {
-      turbo_free_json(&value);
-    }
-  }
-};
-
-using TurboJsonHandle = std::unique_ptr<json_value_t, TurboJsonDeleter>;
-
-struct TurboJsonStringDeleter {
-  void operator()(char *value) const {
-    if (value) {
-      turbo_json_serialize_free(value);
-    }
-  }
-};
-
-using TurboJsonStringHandle = std::unique_ptr<char, TurboJsonStringDeleter>;
-
-static TurboJsonHandle parse_turbo_json_or_null(char const *json, size_t len) {
-  if (!json) {
-    return TurboJsonHandle(nullptr);
-  }
-  json_value_t *root = nullptr;
-  int const rc = turbo_parse_json(reinterpret_cast<uint8_t const *>(json), len, &root);
-  if (rc != 0 || !root) {
-    if (root) {
-      turbo_free_json(&root);
-    }
-    return TurboJsonHandle(nullptr);
-  }
-  return TurboJsonHandle(root);
-}
+using DataBindStreamHandle = std::unique_ptr<data_bind_stream_t, DataBindStreamDeleter>;
 
 static ConstraintValue data_bind_value_to_constraint(DataBindValue const *value) {
   if (!value) {
@@ -377,13 +272,13 @@ static ruleforge_status_t insert_data_bind_fact(StatefulSession &session,
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   if (data_bind_value_kind(value) != DATA_BIND_VALUE_OBJECT) {
-    set_error("TurboScript DataBind result is not an object fact");
+    set_error("DataBind result is not an object fact");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
 
   Fact *fact = session.create_fact(fact_type);
   if (!populate_fact_from_data_bind_value(*fact, value)) {
-    set_error("Failed to convert TurboScript DataBind result to fact");
+    set_error("Failed to convert DataBind result to fact");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   session.add_fact(fact);
@@ -409,7 +304,7 @@ static ruleforge_status_t insert_data_bind_fact_list(StatefulSession &session,
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   if (data_bind_value_kind(value) != DATA_BIND_VALUE_LIST) {
-    set_error("TurboScript DataBind all-result is not a list");
+    set_error("DataBind all-result is not a list");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
 
@@ -426,39 +321,47 @@ static ruleforge_status_t insert_data_bind_fact_list(StatefulSession &session,
   for (size_t i = 0; i < count; ++i) {
     DataBindValue const *item = data_bind_value_at(value, i);
     if (!item || data_bind_value_kind(item) != DATA_BIND_VALUE_OBJECT) {
-      set_error("TurboScript DataBind list item is not an object fact");
+      set_error("DataBind list item is not an object fact");
       // Facts created so far are arena-owned; they will be freed with the session.
       // They have NOT been add_fact'd yet, so working memory is still clean.
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
     Fact *fact = session.create_fact(fact_type);
     if (!populate_fact_from_data_bind_value(*fact, item)) {
-      set_error("Failed to convert TurboScript DataBind list item to fact");
+      set_error("Failed to convert DataBind list item to fact");
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
     built.push_back({fact});
   }
 
-  // Phase 2: all items are valid – insert them atomically.
-  std::vector<ruleforge_fact_t> inserted;
-  inserted.reserve(built.size());
-  for (auto const &bf : built) {
-    session.add_fact(bf.fact);
-    inserted.push_back(reinterpret_cast<ruleforge_fact_t>(bf.fact));
-  }
-
-  if (out_facts && !inserted.empty()) {
-    auto *fact_array =
-        static_cast<ruleforge_fact_t *>(std::calloc(inserted.size(), sizeof(ruleforge_fact_t)));
+  std::unique_ptr<ruleforge_fact_t, decltype(&std::free)> fact_array(nullptr, &std::free);
+  if (out_facts && !built.empty()) {
+    fact_array.reset(
+        static_cast<ruleforge_fact_t *>(std::calloc(built.size(), sizeof(ruleforge_fact_t))));
     if (!fact_array) {
       set_error("Failed to allocate fact handle array");
       return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
     }
-    std::memcpy(fact_array, inserted.data(), inserted.size() * sizeof(ruleforge_fact_t));
-    *out_facts = fact_array;
+  }
+
+  // Phase 2: all validation and output allocation succeeded; commit the facts.
+  std::vector<Fact *> facts_to_insert;
+  facts_to_insert.reserve(built.size());
+  for (auto const &built_fact : built) {
+    facts_to_insert.push_back(built_fact.fact);
+  }
+  session.add_facts(facts_to_insert);
+  for (size_t i = 0; i < built.size(); ++i) {
+    if (fact_array) {
+      fact_array.get()[i] = reinterpret_cast<ruleforge_fact_t>(built[i].fact);
+    }
+  }
+
+  if (out_facts) {
+    *out_facts = fact_array.release();
   }
   if (out_loaded_count) {
-    *out_loaded_count = static_cast<int>(inserted.size());
+    *out_loaded_count = static_cast<int>(built.size());
   }
   return RULES_FORGE_OK;
 }
@@ -473,308 +376,15 @@ static DataBindHandle create_data_bind_or_set_error(char const *schema_path) {
   DataBindStatus status = data_bind_create(schema_path, &raw_codec, &error);
   DataBindHandle codec(raw_codec);
   if (!codec) {
-    set_error_fmt("TurboScript DataBind schema load failed: ",
+    set_error_fmt("DataBind schema load failed: ",
                   data_bind_error_detail(status, error));
   }
   return codec;
 }
 
-static std::string trim_ascii(std::string const &s) {
-  size_t begin = 0;
-  while (begin < s.size() && std::isspace(static_cast<unsigned char>(s[begin]))) {
-    ++begin;
-  }
-  size_t end = s.size();
-  while (end > begin && std::isspace(static_cast<unsigned char>(s[end - 1]))) {
-    --end;
-  }
-  return s.substr(begin, end - begin);
-}
-
-static bool try_parse_int64_str(std::string const &text, int64_t &out) {
-  if (text.empty())
-    return false;
-  auto *begin = text.data();
-  auto *end = begin + text.size();
-  auto [ptr, ec] = std::from_chars(begin, end, out);
-  return ec == std::errc() && ptr == end;
-}
-
-static bool try_parse_double_str(std::string const &text, double &out) {
-  if (text.empty())
-    return false;
-  char *end_ptr = nullptr;
-  out = std::strtod(text.c_str(), &end_ptr);
-  return end_ptr == text.c_str() + text.size();
-}
-
-static void set_fact_field_from_csv(Fact &fact, std::string const &field_name,
-                                    std::string const &raw_value) {
-  std::string value = trim_ascii(raw_value);
-  if (value.empty()) {
-    return;
-  }
-  if (value == "true" || value == "TRUE") {
-    fact.fields[field_name] = static_cast<int64_t>(1);
-    return;
-  }
-  if (value == "false" || value == "FALSE") {
-    fact.fields[field_name] = static_cast<int64_t>(0);
-    return;
-  }
-  if (value == "null" || value == "NULL") {
-    fact.fields[field_name] = NilValue{};
-    return;
-  }
-
-  int64_t int_value = 0;
-  if (try_parse_int64_str(value, int_value)) {
-    fact.fields[field_name] = int_value;
-    return;
-  }
-
-  double double_value = 0.0;
-  if (try_parse_double_str(value, double_value)) {
-    fact.fields[field_name] = double_value;
-    return;
-  }
-
-  fact.fields[field_name] = value;
-}
-
-static ruleforge_status_t load_csv_facts_into_session(StatefulSession *session_ptr,
-                                                      const char *fact_type, const char *csv_source,
-                                                      int *out_loaded_count,
-                                                      ruleforge_fact_t **out_facts) {
-  if (!session_ptr || !fact_type || !csv_source) {
-    set_error("Session handle, fact type, or CSV source is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-
-  if (out_facts) {
-    *out_facts = nullptr;
-  }
-  if (out_loaded_count)
-    *out_loaded_count = 0;
-
-  turbo_csv_doc_t *doc = nullptr;
-  int rc =
-      turbo_parse_csv(reinterpret_cast<const uint8_t *>(csv_source), std::strlen(csv_source), &doc);
-  if (rc != 0 || !doc) {
-    if (doc)
-      turbo_free_csv(&doc);
-    set_error("CSV parsing failed");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-
-  size_t row_count = turbo_csv_row_count(doc);
-  if (row_count == 0) {
-    turbo_free_csv(&doc);
-    return RULES_FORGE_OK;
-  }
-
-  std::vector<std::string> headers;
-  for (size_t c = 0;; ++c) {
-    char const *cell = turbo_csv_get(doc, 0, c);
-    if (!cell)
-      break;
-    headers.push_back(trim_ascii(cell));
-  }
-
-  if (headers.empty()) {
-    turbo_free_csv(&doc);
-    set_error("CSV header row is empty");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-
-  int loaded = 0;
-  std::vector<ruleforge_fact_t> inserted_facts;
-  for (size_t r = 1; r < row_count; ++r) {
-    Fact *fact = session_ptr->create_fact(fact_type);
-    bool has_field = false;
-
-    for (size_t c = 0; c < headers.size(); ++c) {
-      std::string const &field_name = headers[c];
-      if (field_name.empty())
-        continue;
-
-      char const *cell = turbo_csv_get(doc, r, c);
-      if (!cell)
-        continue;
-
-      set_fact_field_from_csv(*fact, field_name, cell);
-      has_field = true;
-    }
-
-    if (!has_field) {
-      continue;
-    }
-
-    session_ptr->add_fact(fact);
-    if (out_facts) {
-      inserted_facts.push_back(reinterpret_cast<ruleforge_fact_t>(fact));
-    }
-    ++loaded;
-  }
-
-  if (out_facts && !inserted_facts.empty()) {
-    auto *fact_array = static_cast<ruleforge_fact_t *>(
-        std::calloc(inserted_facts.size(), sizeof(ruleforge_fact_t)));
-    if (!fact_array) {
-      turbo_free_csv(&doc);
-      set_error("Failed to allocate fact handle array");
-      return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
-    }
-    std::memcpy(fact_array, inserted_facts.data(),
-                inserted_facts.size() * sizeof(ruleforge_fact_t));
-    *out_facts = fact_array;
-  }
-
-  if (out_loaded_count)
-    *out_loaded_count = loaded;
-  turbo_free_csv(&doc);
-  return RULES_FORGE_OK;
-}
-
-// Bridge to call exprtk function from ruleforge native callback
-struct TsFuncBridge {
-  exprtk_builtin_fn fn;
-  void *env;
-};
-
-struct RuleForgeExprtkEnv {
-  uint64_t magic;
-  KnowledgeBase *kb;
-  std::vector<TsFuncBridge *> bridges;
-};
-
-constexpr uint64_t kRuleForgeExprtkEnvMagic = 0x5246454558544B31ULL;
-
-static bool is_ruleforge_exprtk_env(const void *env) {
-  if (!env) {
-    return false;
-  }
-
-  auto magic = *reinterpret_cast<const uint64_t *>(env);
-  return magic == kRuleForgeExprtkEnvMagic;
-}
-
-int ts_func_callback_bridge(void *ctx, int argc, const char **argv, char **out_result) {
-  auto *bridge = static_cast<TsFuncBridge *>(ctx);
-  if (!bridge || !bridge->fn)
-    return RULES_FORGE_ERROR_GENERIC;
-
-  std::vector<exprtk_value_t> expr_args;
-  expr_args.reserve(argc);
-  auto free_expr_args = [&]() {
-    for (auto &arg : expr_args) {
-      if (arg.type == EXPRTK_VAL_STRING) {
-        free((void *)arg.data.string.data);
-      }
-    }
-  };
-
-  for (int i = 0; i < argc; ++i) {
-    auto json = parse_turbo_json_or_null(argv[i], argv[i] ? std::strlen(argv[i]) : 0);
-    if (!json) {
-      expr_args.push_back(exprtk_val_num(0.0));
-      continue;
-    }
-
-    switch (turbo_json_type(json.get())) {
-    case TURBO_JSON_NUMBER:
-      expr_args.push_back(exprtk_val_num(turbo_json_number(json.get())));
-      break;
-    case TURBO_JSON_STRING: {
-      size_t const len = turbo_json_string_len(json.get());
-      char const *text = turbo_json_string(json.get());
-      char *internal_s = static_cast<char *>(std::calloc(len + 1, sizeof(char)));
-      if (!internal_s) {
-        expr_args.push_back(exprtk_val_num(0.0));
-        break;
-      }
-      if (text && len > 0) {
-        std::memcpy(internal_s, text, len);
-      }
-      tstr_v tv;
-      tv.data = internal_s;
-      tv.len = len;
-      expr_args.push_back(exprtk_val_str(tv));
-      break;
-    }
-    case TURBO_JSON_BOOL:
-      expr_args.push_back(exprtk_val_num(turbo_json_bool(json.get()) ? 1.0 : 0.0));
-      break;
-    default:
-      expr_args.push_back(exprtk_val_num(0.0));
-      break;
-    }
-  }
-
-  // Call the function
-  exprtk_value_t res =
-      bridge->fn(expr_args.size(), expr_args.data(), (exprtk_env_t *)bridge->env, nullptr);
-
-  json_value_t *json_result = nullptr;
-  if (res.type == EXPRTK_VAL_NUMBER) {
-    json_result = turbo_json_create_number(res.data.number);
-  } else if (res.type == EXPRTK_VAL_STRING) {
-    std::string text(res.data.string.data, res.data.string.len);
-    json_result = turbo_json_create_string(text.c_str());
-  } else {
-    json_result = turbo_json_create_number(0.0);
-  }
-
-  TurboJsonHandle result_handle(json_result);
-  if (!result_handle) {
-    free_expr_args();
-    return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
-  }
-  size_t result_len = 0;
-  TurboJsonStringHandle serialized(turbo_json_serialize(result_handle.get(), &result_len));
-  if (!serialized) {
-    free_expr_args();
-    return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
-  }
-  *out_result = static_cast<char *>(std::calloc(result_len + 1, sizeof(char)));
-  if (!*out_result) {
-    free_expr_args();
-    return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
-  }
-  std::memcpy(*out_result, serialized.get(), result_len);
-
-  free_expr_args();
-
-  return RULES_FORGE_OK;
-}
-
-struct TsPluginRecord {
-  // Owning pointer to the plugin environment (bridges live inside it)
-  RuleForgeExprtkEnv *env = nullptr;
-  // Plugin descriptor returned by ts_api_create (lifetime tied to DLL)
-  const void         *plugin = nullptr;
-  // Plugin instance returned by plugin->load() (may be null for stateless plugins)
-  void               *instance = nullptr;
-};
-
 struct KnowledgeBaseWrapper {
   std::shared_ptr<KnowledgeBase> kb;
-  std::map<std::string, NativeFunction> native_functions;
-  std::map<std::string, NativeFunction> native_predicates;
-  std::vector<void *> extension_handles;
-  // Tracks every loaded ts_plugin so we can call unload() and delete env on destroy.
-  std::vector<TsPluginRecord> ts_plugin_records;
 };
-
-static void replay_native_extensions(KnowledgeBaseWrapper const *kb_wrapper,
-                                     std::shared_ptr<KnowledgeBase> const &compiled_kb) {
-  for (auto const &[name, func] : kb_wrapper->native_functions) {
-    compiled_kb->register_native_function(name, func.callback, func.user_data);
-  }
-  for (auto const &[name, func] : kb_wrapper->native_predicates) {
-    compiled_kb->register_native_predicate(name, func.callback, func.user_data);
-  }
-}
 
 } // namespace
 
@@ -812,6 +422,41 @@ ruleforge_status_t ruleforge_kb_create(ruleforge_knowledge_base_t *out_kb) {
   }
 }
 
+ruleforge_status_t ruleforge_kb_set_execution_mode(ruleforge_knowledge_base_t kb,
+                                                   ruleforge_execution_mode_t mode) {
+  if (!kb) {
+    set_error("Knowledge Base handle is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto mapped = map_execution_mode(mode);
+  if (!mapped) {
+    set_error("Invalid execution mode");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
+  if (!kb_wrapper->kb) {
+    set_error("Knowledge Base is not initialized");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  kb_wrapper->kb->set_agenda_implementation(*mapped);
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+const char *ruleforge_kb_get_execution_mode(ruleforge_knowledge_base_t kb) {
+  if (!kb) {
+    set_error("Knowledge Base handle is NULL");
+    return nullptr;
+  }
+  auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
+  if (!kb_wrapper->kb) {
+    set_error("Knowledge Base is not initialized");
+    return nullptr;
+  }
+  last_error[0] = '\0';
+  return rulesforge::execution_mode_name(kb_wrapper->kb->execution_mode());
+}
+
 ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const char *drl_source) {
   if (!kb) {
     set_error("Knowledge Base handle is NULL");
@@ -825,8 +470,7 @@ ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const ch
     ParsingResult result;
     auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
 
-    auto saved_native_functions = kb_wrapper->native_functions;
-    auto saved_native_predicates = kb_wrapper->native_predicates;
+    auto saved_agenda = kb_wrapper->kb->agenda_implementation();
     auto compiled_kb = build_knowledge_base(drl_source, result, "C_API_Source");
 
     if (!result.success || !compiled_kb) {
@@ -841,9 +485,7 @@ ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const ch
       return RULES_FORGE_ERROR_COMPILATION_FAILED;
     }
 
-    kb_wrapper->native_functions = saved_native_functions;
-    kb_wrapper->native_predicates = saved_native_predicates;
-    replay_native_extensions(kb_wrapper, compiled_kb);
+    compiled_kb->set_agenda_implementation(saved_agenda);
     kb_wrapper->kb = std::move(compiled_kb);
 
     last_error[0] = '\0';
@@ -862,8 +504,7 @@ ruleforge_status_t ruleforge_kb_load_drl_file(ruleforge_knowledge_base_t kb, con
   }
   try {
     auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
-    auto saved_native_functions = kb_wrapper->native_functions;
-    auto saved_native_predicates = kb_wrapper->native_predicates;
+    auto saved_agenda = kb_wrapper->kb->agenda_implementation();
 
     std::vector<std::string> dirs;
     for (int i = 0; i < base_dir_count; i++) {
@@ -892,9 +533,7 @@ ruleforge_status_t ruleforge_kb_load_drl_file(ruleforge_knowledge_base_t kb, con
       return RULES_FORGE_ERROR_COMPILATION_FAILED;
     }
 
-    kb_wrapper->native_functions = saved_native_functions;
-    kb_wrapper->native_predicates = saved_native_predicates;
-    replay_native_extensions(kb_wrapper, compiled_kb);
+    compiled_kb->set_agenda_implementation(saved_agenda);
     kb_wrapper->kb = std::move(compiled_kb);
 
     last_error[0] = '\0';
@@ -914,8 +553,7 @@ ruleforge_status_t ruleforge_kb_load_drl_files(ruleforge_knowledge_base_t kb,
   }
   try {
     auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
-    auto saved_native_functions = kb_wrapper->native_functions;
-    auto saved_native_predicates = kb_wrapper->native_predicates;
+    auto saved_agenda = kb_wrapper->kb->agenda_implementation();
 
     std::vector<std::string> files;
     for (int i = 0; i < file_count; i++) {
@@ -946,9 +584,7 @@ ruleforge_status_t ruleforge_kb_load_drl_files(ruleforge_knowledge_base_t kb,
       return RULES_FORGE_ERROR_COMPILATION_FAILED;
     }
 
-    kb_wrapper->native_functions = saved_native_functions;
-    kb_wrapper->native_predicates = saved_native_predicates;
-    replay_native_extensions(kb_wrapper, compiled_kb);
+    compiled_kb->set_agenda_implementation(saved_agenda);
     kb_wrapper->kb = std::move(compiled_kb);
 
     last_error[0] = '\0';
@@ -973,8 +609,7 @@ ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base
     ParsingResult result;
     auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
 
-    auto saved_native_functions = kb_wrapper->native_functions;
-    auto saved_native_predicates = kb_wrapper->native_predicates;
+    auto saved_agenda = kb_wrapper->kb->agenda_implementation();
     auto compiled_kb = build_knowledge_base_from_csv_string(csv_source, result, "C_API_CSV_Source");
 
     if (!result.success || !compiled_kb) {
@@ -989,9 +624,7 @@ ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base
       return RULES_FORGE_ERROR_COMPILATION_FAILED;
     }
 
-    kb_wrapper->native_functions = saved_native_functions;
-    kb_wrapper->native_predicates = saved_native_predicates;
-    replay_native_extensions(kb_wrapper, compiled_kb);
+    compiled_kb->set_agenda_implementation(saved_agenda);
     kb_wrapper->kb = std::move(compiled_kb);
 
     last_error[0] = '\0';
@@ -1010,33 +643,6 @@ ruleforge_status_t ruleforge_kb_destroy(ruleforge_knowledge_base_t kb) {
   try {
     auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
 
-    // Unload ts_plugins first: call unload(), then free bridges, then delete env.
-    // This must happen before the KnowledgeBase itself is destroyed so that any
-    // callbacks still registered on it are not called after the env is freed.
-    for (auto &rec : kb_wrapper->ts_plugin_records) {
-      if (rec.plugin && rec.instance) {
-        // Cast back through the original ts_plugin_t* to call unload
-        auto const *plugin = static_cast<const ts_plugin_t *>(rec.plugin);
-        if (plugin->unload) {
-          plugin->unload(rec.instance);
-        }
-      }
-      if (rec.env) {
-        // Free all bridges owned by this env
-        for (auto *bridge : rec.env->bridges) {
-          delete bridge;
-        }
-        rec.env->bridges.clear();
-        delete rec.env;
-        rec.env = nullptr;
-      }
-    }
-    kb_wrapper->ts_plugin_records.clear();
-
-    for (void *handle : kb_wrapper->extension_handles) {
-      close_library(handle);
-    }
-    kb_wrapper->extension_handles.clear();
     delete kb_wrapper;
     last_error[0] = '\0';
     return RULES_FORGE_OK;
@@ -1046,215 +652,384 @@ ruleforge_status_t ruleforge_kb_destroy(ruleforge_knowledge_base_t kb) {
   }
 }
 
-ruleforge_status_t ruleforge_kb_register_native_function(ruleforge_knowledge_base_t kb,
-                                                         const char *function_name,
-                                                         ruleforge_native_function_t callback,
-                                                         void *user_data) {
-  if (!kb) {
-    set_error("Knowledge Base handle is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  if (!function_name) {
-    set_error("Function name is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  if (!callback) {
-    set_error("Callback function is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  try {
-    auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
-    kb_wrapper->native_functions[function_name] = {
-        reinterpret_cast<NativeFunctionCallback>(callback), user_data};
-    if (kb_wrapper->kb) {
-      kb_wrapper->kb->register_native_function(
-          function_name, reinterpret_cast<NativeFunctionCallback>(callback), user_data);
-    }
-    last_error[0] = '\0';
-    return RULES_FORGE_OK;
-  } catch (const std::exception &e) {
-    set_error_fmt("Failed to register native function: ", e.what());
-    return RULES_FORGE_ERROR_GENERIC;
-  }
-}
-
-ruleforge_status_t ruleforge_kb_register_native_predicate(ruleforge_knowledge_base_t kb,
-                                                          const char *predicate_name,
-                                                          ruleforge_native_function_t callback,
-                                                          void *user_data) {
-  if (!kb) {
-    set_error("Knowledge Base handle is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  if (!predicate_name) {
-    set_error("Predicate name is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  if (!callback) {
-    set_error("Callback predicate is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  try {
-    auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
-    kb_wrapper->native_predicates[predicate_name] = {
-        reinterpret_cast<NativeFunctionCallback>(callback), user_data};
-    if (kb_wrapper->kb) {
-      kb_wrapper->kb->register_native_predicate(
-          predicate_name, reinterpret_cast<NativeFunctionCallback>(callback), user_data);
-    }
-    last_error[0] = '\0';
-    return RULES_FORGE_OK;
-  } catch (const std::exception &e) {
-    set_error_fmt("Failed to register native predicate: ", e.what());
-    return RULES_FORGE_ERROR_GENERIC;
-  }
-}
-
-ruleforge_status_t ruleforge_kb_load_native_function_table(ruleforge_knowledge_base_t kb,
-                                                           const char *library_path,
-                                                           const char *symbol_name) {
-  if (!kb) {
-    set_error("Knowledge Base handle is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  if (!library_path) {
-    set_error("Library path is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-
-  auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
-  void *handle = open_library(library_path);
-  if (!handle) {
-    set_error("Failed to load function table library");
-    return RULES_FORGE_ERROR_GENERIC;
-  }
-
-  char const *symbol =
-      (symbol_name && symbol_name[0] != '\0') ? symbol_name : "ruleforge_get_function_table";
-  auto get_table = reinterpret_cast<ruleforge_get_function_table_t>(load_symbol(handle, symbol));
-  if (!get_table) {
-    close_library(handle);
-    set_error("Failed to resolve function table symbol");
-    return RULES_FORGE_ERROR_GENERIC;
-  }
-
-  ruleforge_function_table_t table{};
-  ruleforge_status_t status = get_table(&table);
-  if (status != RULES_FORGE_OK) {
-    close_library(handle);
-    set_error("Function table callback failed");
-    return status;
-  }
-  if (table.abi_version != RULEFORGE_FUNCTION_TABLE_ABI_V1) {
-    close_library(handle);
-    set_error("Function table ABI version mismatch");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  if (table.function_count > 0 && table.functions == nullptr) {
-    close_library(handle);
-    set_error("Function table is invalid");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-
-  // Validate all entries before registering any to avoid partial-registration
-  // with a subsequently closed DLL (which would leave dangling callbacks).
-  for (uint32_t i = 0; i < table.function_count; ++i) {
-    auto const &entry = table.functions[i];
-    if (!entry.name || !entry.callback) {
-      close_library(handle);
-      set_error("Function table entry has NULL name or callback");
-      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-    }
-  }
-
-  try {
-    for (uint32_t i = 0; i < table.function_count; ++i) {
-      auto const &entry = table.functions[i];
-      kb_wrapper->native_functions[entry.name] = {
-          reinterpret_cast<NativeFunctionCallback>(entry.callback), entry.user_data};
-      if (kb_wrapper->kb) {
-        kb_wrapper->kb->register_native_function(
-            entry.name, reinterpret_cast<NativeFunctionCallback>(entry.callback), entry.user_data);
-      }
-    }
-    kb_wrapper->extension_handles.push_back(handle);
-  } catch (const std::exception &e) {
-    close_library(handle);
-    set_error_fmt("Failed to register function table entries: ", e.what());
-    return RULES_FORGE_ERROR_GENERIC;
-  }
-
-  last_error[0] = '\0';
-  return RULES_FORGE_OK;
-}
-
-
-extern "C" void exprtk_env_add_module(exprtk_env_t *env, const exprtk_module_t *mod) {
-  if (!env || !mod)
-    return;
-
-  if (!is_ruleforge_exprtk_env(env)) {
-    return;
-  }
-
-  auto *rfe = reinterpret_cast<RuleForgeExprtkEnv *>(env);
-
-  for (size_t i = 0; i < mod->count; ++i) {
-    auto &entry = mod->entries[i];
-    auto *bridge = new TsFuncBridge{entry.fn, env};
-    rfe->bridges.push_back(bridge);
-    rfe->kb->register_native_function(entry.name, ts_func_callback_bridge, bridge);
-  }
-}
-
-ruleforge_status_t ruleforge_kb_load_ts_plugin(ruleforge_knowledge_base_t kb,
-                                               const char *library_path) {
-  if (!kb || !library_path)
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
-
-  void *handle = open_library(library_path);
-  if (!handle) {
-    set_error("Failed to load TurboScript plugin library");
-    return RULES_FORGE_ERROR_GENERIC;
-  }
-
-  auto ts_api_create = reinterpret_cast<ts_api_create_fn>(load_symbol(handle, "ts_api_create"));
-  if (!ts_api_create) {
-    close_library(handle);
-    set_error("Not a TurboScript plugin (ts_api_create missing)");
-    return RULES_FORGE_ERROR_GENERIC;
-  }
-
-  const ts_plugin_t *plugin = ts_api_create();
-  if (!plugin) {
-    close_library(handle);
-    set_error("ts_api_create returned NULL");
-    return RULES_FORGE_ERROR_GENERIC;
-  }
-
-  // Allocate the env and call the plugin load function.
-  // env and all TsFuncBridge objects it owns are tracked in ts_plugin_records
-  // so that ruleforge_kb_destroy() can correctly call unload() and release them.
-  auto *rfe = new RuleForgeExprtkEnv{kRuleForgeExprtkEnvMagic, kb_wrapper->kb.get()};
-  void *instance = plugin->load(rfe, nullptr);
-  // Note: a null instance means the plugin is stateless; that is acceptable.
-
-  TsPluginRecord record;
-  record.env      = rfe;
-  record.plugin   = static_cast<const void *>(plugin);
-  record.instance = instance;
-  kb_wrapper->ts_plugin_records.push_back(record);
-
-  kb_wrapper->extension_handles.push_back(handle);
-  last_error[0] = '\0';
-  return RULES_FORGE_OK;
-}
-
 // Session wrapper for safe C++/C interop
 struct StatefulSessionWrapper {
   std::unique_ptr<StatefulSession> session;
+  size_t active_data_bind_streams = 0;
 };
+
+struct ContinuousSessionWrapper {
+  std::shared_ptr<KnowledgeBase> kb;
+  std::unique_ptr<ContinuousSession> session;
+  size_t max_pending_results = 0;
+  size_t active_data_bind_streams = 0;
+};
+
+struct ruleforge_continuous_result_handle_s {
+  ContinuousStepResult result;
+  std::vector<Fact> output_facts;
+};
+
+struct ruleforge_continuous_data_bind_stream_handle_s {
+  ContinuousSessionWrapper *session_wrapper = nullptr;
+  DataBindHandle codec;
+  DataBindValueHandle value;
+  DataBindValue *output_value = nullptr;
+  DataBindStreamHandle stream;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  std::string fact_type;
+  std::string event_id;
+  std::string event_id_field;
+  std::string entry_point;
+  std::string event_time_field;
+  std::vector<EventEnvelope> pending_events;
+  std::string callback_error;
+  int64_t event_time_ms = 0;
+  bool multiple = false;
+  bool failed = false;
+  bool finished = false;
+};
+
+struct ruleforge_data_bind_stream_handle_s {
+  StatefulSessionWrapper *session_wrapper = nullptr;
+  DataBindHandle codec;
+  DataBindValueHandle value;
+  DataBindValue *output_value = nullptr;
+  DataBindStreamHandle stream;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  std::string fact_type;
+  bool multiple = false;
+  bool failed = false;
+  bool finished = false;
+};
+
+namespace {
+
+static ruleforge_status_t prepare_data_bind_stream(
+    ruleforge_stateful_session_t session, char const *schema_path,
+    char const *fact_type, bool multiple,
+    ruleforge_data_bind_stream_t *out_stream,
+    std::unique_ptr<ruleforge_data_bind_stream_handle_s> &handle) {
+  if (out_stream) {
+    *out_stream = nullptr;
+  }
+  if (!session || !schema_path || !fact_type || !out_stream) {
+    set_error("Session, schema path, fact type, or output stream is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+
+  try {
+    auto *session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*session_wrapper->session, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
+    handle = std::make_unique<ruleforge_data_bind_stream_handle_s>();
+    handle->session_wrapper = session_wrapper;
+    handle->codec = create_data_bind_or_set_error(schema_path);
+    handle->fact_type = fact_type;
+    handle->multiple = multiple;
+    if (!handle->codec) {
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+    return RULES_FORGE_OK;
+  } catch (std::bad_alloc const &) {
+    set_error("Failed to allocate DataBind stream");
+    return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
+  } catch (std::exception const &e) {
+    set_error_fmt("Failed to create DataBind stream: ", e.what());
+    return RULES_FORGE_ERROR_GENERIC;
+  }
+}
+
+static ruleforge_status_t publish_data_bind_stream(
+    std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle,
+    data_bind_stream_t *raw_stream, ruleforge_data_bind_stream_t *out_stream) {
+  handle->stream.reset(raw_stream);
+  if (!handle->stream) {
+    set_error_fmt("DataBind stream creation failed: ",
+                  data_bind_error_detail(DATA_BIND_ERR_INVALID_ARG, handle->error));
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+
+  ++handle->session_wrapper->active_data_bind_streams;
+  *out_stream = handle.release();
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+static ruleforge_status_t reject_unusable_data_bind_stream(
+    ruleforge_data_bind_stream_handle_s const *stream) {
+  if (!stream) {
+    set_error("DataBind stream handle is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  if (stream->failed || stream->finished) {
+    set_error("DataBind stream is no longer usable");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return RULES_FORGE_OK;
+}
+
+static ruleforge_status_t map_continuous_exception(std::exception const &e) {
+  set_error(e.what());
+  if (dynamic_cast<std::length_error const *>(&e)) {
+    return RULES_FORGE_ERROR_RESOURCE_LIMIT;
+  }
+  if (dynamic_cast<std::bad_alloc const *>(&e)) {
+    return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
+  }
+  if (dynamic_cast<std::invalid_argument const *>(&e)) {
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return RULES_FORGE_ERROR_GENERIC;
+}
+
+static std::unique_ptr<ruleforge_continuous_result_handle_s>
+prepare_continuous_result(ContinuousSessionWrapper const &wrapper) {
+  auto handle = std::make_unique<ruleforge_continuous_result_handle_s>();
+  handle->output_facts.reserve(wrapper.max_pending_results);
+  return handle;
+}
+
+static ruleforge_status_t publish_continuous_result(
+    std::unique_ptr<ruleforge_continuous_result_handle_s> handle,
+    ContinuousStepResult result, ruleforge_continuous_result_t *out_result) {
+  if (!out_result) {
+    set_error("Output continuous result pointer is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  for (auto &output : result.outputs) {
+    Fact fact;
+    fact.id = output.fact_id;
+    fact.type = std::move(output.fact_type);
+    fact.fields = std::move(output.fields);
+    handle->output_facts.push_back(std::move(fact));
+  }
+  handle->result = std::move(result);
+  *out_result = handle.release();
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+static std::shared_ptr<Fact> fact_from_data_bind_value(char const *fact_type,
+                                                      DataBindValue const *value) {
+  if (!fact_type || !value || data_bind_value_kind(value) != DATA_BIND_VALUE_OBJECT) {
+    throw std::invalid_argument("DataBind result is not an object fact");
+  }
+  auto fact = std::make_shared<Fact>();
+  fact->type = fact_type;
+  if (!populate_fact_from_data_bind_value(*fact, value)) {
+    throw std::invalid_argument("Failed to convert DataBind result to fact");
+  }
+  return fact;
+}
+
+static ruleforge_status_t push_continuous_bound_value(
+    ContinuousSessionWrapper *wrapper, char const *fact_type,
+    char const *event_id, char const *entry_point, int64_t event_time_ms,
+    DataBindValue const *value, ruleforge_continuous_result_t *out_result) {
+  if (out_result) {
+    *out_result = nullptr;
+  }
+  if (!wrapper || !wrapper->session || !fact_type || !event_id || !entry_point || !out_result) {
+    set_error("Continuous session, event metadata, or output result is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto fact = fact_from_data_bind_value(fact_type, value);
+    auto result_handle = prepare_continuous_result(*wrapper);
+    EventEnvelope event{event_id, entry_point, event_time_ms, std::move(fact)};
+    return publish_continuous_result(
+        std::move(result_handle), wrapper->session->push(std::move(event)), out_result);
+  } catch (std::exception const &e) {
+    return map_continuous_exception(e);
+  }
+}
+
+static ruleforge_status_t push_continuous_bound_list(
+    ContinuousSessionWrapper *wrapper, char const *fact_type,
+    char const *event_id_field, char const *event_time_field,
+    char const *entry_point, DataBindValue const *value,
+    ruleforge_continuous_result_t *out_result) {
+  if (out_result) {
+    *out_result = nullptr;
+  }
+  if (!wrapper || !wrapper->session || !fact_type || !event_id_field
+      || !event_time_field || !entry_point || !value || !out_result) {
+    set_error("Continuous event batch arguments are invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  if (data_bind_value_kind(value) != DATA_BIND_VALUE_LIST) {
+    set_error("DataBind continuous batch result is not a list");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+
+  try {
+    size_t const count = data_bind_value_count(value);
+    std::vector<EventEnvelope> events;
+    events.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+      DataBindValue const *item = data_bind_value_at(value, i);
+      if (!item || data_bind_value_kind(item) != DATA_BIND_VALUE_OBJECT) {
+        throw std::invalid_argument("DataBind continuous batch item is not an object");
+      }
+      DataBindValue const *id_value = data_bind_value_get(item, event_id_field);
+      DataBindValue const *time_value = data_bind_value_get(item, event_time_field);
+      if (!id_value || data_bind_value_kind(id_value) != DATA_BIND_VALUE_STRING) {
+        throw std::invalid_argument("Continuous event ID field must be a string");
+      }
+      char const *event_id = data_bind_value_as_string(id_value);
+      if (!event_id || event_id[0] == '\0') {
+        throw std::invalid_argument("Continuous event ID field cannot be empty");
+      }
+      int64_t event_time_ms = 0;
+      if (time_value && data_bind_value_kind(time_value) == DATA_BIND_VALUE_INT) {
+        event_time_ms = data_bind_value_as_int(time_value);
+      } else if (time_value && data_bind_value_kind(time_value) == DATA_BIND_VALUE_INT64) {
+        event_time_ms = data_bind_value_as_int64(time_value);
+      } else {
+        throw std::invalid_argument("Continuous event time field must be int or int64");
+      }
+      events.push_back(EventEnvelope{event_id, entry_point, event_time_ms,
+                                     fact_from_data_bind_value(fact_type, item)});
+    }
+
+    auto result_handle = prepare_continuous_result(*wrapper);
+    return publish_continuous_result(
+        std::move(result_handle), wrapper->session->push_batch(events), out_result);
+  } catch (std::exception const &e) {
+    return map_continuous_exception(e);
+  }
+}
+
+static EventEnvelope continuous_event_from_bound_value(
+    char const *fact_type, char const *event_id_field,
+    char const *event_time_field, char const *entry_point,
+    DataBindValue const *value) {
+  if (!value || data_bind_value_kind(value) != DATA_BIND_VALUE_OBJECT) {
+    throw std::invalid_argument("DataBind continuous event is not an object");
+  }
+  DataBindValue const *id_value = data_bind_value_get(value, event_id_field);
+  DataBindValue const *time_value = data_bind_value_get(value, event_time_field);
+  if (!id_value || data_bind_value_kind(id_value) != DATA_BIND_VALUE_STRING) {
+    throw std::invalid_argument("Continuous event ID field must be a string");
+  }
+  char const *event_id = data_bind_value_as_string(id_value);
+  if (!event_id || event_id[0] == '\0') {
+    throw std::invalid_argument("Continuous event ID field cannot be empty");
+  }
+  int64_t event_time_ms = 0;
+  if (time_value && data_bind_value_kind(time_value) == DATA_BIND_VALUE_INT) {
+    event_time_ms = data_bind_value_as_int(time_value);
+  } else if (time_value && data_bind_value_kind(time_value) == DATA_BIND_VALUE_INT64) {
+    event_time_ms = data_bind_value_as_int64(time_value);
+  } else {
+    throw std::invalid_argument("Continuous event time field must be int or int64");
+  }
+  return EventEnvelope{event_id, entry_point, event_time_ms,
+                       fact_from_data_bind_value(fact_type, value)};
+}
+
+static DataBindRecordAction collect_continuous_stream_record(
+    void *user_data, DataBindValue const *record, uint64_t record_index) {
+  auto *handle = static_cast<ruleforge_continuous_data_bind_stream_handle_s *>(user_data);
+  if (!handle || record_index != handle->pending_events.size()) {
+    return DATA_BIND_RECORD_ERROR;
+  }
+  try {
+    handle->pending_events.push_back(continuous_event_from_bound_value(
+        handle->fact_type.c_str(), handle->event_id_field.c_str(),
+        handle->event_time_field.c_str(), handle->entry_point.c_str(), record));
+    return DATA_BIND_RECORD_CONTINUE;
+  } catch (std::exception const &e) {
+    handle->callback_error = e.what();
+    return DATA_BIND_RECORD_ERROR;
+  } catch (...) {
+    handle->callback_error = "Failed to convert DataBind streaming record";
+    return DATA_BIND_RECORD_ERROR;
+  }
+}
+
+static ruleforge_status_t validate_continuous_path_arguments(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *source, char const *path,
+    char const *event_id_field, char const *event_time_field,
+    char const *entry_point, ruleforge_continuous_result_t *out_result) {
+  if (out_result) {
+    *out_result = nullptr;
+  }
+  if (!session || !schema_path || !fact_type || !source || !path || path[0] == '\0'
+      || !event_id_field || event_id_field[0] == '\0'
+      || !event_time_field || event_time_field[0] == '\0'
+      || !entry_point || entry_point[0] == '\0' || !out_result) {
+    set_error("Continuous path input arguments are invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+  return require_schema_imported_fact_type(*wrapper->kb, fact_type);
+}
+
+static ruleforge_status_t prepare_continuous_path_stream(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *path, char const *event_id_field,
+    char const *event_time_field, char const *entry_point,
+    ruleforge_continuous_data_bind_stream_t *out_stream,
+    std::unique_ptr<ruleforge_continuous_data_bind_stream_handle_s> &handle) {
+  if (out_stream) {
+    *out_stream = nullptr;
+  }
+  if (!session || !schema_path || !fact_type || !path || path[0] == '\0'
+      || !event_id_field || event_id_field[0] == '\0'
+      || !event_time_field || event_time_field[0] == '\0'
+      || !entry_point || entry_point[0] == '\0' || !out_stream) {
+    set_error("Continuous path stream arguments are invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*wrapper->kb, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
+    handle = std::make_unique<ruleforge_continuous_data_bind_stream_handle_s>();
+    handle->session_wrapper = wrapper;
+    handle->codec = create_data_bind_or_set_error(schema_path);
+    handle->fact_type = fact_type;
+    handle->event_id_field = event_id_field;
+    handle->event_time_field = event_time_field;
+    handle->entry_point = entry_point;
+    handle->multiple = true;
+    return handle->codec ? RULES_FORGE_OK : RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  } catch (std::exception const &e) {
+    return map_continuous_exception(e);
+  }
+}
+
+static ruleforge_status_t publish_continuous_path_stream(
+    std::unique_ptr<ruleforge_continuous_data_bind_stream_handle_s> handle,
+    data_bind_stream_t *raw_stream,
+    ruleforge_continuous_data_bind_stream_t *out_stream) {
+  handle->stream.reset(raw_stream);
+  if (!handle->stream) {
+    set_error_fmt("Continuous DataBind stream creation failed: ",
+                  data_bind_error_detail(DATA_BIND_ERR_INVALID_ARG, handle->error));
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindStatus callback_status = data_bind_stream_set_record_callback(
+      handle->stream.get(), collect_continuous_stream_record, handle.get());
+  if (callback_status != DATA_BIND_OK) {
+    set_error_fmt("Continuous DataBind callback setup failed: ",
+                  data_bind_error_detail(callback_status, handle->error));
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  ++handle->session_wrapper->active_data_bind_streams;
+  *out_stream = handle.release();
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+} // namespace
 
 ruleforge_status_t ruleforge_session_create(ruleforge_knowledge_base_t kb,
                                             ruleforge_stateful_session_t *out_session) {
@@ -1288,107 +1063,905 @@ ruleforge_status_t ruleforge_session_create(ruleforge_knowledge_base_t kb,
   }
 }
 
+ruleforge_status_t ruleforge_continuous_config_init(
+    ruleforge_continuous_config_t *config) {
+  if (!config) {
+    set_error("Continuous config pointer is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  ContinuousSessionConfig defaults;
+  *config = {};
+  config->abi_version = RULEFORGE_CONTINUOUS_CONFIG_ABI_V1;
+  config->struct_size = sizeof(*config);
+  config->max_active_events = defaults.max_active_events;
+  config->max_dedup_entries = defaults.max_dedup_entries;
+  config->max_pending_result_batches = defaults.max_pending_result_batches;
+  config->max_pending_results = defaults.max_pending_results;
+  config->max_input_batch_size = defaults.max_input_batch_size;
+  config->max_replay_steps = defaults.max_replay_steps;
+  config->max_rules_per_step = defaults.max_rules_per_step;
+  config->allowed_lateness_ms = defaults.allowed_lateness_ms;
+  config->event_retention_ms = defaults.event_retention_ms;
+  config->dedup_retention_ms = defaults.dedup_retention_ms;
+  config->max_event_time_lead_ms = defaults.max_event_time_lead_ms;
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+ruleforge_status_t ruleforge_continuous_session_create(
+    ruleforge_knowledge_base_t kb, ruleforge_continuous_config_t const *config,
+    ruleforge_continuous_session_t *out_session) {
+  if (out_session) {
+    *out_session = nullptr;
+  }
+  if (!kb || !config || !out_session) {
+    set_error("Knowledge Base, continuous config, or output session is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  if (config->abi_version != RULEFORGE_CONTINUOUS_CONFIG_ABI_V1
+      || config->struct_size < sizeof(*config)) {
+    set_error("Unsupported continuous config ABI version or structure size");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  if (config->output_fact_type_count != 0 && !config->output_fact_types) {
+    set_error("Continuous output fact type array is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+
+  try {
+    auto *kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
+    if (!kb_wrapper->kb) {
+      set_error("Knowledge Base is not initialized");
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+    ContinuousSessionConfig cpp_config;
+    cpp_config.max_active_events = config->max_active_events;
+    cpp_config.max_dedup_entries = config->max_dedup_entries;
+    cpp_config.max_pending_result_batches = config->max_pending_result_batches;
+    cpp_config.max_pending_results = config->max_pending_results;
+    cpp_config.max_input_batch_size = config->max_input_batch_size;
+    cpp_config.max_replay_steps = config->max_replay_steps;
+    cpp_config.max_rules_per_step = config->max_rules_per_step;
+    cpp_config.allowed_lateness_ms = config->allowed_lateness_ms;
+    cpp_config.event_retention_ms = config->event_retention_ms;
+    cpp_config.dedup_retention_ms = config->dedup_retention_ms;
+    cpp_config.max_event_time_lead_ms = config->max_event_time_lead_ms;
+    cpp_config.output_fact_types.reserve(config->output_fact_type_count);
+    for (size_t i = 0; i < config->output_fact_type_count; ++i) {
+      if (!config->output_fact_types[i]) {
+        set_error("Continuous output fact type contains NULL");
+        return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+      }
+      cpp_config.output_fact_types.emplace_back(config->output_fact_types[i]);
+    }
+
+    auto wrapper = std::make_unique<ContinuousSessionWrapper>();
+    wrapper->kb = kb_wrapper->kb;
+    wrapper->max_pending_results = cpp_config.max_pending_results;
+    wrapper->session = std::make_unique<ContinuousSession>(wrapper->kb, std::move(cpp_config));
+    *out_session = reinterpret_cast<ruleforge_continuous_session_t>(wrapper.release());
+    last_error[0] = '\0';
+    return RULES_FORGE_OK;
+  } catch (std::exception const &e) {
+    return map_continuous_exception(e);
+  }
+}
+
+ruleforge_status_t ruleforge_continuous_session_destroy(
+    ruleforge_continuous_session_t session) {
+  if (!session) {
+    set_error("Continuous session handle is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+  if (wrapper->active_data_bind_streams != 0) {
+    set_error("Cannot destroy continuous session while DataBind streams are active");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  delete wrapper;
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+ruleforge_status_t ruleforge_continuous_push_json_schema(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *event_id, char const *entry_point,
+    int64_t event_time_ms, char const *fact_json,
+    ruleforge_continuous_result_t *out_result) {
+  if (out_result) {
+    *out_result = nullptr;
+  }
+  if (!session || !schema_path || !fact_type || !event_id || !entry_point
+      || !fact_json || !out_result) {
+    set_error("Continuous JSON event arguments are invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+  auto type_status = require_schema_imported_fact_type(*wrapper->kb, fact_type);
+  if (type_status != RULES_FORGE_OK) {
+    return type_status;
+  }
+  auto codec = create_data_bind_or_set_error(schema_path);
+  if (!codec) {
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindValue *raw_value = nullptr;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindStatus bind_status = data_bind_parse_json(
+      codec.get(), fact_type, fact_json, std::strlen(fact_json), &raw_value, &error);
+  DataBindValueHandle value(raw_value);
+  if (bind_status != DATA_BIND_OK) {
+    set_error_fmt("DataBind JSON parse failed: ", data_bind_error_detail(bind_status, error));
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return push_continuous_bound_value(wrapper, fact_type, event_id, entry_point,
+                                     event_time_ms, value.get(), out_result);
+}
+
+ruleforge_status_t ruleforge_continuous_push_json_path_schema(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *json_source, char const *json_path,
+    char const *event_id_field, char const *event_time_field,
+    char const *entry_point, ruleforge_continuous_result_t *out_result) {
+  auto validation = validate_continuous_path_arguments(
+      session, schema_path, fact_type, json_source, json_path, event_id_field,
+      event_time_field, entry_point, out_result);
+  if (validation != RULES_FORGE_OK) {
+    return validation;
+  }
+  auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+  auto codec = create_data_bind_or_set_error(schema_path);
+  if (!codec) {
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindValue *raw_value = nullptr;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindStatus status = data_bind_parse_json_path_all(
+      codec.get(), fact_type, json_source, std::strlen(json_source), json_path,
+      &raw_value, &error);
+  DataBindValueHandle value(raw_value);
+  if (status != DATA_BIND_OK) {
+    set_error_fmt("Continuous DataBind JSON path parse failed: ",
+                  data_bind_error_detail(status, error));
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return push_continuous_bound_list(wrapper, fact_type, event_id_field,
+                                    event_time_field, entry_point, value.get(), out_result);
+}
+
+ruleforge_status_t ruleforge_continuous_push_csv_path_schema(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *csv_source, char const *csv_path,
+    char const *event_id_field, char const *event_time_field,
+    char const *entry_point, ruleforge_continuous_result_t *out_result) {
+  auto validation = validate_continuous_path_arguments(
+      session, schema_path, fact_type, csv_source, csv_path, event_id_field,
+      event_time_field, entry_point, out_result);
+  if (validation != RULES_FORGE_OK) {
+    return validation;
+  }
+  auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+  auto codec = create_data_bind_or_set_error(schema_path);
+  if (!codec) {
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindValue *raw_value = nullptr;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindStatus status = data_bind_parse_csv_path(
+      codec.get(), fact_type, csv_source, std::strlen(csv_source), csv_path,
+      &raw_value, &error);
+  DataBindValueHandle value(raw_value);
+  if (status != DATA_BIND_OK) {
+    set_error_fmt("Continuous DataBind CSV path parse failed: ",
+                  data_bind_error_detail(status, error));
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return push_continuous_bound_list(wrapper, fact_type, event_id_field,
+                                    event_time_field, entry_point, value.get(), out_result);
+}
+
+ruleforge_status_t ruleforge_continuous_push_xml_path_schema(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *xml_source, char const *xml_path,
+    char const *event_id_field, char const *event_time_field,
+    char const *entry_point, ruleforge_continuous_result_t *out_result) {
+  auto validation = validate_continuous_path_arguments(
+      session, schema_path, fact_type, xml_source, xml_path, event_id_field,
+      event_time_field, entry_point, out_result);
+  if (validation != RULES_FORGE_OK) {
+    return validation;
+  }
+  auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+  auto codec = create_data_bind_or_set_error(schema_path);
+  if (!codec) {
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindValue *raw_value = nullptr;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindStatus status = data_bind_parse_xml_path_all(
+      codec.get(), fact_type, xml_source, std::strlen(xml_source), xml_path,
+      &raw_value, &error);
+  DataBindValueHandle value(raw_value);
+  if (status != DATA_BIND_OK) {
+    set_error_fmt("Continuous DataBind XML path parse failed: ",
+                  data_bind_error_detail(status, error));
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return push_continuous_bound_list(wrapper, fact_type, event_id_field,
+                                    event_time_field, entry_point, value.get(), out_result);
+}
+
+ruleforge_status_t ruleforge_continuous_advance_watermark(
+    ruleforge_continuous_session_t session, int64_t watermark_ms,
+    ruleforge_continuous_result_t *out_result) {
+  if (out_result) {
+    *out_result = nullptr;
+  }
+  if (!session || !out_result) {
+    set_error("Continuous session or output result is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+    auto result_handle = prepare_continuous_result(*wrapper);
+    return publish_continuous_result(
+        std::move(result_handle), wrapper->session->advance_watermark(watermark_ms), out_result);
+  } catch (std::exception const &e) {
+    return map_continuous_exception(e);
+  }
+}
+
+ruleforge_status_t ruleforge_continuous_drain(
+    ruleforge_continuous_session_t session, ruleforge_continuous_result_t *out_result) {
+  if (out_result) {
+    *out_result = nullptr;
+  }
+  if (!session || !out_result) {
+    set_error("Continuous session or output result is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+    auto result_handle = prepare_continuous_result(*wrapper);
+    return publish_continuous_result(
+        std::move(result_handle), wrapper->session->drain(), out_result);
+  } catch (std::exception const &e) {
+    return map_continuous_exception(e);
+  }
+}
+
+ruleforge_status_t ruleforge_continuous_acknowledge(
+    ruleforge_continuous_session_t session, uint64_t batch_id) {
+  if (!session) {
+    set_error("Continuous session handle is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+    wrapper->session->acknowledge(batch_id);
+    last_error[0] = '\0';
+    return RULES_FORGE_OK;
+  } catch (std::exception const &e) {
+    return map_continuous_exception(e);
+  }
+}
+
+ruleforge_status_t ruleforge_continuous_get_metrics(
+    ruleforge_continuous_session_t session,
+    ruleforge_continuous_metrics_t *out_metrics) {
+  if (!session || !out_metrics) {
+    set_error("Continuous session or output metrics is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+  auto metrics = wrapper->session->metrics();
+  *out_metrics = {metrics.accepted_events, metrics.expired_events,
+                  metrics.rejected_duplicates, metrics.rejected_late_events,
+                  metrics.rejected_resource_limits, metrics.replay_recoveries,
+                  metrics.active_events, metrics.dedup_entries,
+                  metrics.pending_result_batches, metrics.pending_results};
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+ruleforge_status_t ruleforge_continuous_data_bind_stream_json_create(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *event_id, char const *entry_point,
+    int64_t event_time_ms, ruleforge_continuous_data_bind_stream_t *out_stream) {
+  if (out_stream) {
+    *out_stream = nullptr;
+  }
+  if (!session || !schema_path || !fact_type || !event_id || !entry_point || !out_stream) {
+    set_error("Continuous DataBind stream arguments are invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*wrapper->kb, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
+    auto handle = std::make_unique<ruleforge_continuous_data_bind_stream_handle_s>();
+    handle->session_wrapper = wrapper;
+    handle->codec = create_data_bind_or_set_error(schema_path);
+    handle->fact_type = fact_type;
+    handle->event_id = event_id;
+    handle->entry_point = entry_point;
+    handle->event_time_ms = event_time_ms;
+    if (!handle->codec) {
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+    handle->stream.reset(data_bind_stream_json_create(
+        handle->codec.get(), fact_type, &handle->output_value, &handle->error));
+    if (!handle->stream) {
+      set_error_fmt("DataBind stream creation failed: ",
+                    data_bind_error_detail(DATA_BIND_ERR_INVALID_ARG, handle->error));
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+    ++wrapper->active_data_bind_streams;
+    *out_stream = handle.release();
+    last_error[0] = '\0';
+    return RULES_FORGE_OK;
+  } catch (std::exception const &e) {
+    return map_continuous_exception(e);
+  }
+}
+
+ruleforge_status_t ruleforge_continuous_data_bind_stream_json_path_create(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *json_path, char const *event_id_field,
+    char const *event_time_field, char const *entry_point,
+    ruleforge_continuous_data_bind_stream_t *out_stream) {
+  std::unique_ptr<ruleforge_continuous_data_bind_stream_handle_s> handle;
+  auto status = prepare_continuous_path_stream(
+      session, schema_path, fact_type, json_path, event_id_field,
+      event_time_field, entry_point, out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_json_path_all_create(
+      handle->codec.get(), fact_type, json_path, &handle->output_value, &handle->error);
+  return publish_continuous_path_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_continuous_data_bind_stream_csv_path_create(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *csv_path, char const *event_id_field,
+    char const *event_time_field, char const *entry_point,
+    ruleforge_continuous_data_bind_stream_t *out_stream) {
+  std::unique_ptr<ruleforge_continuous_data_bind_stream_handle_s> handle;
+  auto status = prepare_continuous_path_stream(
+      session, schema_path, fact_type, csv_path, event_id_field,
+      event_time_field, entry_point, out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_csv_path_create(
+      handle->codec.get(), fact_type, csv_path, &handle->output_value, &handle->error);
+  return publish_continuous_path_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_continuous_data_bind_stream_xml_path_create(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *xml_path, char const *event_id_field,
+    char const *event_time_field, char const *entry_point,
+    ruleforge_continuous_data_bind_stream_t *out_stream) {
+  std::unique_ptr<ruleforge_continuous_data_bind_stream_handle_s> handle;
+  auto status = prepare_continuous_path_stream(
+      session, schema_path, fact_type, xml_path, event_id_field,
+      event_time_field, entry_point, out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_xml_path_all_create(
+      handle->codec.get(), fact_type, xml_path, &handle->output_value, &handle->error);
+  return publish_continuous_path_stream(std::move(handle), stream, out_stream);
+}
+
+static ruleforge_status_t reject_unusable_continuous_data_bind_stream(
+    ruleforge_continuous_data_bind_stream_handle_s const *stream) {
+  if (!stream) {
+    set_error("Continuous DataBind stream handle is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  if (stream->failed || stream->finished) {
+    set_error("Continuous DataBind stream is no longer usable");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return RULES_FORGE_OK;
+}
+
+ruleforge_status_t ruleforge_continuous_data_bind_stream_feed(
+    ruleforge_continuous_data_bind_stream_t stream, void const *data, size_t len) {
+  auto *handle = reinterpret_cast<ruleforge_continuous_data_bind_stream_handle_s *>(stream);
+  auto state_status = reject_unusable_continuous_data_bind_stream(handle);
+  if (state_status != RULES_FORGE_OK) {
+    return state_status;
+  }
+  if (!data && len != 0) {
+    set_error("Continuous DataBind stream chunk is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindStatus status = static_cast<DataBindStatus>(
+      data_bind_stream_feed(handle->stream.get(), data, len));
+  if (status != DATA_BIND_OK) {
+    handle->failed = true;
+    handle->pending_events.clear();
+    if (!handle->callback_error.empty()) {
+      set_error_fmt("Continuous DataBind record callback failed: ",
+                    handle->callback_error.c_str());
+    } else {
+      set_error_fmt("Continuous DataBind stream feed failed: ",
+                    data_bind_error_detail(status, handle->error));
+    }
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+ruleforge_status_t ruleforge_continuous_data_bind_stream_feed_file(
+    ruleforge_continuous_data_bind_stream_t stream, char const *file_path) {
+  auto *handle = reinterpret_cast<ruleforge_continuous_data_bind_stream_handle_s *>(stream);
+  auto state_status = reject_unusable_continuous_data_bind_stream(handle);
+  if (state_status != RULES_FORGE_OK) {
+    return state_status;
+  }
+  if (!file_path || file_path[0] == '\0') {
+    set_error("Continuous DataBind stream file path is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindStatus status = static_cast<DataBindStatus>(
+      data_bind_stream_feed_file(handle->stream.get(), file_path));
+  if (status != DATA_BIND_OK) {
+    handle->failed = true;
+    handle->pending_events.clear();
+    set_error_fmt("Continuous DataBind stream file feed failed: ",
+                  data_bind_error_detail(status, handle->error));
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+ruleforge_status_t ruleforge_continuous_data_bind_stream_finish(
+    ruleforge_continuous_data_bind_stream_t stream,
+    ruleforge_continuous_result_t *out_result) {
+  if (out_result) {
+    *out_result = nullptr;
+  }
+  auto *handle = reinterpret_cast<ruleforge_continuous_data_bind_stream_handle_s *>(stream);
+  auto state_status = reject_unusable_continuous_data_bind_stream(handle);
+  if (state_status != RULES_FORGE_OK) {
+    return state_status;
+  }
+  if (!out_result) {
+    set_error("Output continuous result pointer is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindStatus bind_status = static_cast<DataBindStatus>(
+      data_bind_stream_finish(handle->stream.get()));
+  handle->finished = true;
+  handle->value.reset(handle->output_value);
+  handle->output_value = nullptr;
+  if (bind_status != DATA_BIND_OK) {
+    handle->failed = true;
+    if (!handle->callback_error.empty()) {
+      set_error_fmt("Continuous DataBind record callback failed: ",
+                    handle->callback_error.c_str());
+    } else {
+      set_error_fmt("Continuous DataBind stream finish failed: ",
+                    data_bind_error_detail(bind_status, handle->error));
+    }
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  if (handle->multiple) {
+    try {
+      auto result_handle = prepare_continuous_result(*handle->session_wrapper);
+      return publish_continuous_result(
+          std::move(result_handle),
+          handle->session_wrapper->session->push_batch(handle->pending_events),
+          out_result);
+    } catch (std::exception const &e) {
+      return map_continuous_exception(e);
+    }
+  }
+  return push_continuous_bound_value(
+      handle->session_wrapper, handle->fact_type.c_str(), handle->event_id.c_str(),
+      handle->entry_point.c_str(), handle->event_time_ms, handle->value.get(), out_result);
+}
+
+ruleforge_status_t ruleforge_continuous_data_bind_stream_destroy(
+    ruleforge_continuous_data_bind_stream_t stream) {
+  if (!stream) {
+    set_error("Continuous DataBind stream handle is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto *handle = reinterpret_cast<ruleforge_continuous_data_bind_stream_handle_s *>(stream);
+  if (handle->session_wrapper && handle->session_wrapper->active_data_bind_streams != 0) {
+    --handle->session_wrapper->active_data_bind_streams;
+  }
+  delete handle;
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+ruleforge_continuous_step_status_t ruleforge_continuous_result_get_status(
+    ruleforge_continuous_result_t result) {
+  if (!result) {
+    set_error("Continuous result handle is NULL");
+    return RULES_FORGE_CONTINUOUS_COMMITTED;
+  }
+  auto *handle = reinterpret_cast<ruleforge_continuous_result_handle_s *>(result);
+  last_error[0] = '\0';
+  return handle->result.status == ContinuousStepStatus::DrainRequired
+      ? RULES_FORGE_CONTINUOUS_DRAIN_REQUIRED : RULES_FORGE_CONTINUOUS_COMMITTED;
+}
+
+uint64_t ruleforge_continuous_result_get_batch_id(ruleforge_continuous_result_t result) {
+  if (!result) {
+    set_error("Continuous result handle is NULL");
+    return 0;
+  }
+  auto *handle = reinterpret_cast<ruleforge_continuous_result_handle_s *>(result);
+  last_error[0] = '\0';
+  return handle->result.batch_id;
+}
+
+int ruleforge_continuous_result_get_rules_fired(ruleforge_continuous_result_t result) {
+  if (!result) {
+    set_error("Continuous result handle is NULL");
+    return -1;
+  }
+  auto *handle = reinterpret_cast<ruleforge_continuous_result_handle_s *>(result);
+  last_error[0] = '\0';
+  return handle->result.rules_fired;
+}
+
+size_t ruleforge_continuous_result_get_events_expired(ruleforge_continuous_result_t result) {
+  if (!result) {
+    set_error("Continuous result handle is NULL");
+    return 0;
+  }
+  auto *handle = reinterpret_cast<ruleforge_continuous_result_handle_s *>(result);
+  last_error[0] = '\0';
+  return handle->result.events_expired;
+}
+
+ruleforge_status_t ruleforge_continuous_result_get_watermark(
+    ruleforge_continuous_result_t result, int64_t *out_watermark_ms,
+    int *out_has_watermark) {
+  if (!result || !out_watermark_ms || !out_has_watermark) {
+    set_error("Continuous result or watermark output is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto *handle = reinterpret_cast<ruleforge_continuous_result_handle_s *>(result);
+  *out_has_watermark = handle->result.watermark_ms.has_value() ? 1 : 0;
+  *out_watermark_ms = handle->result.watermark_ms.value_or(0);
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+int ruleforge_continuous_result_get_output_count(ruleforge_continuous_result_t result) {
+  if (!result) {
+    set_error("Continuous result handle is NULL");
+    return -1;
+  }
+  auto *handle = reinterpret_cast<ruleforge_continuous_result_handle_s *>(result);
+  if (handle->output_facts.size() > static_cast<size_t>(INT_MAX)) {
+    set_error("Continuous result output count exceeds int range");
+    return -1;
+  }
+  last_error[0] = '\0';
+  return static_cast<int>(handle->output_facts.size());
+}
+
+ruleforge_status_t ruleforge_continuous_result_get_output(
+    ruleforge_continuous_result_t result, int index, ruleforge_fact_t *out_fact) {
+  if (out_fact) {
+    *out_fact = nullptr;
+  }
+  if (!result || !out_fact || index < 0) {
+    set_error("Continuous result, output fact, or index is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto *handle = reinterpret_cast<ruleforge_continuous_result_handle_s *>(result);
+  if (static_cast<size_t>(index) >= handle->output_facts.size()) {
+    set_error("Continuous output index is out of range");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  *out_fact = reinterpret_cast<ruleforge_fact_t>(&handle->output_facts[static_cast<size_t>(index)]);
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+ruleforge_status_t ruleforge_continuous_result_destroy(
+    ruleforge_continuous_result_t result) {
+  if (!result) {
+    set_error("Continuous result handle is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  delete reinterpret_cast<ruleforge_continuous_result_handle_s *>(result);
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
 // QueryResult wrapper for safe C++/C interop
 struct QueryResultWrapper {
   std::unique_ptr<QueryResult> query_result;
 };
 
-static ruleforge_status_t ruleforge_session_add_fact_json_impl(ruleforge_stateful_session_t session,
-                                                               const char *fact_type,
-                                                               const char *fact_json,
-                                                               ruleforge_fact_t *out_fact) {
-  if (!session || !fact_type || !fact_json) {
-    set_error("Session handle, fact type, or fact JSON is NULL");
+ruleforge_status_t ruleforge_data_bind_stream_json_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, ruleforge_data_bind_stream_t *out_stream) {
+  std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
+  auto status = prepare_data_bind_stream(session, schema_path, fact_type, false,
+                                         out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_json_create(
+      handle->codec.get(), fact_type, &handle->output_value, &handle->error);
+  return publish_data_bind_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_json_all_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, ruleforge_data_bind_stream_t *out_stream) {
+  std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
+  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+                                         out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_json_all_create(
+      handle->codec.get(), fact_type, &handle->output_value, &handle->error);
+  return publish_data_bind_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_json_path_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, const char *json_path,
+    ruleforge_data_bind_stream_t *out_stream) {
+  if (!json_path || json_path[0] == '\0') {
+    if (out_stream) {
+      *out_stream = nullptr;
+    }
+    set_error("JSON path is invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
-  if (out_fact) {
-    *out_fact = nullptr;
+  std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
+  auto status = prepare_data_bind_stream(session, schema_path, fact_type, false,
+                                         out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
   }
-  auto json = parse_turbo_json_or_null(fact_json, std::strlen(fact_json));
-  if (!json || turbo_json_type(json.get()) != TURBO_JSON_OBJECT) {
-    set_error("JSON parsing failed");
+  auto *stream = data_bind_stream_json_path_create(
+      handle->codec.get(), fact_type, json_path, &handle->output_value, &handle->error);
+  return publish_data_bind_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_json_path_all_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, const char *json_path,
+    ruleforge_data_bind_stream_t *out_stream) {
+  if (!json_path || json_path[0] == '\0') {
+    if (out_stream) {
+      *out_stream = nullptr;
+    }
+    set_error("JSON path is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
+  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+                                         out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_json_path_all_create(
+      handle->codec.get(), fact_type, json_path, &handle->output_value, &handle->error);
+  return publish_data_bind_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_csv_all_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, ruleforge_data_bind_stream_t *out_stream) {
+  std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
+  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+                                         out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_csv_all_create(
+      handle->codec.get(), fact_type, &handle->output_value, &handle->error);
+  return publish_data_bind_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_csv_path_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, const char *csv_path,
+    ruleforge_data_bind_stream_t *out_stream) {
+  if (!csv_path || csv_path[0] == '\0') {
+    if (out_stream) {
+      *out_stream = nullptr;
+    }
+    set_error("CSV path is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
+  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+                                         out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_csv_path_create(
+      handle->codec.get(), fact_type, csv_path, &handle->output_value, &handle->error);
+  return publish_data_bind_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_xml_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, ruleforge_data_bind_stream_t *out_stream) {
+  std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
+  auto status = prepare_data_bind_stream(session, schema_path, fact_type, false,
+                                         out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_xml_create(
+      handle->codec.get(), fact_type, &handle->output_value, &handle->error);
+  return publish_data_bind_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_xml_path_all_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, const char *xml_path,
+    ruleforge_data_bind_stream_t *out_stream) {
+  if (!xml_path || xml_path[0] == '\0') {
+    if (out_stream) {
+      *out_stream = nullptr;
+    }
+    set_error("XML path is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
+  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+                                         out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_xml_path_all_create(
+      handle->codec.get(), fact_type, xml_path, &handle->output_value, &handle->error);
+  return publish_data_bind_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_feed(
+    ruleforge_data_bind_stream_t stream, const void *data, size_t len) {
+  auto *handle = reinterpret_cast<ruleforge_data_bind_stream_handle_s *>(stream);
+  auto state_status = reject_unusable_data_bind_stream(handle);
+  if (state_status != RULES_FORGE_OK) {
+    return state_status;
+  }
+  if (!data && len != 0) {
+    set_error("DataBind stream chunk is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindStatus status = static_cast<DataBindStatus>(
+      data_bind_stream_feed(handle->stream.get(), data, len));
+  if (status != DATA_BIND_OK) {
+    handle->failed = true;
+    set_error_fmt("DataBind stream feed failed: ",
+                  data_bind_error_detail(status, handle->error));
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_feed_file(
+    ruleforge_data_bind_stream_t stream, const char *file_path) {
+  auto *handle = reinterpret_cast<ruleforge_data_bind_stream_handle_s *>(stream);
+  auto state_status = reject_unusable_data_bind_stream(handle);
+  if (state_status != RULES_FORGE_OK) {
+    return state_status;
+  }
+  if (!file_path || file_path[0] == '\0') {
+    set_error("DataBind stream file path is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindStatus status = static_cast<DataBindStatus>(
+      data_bind_stream_feed_file(handle->stream.get(), file_path));
+  if (status != DATA_BIND_OK) {
+    handle->failed = true;
+    set_error_fmt("DataBind stream file feed failed: ",
+                  data_bind_error_detail(status, handle->error));
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_finish(
+    ruleforge_data_bind_stream_t stream, ruleforge_fact_t **out_facts,
+    int *out_loaded_count) {
+  if (out_facts) {
+    *out_facts = nullptr;
+  }
+  if (out_loaded_count) {
+    *out_loaded_count = 0;
+  }
+  auto *handle = reinterpret_cast<ruleforge_data_bind_stream_handle_s *>(stream);
+  auto state_status = reject_unusable_data_bind_stream(handle);
+  if (state_status != RULES_FORGE_OK) {
+    return state_status;
+  }
+
+  DataBindStatus bind_status = static_cast<DataBindStatus>(
+      data_bind_stream_finish(handle->stream.get()));
+  handle->finished = true;
+  handle->value.reset(handle->output_value);
+  handle->output_value = nullptr;
+  if (bind_status != DATA_BIND_OK) {
+    handle->failed = true;
+    set_error_fmt("DataBind stream finish failed: ",
+                  data_bind_error_detail(bind_status, handle->error));
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
 
   try {
-    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
-
-    Fact *fact = session_wrapper->session->create_fact(fact_type);
-    size_t const field_count = turbo_json_object_size(json.get());
-    for (size_t i = 0; i < field_count; ++i) {
-      char const *key = turbo_json_object_key(json.get(), i);
-      json_value_t *value = turbo_json_object_value(json.get(), i);
-      if (!key || !value) {
-        continue;
-      }
-
-      switch (turbo_json_type(value)) {
-      case TURBO_JSON_STRING: {
-        char const *text = turbo_json_string(value);
-        size_t const len = turbo_json_string_len(value);
-        fact->fields[key] = text ? std::string(text, len) : std::string();
-        break;
-      }
-      case TURBO_JSON_NUMBER: {
-        double const number = turbo_json_number(value);
-        if (is_integral_double(number)) {
-          fact->fields[key] = static_cast<int64_t>(number);
-        } else {
-          fact->fields[key] = number;
+    ruleforge_status_t status;
+    if (handle->multiple) {
+      status = insert_data_bind_fact_list(*handle->session_wrapper->session,
+                                          handle->fact_type.c_str(), handle->value.get(),
+                                          out_facts, out_loaded_count);
+    } else {
+      ruleforge_fact_t *facts = nullptr;
+      if (out_facts) {
+        facts = static_cast<ruleforge_fact_t *>(std::malloc(sizeof(ruleforge_fact_t)));
+        if (!facts) {
+          set_error("Failed to allocate fact handle array");
+          return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
         }
-        break;
       }
-      case TURBO_JSON_BOOL:
-        fact->fields[key] = static_cast<int64_t>(turbo_json_bool(value) ? 1 : 0);
-        break;
-      default:
-        break;
+      ruleforge_fact_t fact = nullptr;
+      status = insert_data_bind_fact(*handle->session_wrapper->session,
+                                     handle->fact_type.c_str(), handle->value.get(), &fact);
+      if (status == RULES_FORGE_OK) {
+        if (out_loaded_count) {
+          *out_loaded_count = 1;
+        }
+        if (out_facts) {
+          facts[0] = fact;
+          *out_facts = facts;
+        }
+      } else {
+        std::free(facts);
       }
     }
-
-    // Add the fact to the session
-    session_wrapper->session->add_fact(fact);
-    if (out_fact) {
-      *out_fact = reinterpret_cast<ruleforge_fact_t>(fact);
+    if (status == RULES_FORGE_OK) {
+      last_error[0] = '\0';
     }
-    last_error[0] = '\0';
-    return RULES_FORGE_OK;
+    return status;
   } catch (SessionInconsistentException const &e) {
     return map_session_inconsistent(e);
-  } catch (const std::exception &e) {
-    set_error_fmt("Failed to add fact: ", e.what());
+  } catch (std::exception const &e) {
+    set_error_fmt("Failed to insert DataBind stream result: ", e.what());
     return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
   }
 }
 
-static ruleforge_status_t
-ruleforge_session_add_fact_binary_impl(ruleforge_stateful_session_t session, const char *fact_type,
-                                       const uint8_t *fact_data, size_t fact_len,
-                                       ruleforge_fact_t *out_fact) {
-  if (!session || !fact_type || !fact_data || fact_len == 0) {
-    set_error("Session handle, fact type, or binary fact payload is invalid");
+ruleforge_status_t ruleforge_data_bind_stream_destroy(ruleforge_data_bind_stream_t stream) {
+  if (!stream) {
+    set_error("DataBind stream handle is NULL");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
-  if (out_fact) {
-    *out_fact = nullptr;
+  auto *handle = reinterpret_cast<ruleforge_data_bind_stream_handle_s *>(stream);
+  if (handle->session_wrapper && handle->session_wrapper->active_data_bind_streams != 0) {
+    --handle->session_wrapper->active_data_bind_streams;
   }
-  set_error("Binary fact parsing is not part of RulesForge runtime; construct a Fact before insertion");
-  return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-}
-
-ruleforge_status_t ruleforge_session_add_fact_json(ruleforge_stateful_session_t session,
-                                                   const char *fact_type, const char *fact_json) {
-  return ruleforge_session_add_fact_json_impl(session, fact_type, fact_json, nullptr);
-}
-
-ruleforge_status_t ruleforge_session_add_fact_json_ex(ruleforge_stateful_session_t session,
-                                                      const char *fact_type, const char *fact_json,
-                                                      ruleforge_fact_t *out_fact) {
-  if (!out_fact) {
-    set_error("Output Fact pointer is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  return ruleforge_session_add_fact_json_impl(session, fact_type, fact_json, out_fact);
+  delete handle;
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
 }
 
 ruleforge_status_t
@@ -1406,6 +1979,10 @@ ruleforge_session_add_fact_json_schema(ruleforge_stateful_session_t session,
   }
   try {
     auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*session_wrapper->session, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
     auto codec = create_data_bind_or_set_error(schema_path);
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
@@ -1417,7 +1994,7 @@ ruleforge_session_add_fact_json_schema(ruleforge_stateful_session_t session,
                                                       std::strlen(fact_json), &raw_value, &error);
     DataBindValueHandle value(raw_value);
     if (bind_status != DATA_BIND_OK) {
-      set_error_fmt("TurboScript DataBind JSON parse failed: ",
+      set_error_fmt("DataBind JSON parse failed: ",
                     data_bind_error_detail(bind_status, error));
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -1435,21 +2012,112 @@ ruleforge_session_add_fact_json_schema(ruleforge_stateful_session_t session,
   }
 }
 
-ruleforge_status_t ruleforge_session_add_fact_binary(ruleforge_stateful_session_t session,
-                                                     const char *fact_type,
-                                                     const uint8_t *fact_data, size_t fact_len) {
-  return ruleforge_session_add_fact_binary_impl(session, fact_type, fact_data, fact_len, nullptr);
-}
-
-ruleforge_status_t ruleforge_session_add_fact_binary_ex(ruleforge_stateful_session_t session,
-                                                        const char *fact_type,
-                                                        const uint8_t *fact_data, size_t fact_len,
-                                                        ruleforge_fact_t *out_fact) {
-  if (!out_fact) {
-    set_error("Output Fact pointer is NULL");
+ruleforge_status_t
+ruleforge_session_add_fact_json_path_schema(ruleforge_stateful_session_t session,
+                                            const char *schema_path,
+                                            const char *fact_type,
+                                            const char *fact_json,
+                                            const char *json_path,
+                                            ruleforge_fact_t *out_fact) {
+  if (out_fact) {
+    *out_fact = nullptr;
+  }
+  if (!session || !schema_path || !fact_type || !fact_json
+      || !json_path || json_path[0] == '\0') {
+    set_error("Session, schema, fact type, JSON source, or JSON path is invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
-  return ruleforge_session_add_fact_binary_impl(session, fact_type, fact_data, fact_len, out_fact);
+  try {
+    auto *session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*session_wrapper->session, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
+    auto codec = create_data_bind_or_set_error(schema_path);
+    if (!codec) {
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+
+    DataBindValue *raw_value = nullptr;
+    DataBindError error = DATA_BIND_ERROR_INIT;
+    DataBindStatus bind_status = data_bind_parse_json_path(
+        codec.get(), fact_type, fact_json, std::strlen(fact_json), json_path,
+        &raw_value, &error);
+    DataBindValueHandle value(raw_value);
+    if (bind_status != DATA_BIND_OK) {
+      set_error_fmt("DataBind JSON path parse failed: ",
+                    data_bind_error_detail(bind_status, error));
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+
+    auto status = insert_data_bind_fact(*session_wrapper->session, fact_type,
+                                        value.get(), out_fact);
+    if (status == RULES_FORGE_OK) {
+      last_error[0] = '\0';
+    }
+    return status;
+  } catch (SessionInconsistentException const &e) {
+    return map_session_inconsistent(e);
+  } catch (std::exception const &e) {
+    set_error_fmt("Failed to add JSONPath-selected fact: ", e.what());
+    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
+  }
+}
+
+ruleforge_status_t
+ruleforge_session_add_facts_json_path_schema(ruleforge_stateful_session_t session,
+                                             const char *schema_path,
+                                             const char *fact_type,
+                                             const char *fact_json,
+                                             const char *json_path,
+                                             ruleforge_fact_t **out_facts,
+                                             int *out_loaded_count) {
+  if (out_facts) {
+    *out_facts = nullptr;
+  }
+  if (out_loaded_count) {
+    *out_loaded_count = 0;
+  }
+  if (!session || !schema_path || !fact_type || !fact_json
+      || !json_path || json_path[0] == '\0') {
+    set_error("Session, schema, fact type, JSON source, or JSON path is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto *session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*session_wrapper->session, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
+    auto codec = create_data_bind_or_set_error(schema_path);
+    if (!codec) {
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+
+    DataBindValue *raw_value = nullptr;
+    DataBindError error = DATA_BIND_ERROR_INIT;
+    DataBindStatus bind_status = data_bind_parse_json_path_all(
+        codec.get(), fact_type, fact_json, std::strlen(fact_json), json_path,
+        &raw_value, &error);
+    DataBindValueHandle value(raw_value);
+    if (bind_status != DATA_BIND_OK) {
+      set_error_fmt("DataBind JSON path parse failed: ",
+                    data_bind_error_detail(bind_status, error));
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+
+    auto status = insert_data_bind_fact_list(*session_wrapper->session, fact_type,
+                                             value.get(), out_facts, out_loaded_count);
+    if (status == RULES_FORGE_OK) {
+      last_error[0] = '\0';
+    }
+    return status;
+  } catch (SessionInconsistentException const &e) {
+    return map_session_inconsistent(e);
+  } catch (std::exception const &e) {
+    set_error_fmt("Failed to add JSONPath-selected facts: ", e.what());
+    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
+  }
 }
 
 ruleforge_status_t
@@ -1468,6 +2136,10 @@ ruleforge_session_add_fact_binary_schema(ruleforge_stateful_session_t session,
   }
   try {
     auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*session_wrapper->session, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
     auto codec = create_data_bind_or_set_error(schema_path);
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
@@ -1479,7 +2151,7 @@ ruleforge_session_add_fact_binary_schema(ruleforge_stateful_session_t session,
         data_bind_parse(codec.get(), fact_type, fact_data, fact_len, &raw_value, &error);
     DataBindValueHandle value(raw_value);
     if (bind_status != DATA_BIND_OK) {
-      set_error_fmt("TurboScript DataBind binary parse failed: ",
+      set_error_fmt("DataBind binary parse failed: ",
                     data_bind_error_detail(bind_status, error));
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -1493,29 +2165,6 @@ ruleforge_session_add_fact_binary_schema(ruleforge_stateful_session_t session,
     return map_session_inconsistent(e);
   } catch (std::exception const &e) {
     set_error_fmt("Failed to add schema-bound binary fact: ", e.what());
-    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
-  }
-}
-
-ruleforge_status_t ruleforge_session_add_facts_csv(ruleforge_stateful_session_t session,
-                                                   const char *fact_type, const char *csv_source,
-                                                   int *out_loaded_count) {
-  if (!session || !fact_type || !csv_source) {
-    set_error("Session handle, fact type, or CSV source is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  try {
-    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
-    auto status = load_csv_facts_into_session(session_wrapper->session.get(), fact_type, csv_source,
-                                              out_loaded_count, nullptr);
-    if (status == RULES_FORGE_OK) {
-      last_error[0] = '\0';
-    }
-    return status;
-  } catch (SessionInconsistentException const &e) {
-    return map_session_inconsistent(e);
-  } catch (const std::exception &e) {
-    set_error_fmt("Failed to add CSV facts: ", e.what());
     return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
   }
 }
@@ -1539,6 +2188,10 @@ ruleforge_session_add_facts_csv_schema(ruleforge_stateful_session_t session,
   }
   try {
     auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*session_wrapper->session, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
     auto codec = create_data_bind_or_set_error(schema_path);
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
@@ -1551,7 +2204,7 @@ ruleforge_session_add_facts_csv_schema(ruleforge_stateful_session_t session,
                                                          &error);
     DataBindValueHandle value(raw_value);
     if (bind_status != DATA_BIND_OK) {
-      set_error_fmt("TurboScript DataBind CSV parse failed: ",
+      set_error_fmt("DataBind CSV parse failed: ",
                     data_bind_error_detail(bind_status, error));
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -1566,6 +2219,62 @@ ruleforge_session_add_facts_csv_schema(ruleforge_stateful_session_t session,
     return map_session_inconsistent(e);
   } catch (std::exception const &e) {
     set_error_fmt("Failed to add schema-bound CSV facts: ", e.what());
+    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
+  }
+}
+
+ruleforge_status_t
+ruleforge_session_add_facts_csv_path_schema(ruleforge_stateful_session_t session,
+                                            const char *schema_path,
+                                            const char *fact_type,
+                                            const char *csv_source,
+                                            const char *csv_path,
+                                            ruleforge_fact_t **out_facts,
+                                            int *out_loaded_count) {
+  if (out_facts) {
+    *out_facts = nullptr;
+  }
+  if (out_loaded_count) {
+    *out_loaded_count = 0;
+  }
+  if (!session || !schema_path || !fact_type || !csv_source
+      || !csv_path || csv_path[0] == '\0') {
+    set_error("Session, schema, fact type, CSV source, or CSV path is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto *session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*session_wrapper->session, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
+    auto codec = create_data_bind_or_set_error(schema_path);
+    if (!codec) {
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+
+    DataBindValue *raw_value = nullptr;
+    DataBindError error = DATA_BIND_ERROR_INIT;
+    DataBindStatus bind_status = data_bind_parse_csv_path(
+        codec.get(), fact_type, csv_source, std::strlen(csv_source), csv_path,
+        &raw_value, &error);
+    DataBindValueHandle value(raw_value);
+    if (bind_status != DATA_BIND_OK) {
+      set_error_fmt("DataBind CSV path parse failed: ",
+                    data_bind_error_detail(bind_status, error));
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+
+    auto status = insert_data_bind_fact_list(*session_wrapper->session, fact_type,
+                                             value.get(), out_facts, out_loaded_count);
+    if (status == RULES_FORGE_OK) {
+      last_error[0] = '\0';
+    }
+    return status;
+  } catch (SessionInconsistentException const &e) {
+    return map_session_inconsistent(e);
+  } catch (std::exception const &e) {
+    set_error_fmt("Failed to add CSVPath-selected facts: ", e.what());
     return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
   }
 }
@@ -1590,6 +2299,10 @@ ruleforge_session_add_facts_xml_schema(ruleforge_stateful_session_t session,
   }
   try {
     auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*session_wrapper->session, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
     auto codec = create_data_bind_or_set_error(schema_path);
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
@@ -1597,12 +2310,12 @@ ruleforge_session_add_facts_xml_schema(ruleforge_stateful_session_t session,
 
     DataBindValue *raw_value = nullptr;
     DataBindError error = DATA_BIND_ERROR_INIT;
-    DataBindStatus bind_status = data_bind_parse_xml_all(codec.get(), fact_type, xml_source,
-                                                         std::strlen(xml_source), xpath,
-                                                         &raw_value, &error);
+    DataBindStatus bind_status = data_bind_parse_xml_path_all(codec.get(), fact_type, xml_source,
+                                                             std::strlen(xml_source), xpath,
+                                                             &raw_value, &error);
     DataBindValueHandle value(raw_value);
     if (bind_status != DATA_BIND_OK) {
-      set_error_fmt("TurboScript DataBind XML parse failed: ",
+      set_error_fmt("DataBind XML parse failed: ",
                     data_bind_error_detail(bind_status, error));
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -1617,109 +2330,6 @@ ruleforge_session_add_facts_xml_schema(ruleforge_stateful_session_t session,
     return map_session_inconsistent(e);
   } catch (std::exception const &e) {
     set_error_fmt("Failed to add schema-bound XML facts: ", e.what());
-    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
-  }
-}
-
-ruleforge_status_t ruleforge_session_add_facts_csv_ex(ruleforge_stateful_session_t session,
-                                                      const char *fact_type, const char *csv_source,
-                                                      ruleforge_fact_t **out_facts,
-                                                      int *out_loaded_count) {
-  if (!out_facts) {
-    set_error("Output Fact array pointer is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  *out_facts = nullptr;
-
-  if (!session || !fact_type || !csv_source) {
-    set_error("Session handle, fact type, or CSV source is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  try {
-    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
-    auto status = load_csv_facts_into_session(session_wrapper->session.get(), fact_type, csv_source,
-                                              out_loaded_count, out_facts);
-    if (status == RULES_FORGE_OK) {
-      last_error[0] = '\0';
-    }
-    return status;
-  } catch (SessionInconsistentException const &e) {
-    return map_session_inconsistent(e);
-  } catch (const std::exception &e) {
-    set_error_fmt("Failed to add CSV facts: ", e.what());
-    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
-  }
-}
-
-ruleforge_status_t ruleforge_session_add_facts_csv_file(ruleforge_stateful_session_t session,
-                                                        const char *fact_type,
-                                                        const char *csv_file_path,
-                                                        int *out_loaded_count) {
-  if (!session || !fact_type || !csv_file_path) {
-    set_error("Session handle, fact type, or CSV file path is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-
-  try {
-    std::ifstream file(csv_file_path, std::ios::binary);
-    if (!file) {
-      set_error("Cannot open CSV file");
-      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-    }
-    std::string csv_content((std::istreambuf_iterator<char>(file)),
-                            std::istreambuf_iterator<char>());
-
-    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
-    auto status = load_csv_facts_into_session(session_wrapper->session.get(), fact_type,
-                                              csv_content.c_str(), out_loaded_count, nullptr);
-    if (status == RULES_FORGE_OK) {
-      last_error[0] = '\0';
-    }
-    return status;
-  } catch (SessionInconsistentException const &e) {
-    return map_session_inconsistent(e);
-  } catch (const std::exception &e) {
-    set_error_fmt("Failed to add CSV facts from file: ", e.what());
-    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
-  }
-}
-
-ruleforge_status_t ruleforge_session_add_facts_csv_file_ex(ruleforge_stateful_session_t session,
-                                                           const char *fact_type,
-                                                           const char *csv_file_path,
-                                                           ruleforge_fact_t **out_facts,
-                                                           int *out_loaded_count) {
-  if (!out_facts) {
-    set_error("Output Fact array pointer is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  *out_facts = nullptr;
-
-  if (!session || !fact_type || !csv_file_path) {
-    set_error("Session handle, fact type, or CSV file path is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-
-  try {
-    std::ifstream file(csv_file_path, std::ios::binary);
-    if (!file) {
-      set_error("Cannot open CSV file");
-      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-    }
-    std::string csv_content((std::istreambuf_iterator<char>(file)),
-                            std::istreambuf_iterator<char>());
-
-    auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
-    auto status = load_csv_facts_into_session(session_wrapper->session.get(), fact_type,
-                                              csv_content.c_str(), out_loaded_count, out_facts);
-    if (status == RULES_FORGE_OK) {
-      last_error[0] = '\0';
-    }
-    return status;
-  } catch (SessionInconsistentException const &e) {
-    return map_session_inconsistent(e);
-  } catch (const std::exception &e) {
-    set_error_fmt("Failed to add CSV facts from file: ", e.what());
     return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
   }
 }
@@ -1830,6 +2440,10 @@ ruleforge_status_t ruleforge_session_destroy(ruleforge_stateful_session_t sessio
   }
   try {
     auto session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    if (session_wrapper->active_data_bind_streams != 0) {
+      set_error("Cannot destroy session while DataBind streams are active");
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
     delete session_wrapper;
     last_error[0] = '\0';
     return RULES_FORGE_OK;

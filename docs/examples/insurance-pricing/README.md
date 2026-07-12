@@ -98,19 +98,9 @@ Discounts:
 
 ## Running the Example
 
-### Quick Run with capi_demo
+### capi_demo Status
 
-```bash
-./build/bin/capi_demo \
-  -r docs/examples/insurance-pricing/insurance-pricing.rfl \
-  -j docs/examples/insurance-pricing/insurance-applications-sample.json \
-  -m applications:com.insurance.auto.InsuranceApplication \
-  -q PolicyDecisions \
-  -b decision \
-  -f applicationId,approved,annualPremium,coverageLevel,reason
-```
-
-The bundled sample JSON is directly runnable because `applications` is a top-level array that maps cleanly to `InsuranceApplication`.
+The bundled sample JSON maps cleanly because `applications` is a top-level array of `InsuranceApplication` facts. To run it through the current public C API, first add a `.schema` file for `InsuranceApplication`, import it from the RFL file with `import schema "...schema"`, and pass the same schema with `capi_demo -s`.
 
 ## Expected Results
 

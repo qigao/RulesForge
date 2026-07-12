@@ -10,7 +10,7 @@
 #include <vector>
 
 /**
- * @brief High-performance priority queue using TurboNet bucket_priority_queue_spsc
+ * @brief High-performance priority queue using TurboUtils bucket_priority_queue_spsc
  *
  * DESIGN PHILOSOPHY (Linus-style "good taste"):
  * - Lock-free SPSC (faster than MPMC disruptor for single producer)
@@ -18,7 +18,7 @@
  * - Simple priority model (fixed levels)
  *
  * MIGRATION NOTE:
- * - Now uses TurboNet's bucket_priority_queue_spsc internally
+ * - Now uses TurboUtils's bucket_priority_queue_spsc internally
  * - Simplified: stores only activation_hash (size_t), not full PriorityEntry
  * - Priority is used for ordering, but not returned on dequeue
  *
@@ -28,7 +28,7 @@
  * - Lower overhead than disruptor when SPSC is sufficient
  *
  * PERFORMANCE:
- * - 9M+ ops/sec (measured in TurboNet benchmarks)
+ * - 9M+ ops/sec (measured in TurboUtils benchmarks)
  * - ~100ns latency
  * - Zero allocation in hot path, zero locks
  *

@@ -39,7 +39,10 @@ public:
         return std::nullopt;
     }
 
-    template <typename T>
+    /// @brief 获取绑定中指定字段并以 T 类型返回。
+    /// T 必须为 ConstraintValue 的合法成员类型或 bool（参见 ConstraintValueExtractable）。
+    /// 非法 T 在编译期报错，而非运行期静默返回 nullopt。
+    template <ConstraintValueExtractable T>
     std::optional<T> getFieldAs(std::string const& binding, std::string const& field_name) const;
 
 private:
@@ -139,7 +142,8 @@ public:
     }
 
     /// @brief Returns a vector of specific field values for a binding.
-    template <typename T>
+    /// T 必须满足 ConstraintValueExtractable（见 value_types.hpp），非法 T 在编译期报错。
+    template <ConstraintValueExtractable T>
     std::vector<T> getColumnFieldAs(std::string const& binding, std::string const& field_name) const;
 
     auto begin() const { return QueryResultIterator(data_.cbegin(), kb_); }
@@ -159,7 +163,7 @@ private:
 // --- Template and Iterator Implementations ---
 
 // In QueryResultRow class definition
-template <typename T>
+template <ConstraintValueExtractable T>
 std::optional<T> QueryResultRow::getFieldAs(std::string const& binding, std::string const& field_name) const {
     auto fact_opt = get(binding);
     if (!fact_opt) {
@@ -206,7 +210,7 @@ std::optional<T> QueryResultRow::getFieldAs(std::string const& binding, std::str
 }
 
 // QueryResult implementation
-template <typename T>
+template <ConstraintValueExtractable T>
 std::vector<T> QueryResult::getColumnFieldAs(std::string const& binding, std::string const& field_name) const {
     std::vector<T> column_data;
     for (auto const& row_map : data_) {

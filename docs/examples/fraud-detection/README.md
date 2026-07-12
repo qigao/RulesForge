@@ -105,7 +105,7 @@ This example showcases:
 
 ## Running the Example
 
-### Quick Run with capi_demo
+### Run with the C++ Example
 
 This example needs stream insertion, so the repo now provides a dedicated C++ runner.
 
@@ -132,17 +132,21 @@ The runner outputs a final alert view rather than the raw working-memory rows:
 - it computes the displayed `totalScore` from the emitted `FraudSignal` facts
 - it prints one line per transaction in the form `transactionId | accountId | totalScore | riskLevel | action`
 
-Why it still cannot use `capi_demo`:
+Why it does not use the batch-oriented `capi_demo`:
 
 - transactions must be inserted into `entry-point "transaction-stream"`
-- the current public C API in `include/rule_forge.h` does not expose entry-point insertion
+- the runner performs domain-specific flattening and alert consolidation
 
-So a real runner must do two things:
+The public continuous C API can commit one schema-bound JSON event or a
+path-selected JSON/CSV/XML event batch to a named entry point. The existing
+example runner instead does two domain-specific jobs:
 
 1. flatten or extract scenario transactions from the sample JSON
 2. insert those `Transaction` facts into the `transaction-stream` entry point via C++
 
-Treat this example as a CEP reference rule set with a dedicated runner until the C API gains entry-point support.
+Treat this example as a CEP reference rule set with a dedicated runner. See
+[`../../CONTINUOUS_RULE_ENGINE_DESIGN.md`](../../CONTINUOUS_RULE_ENGINE_DESIGN.md)
+for the continuous C API contract.
 
 ## Sample Fraud Scenarios
 

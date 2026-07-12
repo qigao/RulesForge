@@ -74,19 +74,9 @@ Ensure all regulatory requirements are met.
 
 ## Running the Example
 
-### Quick Run with capi_demo
+### capi_demo Status
 
-```bash
-./build/bin/capi_demo \
-  -r docs/examples/loan-eligibility/loan-eligibility.rfl \
-  -j docs/examples/loan-eligibility/loan-applications-sample.json \
-  -m applications:com.bank.loan.LoanApplication \
-  -q LoanDecisions \
-  -b decision \
-  -f applicantId,approved,approvedAmount,interestRate,reason
-```
-
-The sample JSON is already shaped for direct CLI loading because `applications` is a top-level array of `LoanApplication` facts.
+The sample JSON is shaped for direct loading because `applications` is a top-level array of `LoanApplication` facts. To run it through the current public C API, first add a `.schema` file for `LoanApplication`, import it from the RFL file with `import schema "...schema"`, and pass the same schema with `capi_demo -s`.
 
 ## Expected Behavior
 

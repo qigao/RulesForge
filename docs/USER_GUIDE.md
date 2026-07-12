@@ -1,127 +1,147 @@
 # RulesForge User Guide
 
-This document is the product guide. For exact language support, use [`dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md). If this guide and code ever disagree, code wins.
+RulesForge embeds compiled RFL rules in a C or C++ application. The host owns
+input, scheduling, persistence, and external side effects. The engine owns rule
+matching, session facts, agenda execution, queries, and event-time state.
 
-RulesForge is a Drools-like rule scripting engine. It supports RETE-based inference, dynamic schema/data binding, and JIT-backed dynamic script execution.
+## Runtime Objects
 
-## 1. Choose The Right API Surface
+`KnowledgeBase` contains compiled rules and imported type declarations. Load
+and configure it before creating sessions. A configured knowledge base may be
+shared by multiple sessions without further mutation.
 
-RulesForge exposes three practical integration layers:
+`StatefulSession` contains mutable facts and agenda state. Use it for request,
+batch, or explicitly managed stateful evaluation. It is not thread-safe.
 
-- C API in [`include/rule_forge.h`](/C:/projects/cpp/rulesforge/include/rule_forge.h)
-- C++ engine API in `rulesforge/include` plus parser API in `parser/include`
-- RFL/TurboScript script execution with an explicit host callback boundary through the C API
+`ContinuousSession` adds event IDs, entry points, event time, watermarks,
+retention, output batches, and bounded replay recovery. It is explicitly driven
+by the caller and does not create a thread or event loop.
 
-Recommendation:
+## Supported Integration Boundary
 
-- new application embedding: start with the C API
-- advanced in-process engine control: use the C++ API
-- external side effects: register explicit host callbacks
+RulesForge is a filtering and inference library:
 
-## 2. Runtime Model
+- the host loads RFL and external data;
+- rules match facts and mutate session-owned facts;
+- queries and configured continuous outputs return results to the host;
+- the host decides whether to call services, write files, or publish messages.
 
-The current runtime is built around two primary objects:
+RFL cannot load dynamic function tables or invoke arbitrary external calls.
+Rule conditions use the built-in expression and typed predicate set only.
+External service calls and other side effects remain the host's responsibility.
 
-- `KnowledgeBase`: compiled rules and host callback registrations
-- `StatefulSession`: facts, agenda, queries, tracing, validation mode, runtime metrics
+## Load Rules
 
-Thread model:
+The C API accepts in-memory RFL, one file, multiple files, and CSV decision
+tables:
 
-- `KnowledgeBase` may be shared after rule loading and callback registration are complete
-- `StatefulSession` is not thread-safe
+```c
+ruleforge_knowledge_base_t kb = NULL;
+if (ruleforge_kb_create(&kb) != RULES_FORGE_OK) {
+  return 1;
+}
 
-## 3. Loading Rules
+const char *search_dirs[] = {"rules"};
+if (ruleforge_kb_load_drl_file(kb, "rules/main.rfl", search_dirs, 1)
+    != RULES_FORGE_OK) {
+  fprintf(stderr, "%s\n", ruleforge_get_last_error_message());
+  ruleforge_kb_destroy(kb);
+  return 1;
+}
+```
 
-Current rule-loading paths include:
+Schema imports are resolved relative to the importing RFL file and then through
+the supplied base directories.
 
-- in-memory RFL source
-- one RFL file
-- many RFL files with import resolution
-- decision table CSV through the C API
+## Choose a Session
 
-Relevant APIs:
+Use `StatefulSession` when input is a request or finite batch and the caller
+controls when to fire rules:
 
-- `ruleforge_kb_load_drl()`
-- `ruleforge_kb_load_drl_file()`
-- `ruleforge_kb_load_drl_files()`
-- `ruleforge_kb_load_decision_table_csv()`
+```text
+create session -> insert facts -> fire -> query -> destroy session
+```
 
-## 4. Loading Facts
+Use `ContinuousSession` when correctness depends on event identity, event time,
+watermarks, bounded retention, or acknowledgement:
 
-RulesForge exposes facts to the engine. The public C API also provides schema-aware data binding helpers backed by `TurboScript::DataBind`.
+```text
+create -> push event -> inspect result -> acknowledge -> advance watermark
+```
 
-- already constructed fact objects
-- JSON with schema
-- CSV with schema
-- XML with schema
-- binary TBE payloads with schema
+Do not emulate continuous processing by keeping an unbounded stateful session.
+That omits duplicate detection, lateness checks, retention limits, result
+backpressure, and recovery semantics.
 
-C API entry points:
+## Insert External Data
 
-- `ruleforge_session_add_fact_json()`
-- `ruleforge_session_add_fact_json_schema()`
-- `ruleforge_session_add_fact_binary_schema()`
-- `ruleforge_session_add_facts_csv_schema()`
-- `ruleforge_session_add_facts_xml_schema()`
-- field-based fact construction APIs
+External JSON, CSV, XML, and binary values must be described by a DataBind
+`.schema` file imported by the RFL rule pack. There are two equally supported
+input styles:
 
-C++ entry points:
+- complete-document functions parse an already available payload;
+- incremental stream functions accept chunks and commit only on `finish`.
 
-- `session->add_fact(fact)`
-- `session->add_data(DataSource::fact(fact))`
+JSONPath, CSVPath, and XMLPath select records before insertion in both input
+styles. RFL rules and queries then apply business constraints to the selected
+facts. Path filtering and rule filtering are consecutive stages, not competing
+APIs.
 
-Notes:
+The stream API is synchronous. It is designed to be called from async I/O
+callbacks; it does not own an async runtime. See
+[Data ingestion](./DATA_INGESTION.md) for the API matrix and ownership rules.
 
-- The C++ engine runtime remains fact-only.
-- Schema-aware C API helpers call `TurboScript::DataBind`, convert bound values into session-owned facts, and insert those facts.
-- Schema declarations can be imported in RFL with `import "name.schema"`.
+## Fire and Query
 
-## 5. Queries
+After inserting facts into a stateful session, fire rules with a finite budget
+unless the rule pack is known to terminate:
 
-RulesForge supports named queries in RFL and runtime query execution after facts are loaded and rules have fired.
+```c
+int fired = 0;
+if (ruleforge_session_fire_all_rules(session, 10000, &fired)
+    != RULES_FORGE_OK) {
+  fprintf(stderr, "%s\n", ruleforge_get_last_error_message());
+}
+```
 
-C API:
+Named RFL queries return a result handle. Facts borrowed from that result remain
+valid only while their owner remains alive; follow the ownership comments in
+[`rule_forge.h`](../include/rule_forge.h).
 
-- `ruleforge_session_query()`
-- `ruleforge_query_result_get_size()`
-- `ruleforge_query_result_get_fact_at_index()`
+## Execution Modes
 
-C++:
+Select the mode on the knowledge base before creating sessions:
 
-- `session->execute_query("QueryName")`
+- `RULES_FORGE_EXECUTION_MODE_V1_STANDARD` preserves exact salience ordering;
+- `RULES_FORGE_EXECUTION_MODE_V2_HIGH_PERFORMANCE` uses coarser priority buckets.
 
-## 6. Host Callbacks
+Do not depend on ordering between close salience values in V2. Measure both
+modes with the actual rule pack before choosing one; throughput claims are not
+a substitute for a local benchmark.
 
-RHS host calls:
+## Error Handling
 
-- register explicitly with `ruleforge_kb_register_native_function()`
-- use them for `invoke(...)` style logic inside rules
-- keep them deterministic and treat failures as runtime errors
+Every status-returning C function must be checked. On failure,
+`ruleforge_get_last_error_message()` returns thread-local diagnostic text until
+the next RulesForge call on that thread.
 
-## 7. What Is Actually Implemented In RFL
+Malformed payloads, unknown schema types, invalid entry points, decreasing
+watermarks, resource-limit violations, and invalid handle state fail explicitly.
+A failed DataBind stream cannot be reused; destroy it.
 
-The parser and runtime currently cover:
+## Threading and Ownership
 
-- `package`, `import`, `global`, `declare`, `enum`, `function`, `query`, `rule`
-- rule attributes such as `salience`, `agenda-group`, `activation-group`, `no-loop`, `enabled`, `duration`, `timer`, `extends`
-- pattern forms including `not`, `exists`, `forall`, `accumulate`, and query calls
-- RHS actions including `insert`, `insertLogical`, `update`, `retract`, `halt`, and control flow
-- sliding windows such as `over window:time(...)`
+- Configure a knowledge base before sharing it.
+- Use each stateful or continuous session from one thread at a time.
+- Use a DataBind stream on the same thread as its session.
+- Destroy all active streams before destroying their session.
+- Destroy result handles and arrays with the matching RulesForge function.
+- Never dereference an opaque C handle.
 
-For exact syntax and caveats, read [`dsl.md`](/C:/projects/cpp/rulesforge/docs/dsl.md).
+## Next Steps
 
-## 8. Production Checklist
-
-- build rules once, reuse the compiled `KnowledgeBase`
-- create one `StatefulSession` per thread or request
-- choose one data-loading format per integration boundary and keep it boring
-- validate rule packs and sample data in CI
-- use tracing and metrics only when you need them
-- keep custom host callbacks small, deterministic, and safe
-
-## 9. Where To Go Next
-
-- quick path: [`QUICKSTART.md`](/C:/projects/cpp/rulesforge/docs/QUICKSTART.md)
-- deployment: [`DEPLOYMENT.md`](/C:/projects/cpp/rulesforge/docs/DEPLOYMENT.md)
-- examples: [`examples/README.md`](/C:/projects/cpp/rulesforge/docs/examples/README.md)
-- data binding ownership: [`TURBOSCRIPT_DATABIND_PARSER_COMPARISON.md`](/C:/projects/cpp/rulesforge/docs/TURBOSCRIPT_DATABIND_PARSER_COMPARISON.md)
+- [C API example](../capi/examples/readme.md)
+- [Data ingestion](./DATA_INGESTION.md)
+- [Continuous engine](./CONTINUOUS_RULE_ENGINE_DESIGN.md)
+- [DSL reference](./dsl.md)
+- [Deployment](./DEPLOYMENT.md)

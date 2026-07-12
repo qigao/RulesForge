@@ -4,6 +4,7 @@
 #include "core/token.hpp"
 #include <object_pool.h>
 #include <functional>
+#include <limits>
 #include <stdexcept>
 
 namespace rulesforge {
@@ -14,16 +15,18 @@ namespace rulesforge {
  * Replaces TokenArena for long-running rule engines.
  * Supports individual token deallocation to prevent memory leaks.
  *
- * PERFORMANCE:
- * - Allocation: 50-100M ops/s (vs 100M+ for bump allocator)
- * - Trade-off: 2x slower but prevents memory leaks in RETRACT scenarios
+ * The configured capacity counts user tokens; the pool reserves one additional
+ * slot for its root token.
  */
 class TokenPool {
 public:
     explicit TokenPool(size_t initial_capacity = 1024) {
+        if (initial_capacity == std::numeric_limits<size_t>::max()) {
+            throw std::invalid_argument("TokenPool capacity cannot reserve root token");
+        }
         object_pool_config_t config = {
             .object_size = sizeof(TokenWME),
-            .initial_capacity = initial_capacity,
+            .initial_capacity = initial_capacity + 1,
             .max_capacity = 0,  // unlimited
             .zero_on_alloc = false
         };

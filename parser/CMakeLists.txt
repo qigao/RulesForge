@@ -65,8 +65,8 @@ target_include_directories(
 
 target_link_libraries(
     ${TARGET_NAME}
-    PUBLIC TurboNet::Utils TurboNet::Parser TurboScript::ExprTk
-    PRIVATE TurboScript::DataBind
+    PUBLIC TurboUtils::Core TurboUtils::Parser
+    PRIVATE TurboUtils::DataBind
 )
 
 if(MSVC)

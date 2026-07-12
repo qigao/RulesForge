@@ -58,6 +58,14 @@ suite("TokenPool vs TokenArena") {
             pool.destroy_token(token2);
         }
 
+        it("TokenPool reserves requested user capacity plus root") {
+            constexpr size_t kUserCapacity = 10;
+            TokenPool pool(kUserCapacity);
+
+            check_size_eq(pool.capacity(), kUserCapacity + 1);
+            check_size_eq(pool.allocated_count(), 1);
+        }
+
         it("TokenArena cannot free individual tokens") {
             TokenArena arena(1024);
 

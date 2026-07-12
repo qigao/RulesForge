@@ -7,11 +7,12 @@
 #include "engine/knowledge_base.hpp"
 #include "rfl_parser_impl.hpp"
 #include "semantic_analyzer.hpp"
-#include "turboscript_schema_importer.hpp"
+#include "databind_schema_importer.hpp"
 
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <set>
 #include <sstream>
 
@@ -85,21 +86,88 @@ std::vector<std::string> schema_base_dirs_for_source(std::string const &source_n
   return base_dirs;
 }
 
+std::string unqualified_type_name(std::string const &type_name) {
+  auto const dot = type_name.find_last_of('.');
+  return dot == std::string::npos ? type_name : type_name.substr(dot + 1);
+}
+
+bool has_schema_source(std::map<std::string, std::string> const &annotations) {
+  return annotations.find("schema_source") != annotations.end();
+}
+
+std::string declaration_display_name(ParsedDeclaration const &decl) {
+  if (decl.type_name.find('.') != std::string::npos || decl.source_package.empty()) {
+    return decl.type_name;
+  }
+  return decl.source_package + "." + decl.type_name;
+}
+
+std::string enum_display_name(ParsedEnum const &enum_decl) {
+  if (enum_decl.enum_name.find('.') != std::string::npos || enum_decl.source_package.empty()) {
+    return enum_decl.enum_name;
+  }
+  return enum_decl.source_package + "." + enum_decl.enum_name;
+}
+
+bool validate_schema_internal_type_names(parser_state const &state,
+                                         ParsingResult &result,
+                                         std::string const &source_name) {
+  std::map<std::string, std::string> schema_types;
+  for (auto const &decl : state.parsed_declarations) {
+    if (has_schema_source(decl.annotations)) {
+      schema_types.emplace(unqualified_type_name(decl.type_name), decl.type_name);
+    }
+  }
+  for (auto const &enum_decl : state.parsed_enums) {
+    if (has_schema_source(enum_decl.annotations)) {
+      schema_types.emplace(unqualified_type_name(enum_decl.enum_name), enum_decl.enum_name);
+    }
+  }
+
+  bool ok = true;
+  for (auto const &decl : state.parsed_declarations) {
+    if (has_schema_source(decl.annotations)) {
+      continue;
+    }
+    auto const short_name = unqualified_type_name(decl.type_name);
+    if (schema_types.find(short_name) != schema_types.end()) {
+      result.errors.push_back({.file_name = source_name,
+                               .message = "RFL declare '" + declaration_display_name(decl)
+                                        + "' conflicts with DataBind schema type '"
+                                        + schema_types.at(short_name)
+                                        + "'. External input types must be described by .schema; "
+                                          "use a different name for internal facts."});
+      ok = false;
+    }
+  }
+  for (auto const &enum_decl : state.parsed_enums) {
+    if (has_schema_source(enum_decl.annotations)) {
+      continue;
+    }
+    auto const short_name = unqualified_type_name(enum_decl.enum_name);
+    if (schema_types.find(short_name) != schema_types.end()) {
+      result.errors.push_back({.file_name = source_name,
+                               .message = "RFL enum '" + enum_display_name(enum_decl)
+                                        + "' conflicts with DataBind schema type '"
+                                        + schema_types.at(short_name)
+                                        + "'. External input types must be described by .schema; "
+                                          "use a different name for internal enums."});
+      ok = false;
+    }
+  }
+  if (!ok) {
+    result.success = false;
+  }
+  return ok;
+}
+
 bool resolve_schema_imports(parser_state &state, std::vector<std::string> const &base_dirs,
                             ParsingResult &result, std::string const &source_name) {
-  if (!state.schema_imports.empty()
-      && (!state.parsed_declarations.empty() || !state.parsed_enums.empty())) {
-    result.errors.push_back({.file_name = source_name,
-                             .message = "RFL declare/enum cannot be mixed with schema file imports; "
-                                        "TurboScript Schema is the schema source in schema file import mode."});
+  if (!rulesforge::import_databind_schemas(state, base_dirs, result.errors, source_name)) {
     result.success = false;
     return false;
   }
-  if (rulesforge::import_turboscript_schemas(state, base_dirs, result.errors, source_name)) {
-    return true;
-  }
-  result.success = false;
-  return false;
+  return validate_schema_internal_type_names(state, result, source_name);
 }
 
 // Context for multi-file import discovery (not the Lemon parser context)

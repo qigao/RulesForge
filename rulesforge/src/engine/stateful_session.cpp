@@ -69,7 +69,8 @@ namespace {
 StatefulSession::StatefulSession(private_key, std::shared_ptr<KnowledgeBase const> kb) :
     kb_(std::move(kb)),
     token_pool_(1024), // Initial capacity: 1024 tokens
-    fact_arena_(64 * 1024 * 1024)   // 64MB
+    fact_arena_(64 * 1024 * 1024),   // 64MB
+    agenda_(kb_->agenda_implementation())
 {
     // Initialize native RHS executor
     rhs_executor_ = std::make_unique<RhsExecutor>(*this);
@@ -260,6 +261,7 @@ void StatefulSession::insert_into(std::string const& stream_name, Fact* fact) {
     ensure_consistent_for_mutation("adding facts");
     fact->type = canonicalize_fact_type_name(fact->type);
     validate_fact_for_insert(*fact);
+    auto entry_point = require_entry_point_route(stream_name, fact->type);
     if (fact->id == 0) { fact->id = working_memory_.reserve_next_id(); }
     working_memory_.assign_nested_ids(*fact);
 
@@ -273,18 +275,78 @@ void StatefulSession::insert_into(std::string const& stream_name, Fact* fact) {
 
     working_memory_.insert(fact);
 
-    // Route to named entry point
-    auto stream_it = kb_->network().named_entry_points.find(stream_name);
-    if (stream_it != kb_->network().named_entry_points.end()) {
-        auto type_it = stream_it->second.find(fact->type);
-        if (type_it != stream_it->second.end()) {
-            if (phreak_experimental_) mark_phreak_dirty_for_type(fact->type);
-            type_it->second->right_activate(*this, fact, PropagationType::ASSERT);
-        } else {
-        }
-    } else {
-    }
+    if (phreak_experimental_) mark_phreak_dirty_for_type(fact->type);
+    entry_point->right_activate(*this, fact, PropagationType::ASSERT);
     refresh_query_call_nodes();
+}
+
+void StatefulSession::insert_into(std::string const& stream_name,
+                                  std::shared_ptr<Fact> const& fact) {
+    if (!fact) return;
+    insert_into(stream_name, fact.get());
+    retain_shared_fact(fact);
+}
+
+void StatefulSession::insert_event_into(std::string const& stream_name,
+                                        std::shared_ptr<Fact> const& fact,
+                                        std::int64_t event_time_ms) {
+    if (!fact) return;
+    ensure_consistent_for_mutation("adding events");
+    fact->type = canonicalize_fact_type_name(fact->type);
+    validate_fact_for_insert(*fact);
+    auto entry_point = require_entry_point_route(stream_name, fact->type);
+    if (fact->id == 0) { fact->id = working_memory_.reserve_next_id(); }
+    working_memory_.assign_nested_ids(*fact);
+
+    fact_event_times_ms_[fact.get()] = event_time_ms;
+    tracer_.trace_fact_added(fact->id, fact->type);
+    facts_inserted_total_++;
+    working_memory_.insert(fact.get());
+    if (phreak_experimental_) mark_phreak_dirty_for_type(fact->type);
+    entry_point->right_activate(*this, fact.get(), PropagationType::ASSERT);
+    retain_shared_fact(fact);
+    refresh_query_call_nodes();
+}
+
+std::optional<std::int64_t> StatefulSession::fact_event_time(Fact const* fact) const {
+    auto it = fact_event_times_ms_.find(fact);
+    if (it == fact_event_times_ms_.end()) return std::nullopt;
+    return it->second;
+}
+
+std::shared_ptr<ReteNode> StatefulSession::require_entry_point_route(
+    std::string const& stream_name, std::string const& fact_type) const {
+    auto stream_it = kb_->network().named_entry_points.find(stream_name);
+    if (stream_it == kb_->network().named_entry_points.end()) {
+        throw std::invalid_argument("Unknown entry point '" + stream_name + "'");
+    }
+    auto type_it = stream_it->second.find(fact_type);
+    if (type_it == stream_it->second.end() || !type_it->second) {
+        throw std::invalid_argument("Entry point '" + stream_name
+                                    + "' does not accept fact type '" + fact_type + "'");
+    }
+    return type_it->second;
+}
+
+void StatefulSession::validate_entry_point_route(std::string const& stream_name,
+                                                 std::string const& fact_type) const {
+    (void)require_entry_point_route(stream_name, canonicalize_fact_type_name(fact_type));
+}
+
+void StatefulSession::retract_from(std::string const& stream_name, Fact* fact) {
+    if (!fact) return;
+    ensure_consistent_for_mutation("retracting facts");
+    auto* existing = working_memory_.get(fact->id);
+    if (!existing) return;
+    auto entry_point = require_entry_point_route(stream_name, existing->type);
+    working_memory_.remove(existing->id);
+    facts_retracted_total_++;
+    agenda_.remove_activations_with_fact_id(existing->id);
+    tms_->on_fact_retracted(existing);
+    entry_point->right_activate(*this, existing, PropagationType::RETRACT);
+    refresh_query_call_nodes();
+    fact_event_times_ms_.erase(existing);
+    release_retained_fact(existing->id);
 }
 
 void StatefulSession::retract_facts(std::vector<Fact*> const& facts) {
@@ -338,6 +400,31 @@ void StatefulSession::_internal_remove_fact(int64_t fact_id) {
 }
 
 int StatefulSession::fire_all_rules(int max_rules) {
+    return fire_all_rules_impl(max_rules, false);
+}
+
+int StatefulSession::fire_all_rules_fail_fast(int max_rules) {
+    return fire_all_rules_impl(max_rules, true);
+}
+
+std::size_t StatefulSession::advance_event_time(std::int64_t watermark_ms) {
+    ensure_consistent_for_mutation("advancing event time");
+    if (event_time_watermark_ms_ && watermark_ms < *event_time_watermark_ms_) {
+        throw std::invalid_argument("Event-time watermark cannot move backwards");
+    }
+    event_time_watermark_ms_ = watermark_ms;
+
+    std::size_t expired = 0;
+    for (auto const& node : kb_->network().all_nodes) {
+        if (node && node->kind == NodeKind::Window) {
+            expired += static_cast<WindowNode*>(node.get())->evaluate_expiration(*this);
+        }
+    }
+    refresh_query_call_nodes();
+    return expired;
+}
+
+int StatefulSession::fire_all_rules_impl(int max_rules, bool fail_fast) {
     int total_fired_count = 0;
     constexpr size_t kAgendaBatchSize = 64;
 
@@ -427,7 +514,7 @@ int StatefulSession::fire_all_rules(int max_rules) {
             rules_fired_total_++;
 
             auto act_t0 = std::chrono::steady_clock::now();
-            fire_activation(batch[i].activation);
+            fire_activation(batch[i].activation, fail_fast);
             auto act_t1 = std::chrono::steady_clock::now();
             runtime_counters_.fire_activation_time_us +=
                 std::chrono::duration_cast<std::chrono::microseconds>(act_t1 - act_t0).count();
@@ -449,7 +536,7 @@ int StatefulSession::fire_all_rules(int max_rules) {
     return total_fired_count;
 }
 
-void StatefulSession::fire_activation(Activation& activation) {
+void StatefulSession::fire_activation(Activation& activation, bool fail_fast) {
     runtime_counters_.fire_activation_calls++;
     auto total_t0 = std::chrono::steady_clock::now();
     uint64_t rhs_us = 0;
@@ -513,6 +600,7 @@ void StatefulSession::fire_activation(Activation& activation) {
         }
     } catch (ReteExecutionException const& e) {
         loge("--- RUNTIME ERROR in rule '{}': {}", e.get_rule_name(), e.what());
+        if (fail_fast) throw;
     }
 
     if (!listeners_.empty()) {
@@ -551,7 +639,7 @@ void StatefulSession::retract_fact(Fact* fact) {
     // Uses fact_index directly to avoid vector allocation per activation
     agenda_.remove_activations_with_fact_id(fact_to_retract->id);
 
-    // Note: Agenda compaction handles stale queue entries lazily.
+    // Agenda implementations handle stale queue entries lazily.
 
     tms_->on_fact_retracted(fact_to_retract);
 
@@ -1127,6 +1215,9 @@ void StatefulSession::reset() {
     is_consistent_ = true;
     current_activation_ = nullptr;
     current_modified_fields_ = nullptr;
+    event_time_watermark_ms_.reset();
+    event_time_mode_ = false;
+    fact_event_times_ms_.clear();
 
     transaction_inserted_facts_.clear();
     transaction_retracted_facts_.clear();
@@ -1138,7 +1229,7 @@ void StatefulSession::reset() {
     facts_retracted_total_ = 0;
     reset_runtime_counters();
 
-    agenda_ = Agenda{};
+    agenda_.reset(kb_->agenda_implementation());
     wme_cache_.clear();
     working_memory_.clear();
     retained_shared_facts_.clear();

@@ -11,16 +11,16 @@
 #include <vector>
 
 /**
- * @brief High-throughput priority queue using TurboNet bucket_priority_queue_mpmc
+ * @brief High-throughput priority queue using TurboUtils bucket_priority_queue_mpmc
  *
- * DESIGN PHILOSOPHY (inspired by Linus & TurboNet):
+ * DESIGN PHILOSOPHY (inspired by Linus & TurboUtils):
  * - No locks in hot path (lock-free disruptor)
  * - Pre-allocated memory (no malloc in hot path)
  * - Cache-line aligned (prevent false sharing)
  * - Simple priority model (fixed priority levels)
  *
  * MIGRATION NOTE:
- * - Now uses TurboNet's bucket_priority_queue_mpmc internally
+ * - Now uses TurboUtils's bucket_priority_queue_mpmc internally
  * - Simplified: stores only activation_hash (size_t), not full PriorityEntry
  * - Each consumer must track their own sequence numbers
  *

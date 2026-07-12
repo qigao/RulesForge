@@ -33,18 +33,11 @@ Example:
 
 ```rfl
 package com.example.rules
-import com.example.model.Customer
+import schema "customer.schema"
 global List results
 
-enum Status
-    PENDING
-    ACTIVE
-    CLOSED
-end
-
-declare Customer
-    id: int
-    name: String
+declare AuditLog
+    msg: String
 end
 
 rule "Example"
@@ -59,7 +52,7 @@ Notes:
 - Qualified names used by `package`, `import`, globals, and type references may contain segments such as `time`, `length`, and `window`.
 - Duration literals supported by the parser are `ms`, `s`, `m`, and `h`.
 
-## 1.2 Import Forms
+## 1.1 Import Forms
 
 Standard namespace imports are accepted:
 
@@ -68,9 +61,21 @@ import com.example.model.Customer
 import com.example.model.*
 ```
 
-External payload parsing is not part of the RulesForge engine runtime. Use TurboScript parser/data_bind, host-side code, or the RulesForge C API schema helpers to parse payloads and insert constructed facts.
+Schema imports are accepted for external input types:
 
-## 1.1 Globals
+```rfl
+import schema "customer.schema"
+import "orders.schema"
+```
+
+RulesForge uses one schema source for external input data:
+- JSON, CSV, XML, and binary payloads must be described by a `.schema` file.
+- RFL `declare` is still supported, but it is for internal derived facts inserted by rules or host code.
+- A RFL `declare` or `enum` cannot reuse the same short type name as an imported schema type.
+- Schema import paths are resolved relative to the RFL file that contains the import, then through configured base directories.
+- Standard namespace imports resolve RFL files such as `com.example.Type` -> `com/example/Type.rfl` through configured base directories.
+
+## 1.2 Globals
 
 `global` declarations are parsed and now initialized in each session:
 
@@ -97,7 +102,7 @@ RHS examples:
 
 ## 2. Declarations
 
-`declare` defines a fact schema:
+`declare` defines an internal fact schema:
 
 ```rfl
 declare Customer
@@ -106,6 +111,29 @@ declare Customer
     score: double
 end
 ```
+
+Use `declare` for facts produced inside the rule session, for example alerts, decisions, audit rows, or intermediate calculation facts. Do not use it as the schema for external JSON/CSV/XML/binary input. External input types must come from `import schema "name.schema"`.
+
+External input example:
+
+```rfl
+package com.example.pricing
+
+import schema "payments.schema"
+
+declare PricingAudit
+    message: String
+end
+
+rule "Audit Order"
+when
+    $order: Order(finalPrice > 0.01)
+then
+    insert PricingAudit { message = "priced" }
+end
+```
+
+Here `Order` is defined in `payments.schema`; `PricingAudit` is an internal derived fact.
 
 Built-in `Number` type is available for accumulate results (e.g., `count/sum/avg` output).
 
@@ -348,48 +376,7 @@ $items: AnyType() from collect($o: Order())
 $item: Item() from unnest($order.items)
 ```
 
-4. `from json(input, "expr")` **[REMOVED]**
-
-JSON parsing is not a RulesForge runtime responsibility. Use TurboScript parser/data_bind or another host-side parser to construct facts before insertion.
-
-```rfl
-$r: Row() from json("{\"orders\":[{\"amount\":120.5}]}", "orders[*]")
-$r: Row() from json(file("data/orders.json"), "orders[*]")
-```
-
-**Recommended approach**:
-```cpp
-// Parse and bind outside RulesForge, then insert facts.
-session->add_fact(row_fact);
-
-// Simplified rule
-$r: Row()
-```
-
-5. `from dsv/csv(input, "filter-expr")` **[REMOVED]**
-
-CSV/DSV parsing is not a RulesForge runtime responsibility. Use TurboScript parser/data_bind or another host-side parser to construct facts before insertion.
-
-```rfl
-$r: Row() from dsv("amount_n,sym_s\n120.5,A\n80.0,B\n", "amount > 100 and sym == \"A\"")
-$r: Row() from dsv(file("data/orders.csv"), "amount > 100 and sym == \"A\"")
-$r: Row() from csv(file("data/orders.csv"), "amount > 100")
-```
-
-**Recommended approach**:
-```cpp
-// Parse and bind outside RulesForge, then insert facts.
-session->add_fact(row_fact);
-
-// Simplified rule
-$r: Row()
-```
-
-Note:
-- `DataSource` is fact-only in RulesForge.
-- External file formats should be handled by TurboScript parser/data_bind or host application code.
-
-6. `from entry-point "stream-name"`
+4. `from entry-point "stream-name"`
 
 ```rfl
 $e: Event() from entry-point "sensor-stream"
@@ -397,11 +384,8 @@ $e: Event() from entry-point "sensor-stream"
 
 For accumulate source pattern, `from entry-point` is also allowed inside source pattern.
 
-Accumulate source pattern does not ingest external data. Insert facts before rule execution:
-
-```cpp
-session->add_fact(purchase_fact);
-```
+`from` does not parse files or network payloads. Bind external data through the
+host API before matching it; see [`DATA_INGESTION.md`](./DATA_INGESTION.md).
 
 ### 4.7 Query Call Pattern (LHS)
 
@@ -423,7 +407,6 @@ RHS is parsed by `RhsParser` and compiled into the supported RHS execution path.
 - `retract $var`
 - `halt`
 - `setFocus("group")`
-- `invoke functionName(arg1, arg2, ...)`
 - `if / else if / else`
 - `for`
 - `while`
@@ -440,7 +423,6 @@ then
     } else {
         update $o { tier = "STD" }
     }
-    invoke emitAudit($o.id, "tier-updated")
 end
 ```
 
@@ -471,7 +453,7 @@ Supported assignment values:
 - boolean literal (`true` / `false`)
 - variable reference (`$v`, `$v.field`)
 - numeric/expression value
-- host function call value, e.g. `metric($o.total)`
+- registered expression function call, e.g. `max($o.total, 0)`
 
 Expression syntax in RHS supports:
 - arithmetic: `+ - * / % ^`
@@ -499,33 +481,16 @@ Practical note:
 - document only functions that the current parser accepts and the current runtime actually registers
 - do not assume the entire upstream ExprTk function surface is available unless it is wired here
 
-### 5.4 Host Callback Support
+### 5.4 Predicate Boundary
 
-RHS function calls can be backed by explicitly registered host callbacks.
+Rule conditions use built-in expressions and typed predicates only. The C API
+does not register host predicates or dynamically loaded function tables, and
+rules cannot invoke external services. The host consumes rule results and owns
+all external side effects.
 
-Rule side usage is the same:
+## 5.5 Fact Input Boundary
 
-```rfl
-then
-    invoke hostLog($s.id, $s.temperature)
-    update $s { score = hostMetric($s.temperature, 2) }
-end
-```
-
-Host integration path (C API):
-- direct registration: `ruleforge_kb_register_native_function(...)`
-
-Runtime resolution:
-1. parse RHS `invoke` / assignment call expression
-2. resolve function name from the KnowledgeBase callback registry
-3. evaluate arguments
-4. call host callback
-
-For ownership and failure semantics, see [`C_API_CONTRACT.md`](/C:/projects/cpp/rulesforge/docs/C_API_CONTRACT.md).
-
-## 5.5 Fact Input API
-
-RulesForge engine sessions accept already constructed facts. External files and payloads should be parsed by TurboScript parser/data_bind, host application code, or the C API schema-aware DataBind helpers before insertion.
+RulesForge engine sessions accept already constructed facts. External files and payloads must be schema-bound when they enter through the public C API.
 
 ### C++ API
 
@@ -539,44 +504,14 @@ session->add_data(DataSource::fact(fact));
 
 Current runtime behavior:
 - `add_data(DataSource::fact(...))` delegates to `add_fact(...)`
-- fact validation still uses declarations loaded from RFL or `import "name.schema"`
+- fact validation uses declarations loaded from RFL internal `declare` or schema imports
 - C++ engine runtime is fact-only
-- schema-aware C API helpers can use installed `TurboScript::DataBind` to bind JSON/CSV/XML/binary payloads into session-owned facts
+- schema-aware C API helpers use `TurboUtils::DataBind` to bind JSON/CSV/XML/binary payloads into session-owned facts
+- the target external fact type must be imported into the KnowledgeBase from `.schema`
 
-### Migration from external data clauses
-
-**Before** (deprecated):
-```rfl
-rule "ProcessOrders"
-when
-    $r: Row() from json(file("orders.json"), "orders[*]")
-then
-    insert Order { id = $r.id }
-end
-```
-
-**After**:
-```cpp
-// Host or TurboScript side parses JSON and constructs Row facts.
-session->add_fact(row_fact);
-```
-
-```rfl
-// Simplified rule
-rule "ProcessOrders"
-when
-    $r: Row()
-then
-    insert Order { id = $r.id }
-end
-```
-
-### Benefits
-
-- **Unified interface**: Single entry point for all data types
-- **Better control**: Load data when needed, not on every rule match
-- **Performance**: One-time loading vs repeated file I/O
-- **Testability**: Easy to mock data sources in tests
+Complete-document and incremental input APIs are documented in
+[`DATA_INGESTION.md`](./DATA_INGESTION.md). Input and file I/O remain host
+responsibilities rather than pattern-source behavior.
 
 ## 6. Queries
 
@@ -634,4 +569,3 @@ query "VipOrders"
     $o: Order(tier == "VIP")
 end
 ```
-

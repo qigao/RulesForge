@@ -10,7 +10,7 @@
 #include "engine/i_network_callback.hpp"
 #include "engine/knowledge_base.hpp"
 #include "engine/metrics_exporter.hpp"
-#include "engine/agenda.hpp"
+#include "engine/agenda_selector.hpp"
 #include "engine/data_source.hpp"
 
 #include "engine/query_result.hpp"
@@ -93,7 +93,23 @@ public:
    * @brief Insert a fact into a named entry point stream.
    */
   void insert_into(std::string const& stream_name, Fact* fact);
+  void insert_into(std::string const& stream_name, std::shared_ptr<Fact> const& fact);
+  void insert_event_into(std::string const& stream_name,
+                         std::shared_ptr<Fact> const& fact,
+                         std::int64_t event_time_ms);
+  void retract_from(std::string const& stream_name, Fact* fact);
+  void validate_entry_point_route(std::string const& stream_name,
+                                  std::string const& fact_type) const;
   int fire_all_rules(int max_rules = -1);
+  int fire_all_rules_fail_fast(int max_rules = -1);
+  std::size_t advance_event_time(std::int64_t watermark_ms);
+  void enable_event_time_mode() { event_time_mode_ = true; }
+  bool is_event_time_mode() const { return event_time_mode_; }
+  std::optional<std::int64_t> event_time_watermark() const { return event_time_watermark_ms_; }
+  std::optional<std::int64_t> fact_event_time(Fact const* fact) const;
+  std::size_t pending_activation_count() const { return agenda_.size(); }
+  std::int64_t next_fact_id() const { return working_memory_.next_id(); }
+  std::vector<Fact*> facts_snapshot() const { return working_memory_.snapshot(); }
 
   void retract_fact(Fact* fact) override;
   void retract_fact(std::shared_ptr<Fact> const& fact) { retract_fact(fact.get()); }
@@ -114,20 +130,32 @@ public:
   void begin_rhs_transaction() override;
   void end_rhs_transaction(bool commit) override;
 
-  template<typename T>
+  /**
+   * @brief 型安全な fact 追加 API。
+   *
+   * 登録済みの C++ 型 T を RulesForge の Fact に変換して session に追加する。
+   * T は事前に `KnowledgeBase::get_fact_type_registry().register_type<T>(...)` で
+   * 登録されている必要がある。未登録の場合は std::runtime_error で即座に失敗する。
+   *
+   * @tparam T 非ポインタの class/struct 型（Concept: std::is_class_v<T>）
+   * @param typed_fact 追加する C++ オブジェクト（値参照）
+   * @throws std::runtime_error T が FactTypeRegistry に未登録の場合
+   *
+   * 所有権: Fact は session の FactArena が管理する。呼び出し元は typed_fact の
+   * 所有権を保持したまま（コピー渡し）。
+   */
+  template <typename T>
+      requires std::is_class_v<T> && (!std::is_pointer_v<T>)
   void add_fact_typed(T const& typed_fact)
   {
-    // Type registry still returns shared_ptr? Need to check.
-    // If registry returns shared_ptr, we might need to change it or release.
-    // For now assuming we refactoring core.
-    // If registry returns shared_ptr, we can call .get() but we must ensure ownership.
-    // Ideally registry should be updated too.
-    // Just using .get() for now if it returns shared_ptr (assuming it's kept alive elsewhere or we copy).
-    // Actually, if add_fact takes Fact*, and Session expects ownership (or arena managed),
-    // we should clone it into internal arena?
-    // Or just take ownership if it's unique_ptr.
-    // Given the task, I'll comment out implementation details or assume Fact* validity.
-    // NOTE: This template needs to be updated based on registry changes.
+    Fact* fact = kb_->get_fact_type_registry().convert(fact_arena_, typed_fact);
+    if (!fact) {
+      throw std::runtime_error(
+          std::string("add_fact_typed: type '") + typeid(T).name() +
+          "' has not been registered with FactTypeRegistry. "
+          "Call kb->get_fact_type_registry().register_type<T>(...) before inserting facts.");
+    }
+    add_fact(fact);
   }
 
   void set_focus(std::string const& group_name) override;
@@ -157,6 +185,13 @@ public:
   }
   std::string get_rule_performance_summary() const {
       return tracer_.format_rule_summary();
+  }
+  std::string get_agenda_implementation() const {
+      return agenda_.implementation_name();
+  }
+  std::string get_execution_mode() const {
+      return rulesforge::execution_mode_name(
+          rulesforge::agenda_implementation_to_execution_mode(agenda_.implementation()));
   }
 
   // Memory statistics
@@ -273,7 +308,10 @@ private:
   void validate_fact_for_insert(Fact const& fact) const;
   void prime_network_state();
   void refresh_query_call_nodes();
-  void fire_activation(Activation& activation);
+  int fire_all_rules_impl(int max_rules, bool fail_fast);
+  void fire_activation(Activation& activation, bool fail_fast);
+  std::shared_ptr<ReteNode> require_entry_point_route(std::string const& stream_name,
+                                                      std::string const& fact_type) const;
   bool is_node_pending_dirty(ReteNode const& node) const;
   void mark_phreak_dirty_for_node(int node_id);
   void mark_phreak_dirty_for_type(std::string const& fact_type);
@@ -300,7 +338,7 @@ private:
   WorkingMemory working_memory_;
   std::unordered_map<int64_t, std::shared_ptr<Fact>> retained_shared_facts_;
   Activation const* current_activation_ = nullptr;
-  Agenda agenda_;
+  rulesforge::RuntimeAgenda agenda_;
   std::vector<std::shared_ptr<IEngineListener>> listeners_;
   bool halt_requested_ = false;
 
@@ -325,6 +363,9 @@ private:
   RuntimeCounters runtime_counters_{};
   rulesforge::ModifiedFieldsHint const* current_modified_fields_ = nullptr;
   uint64_t phreak_epoch_ = 0;
+  std::optional<std::int64_t> event_time_watermark_ms_;
+  bool event_time_mode_ = false;
+  std::unordered_map<Fact const*, std::int64_t> fact_event_times_ms_;
   std::map<int, std::shared_ptr<ReteNode>> get_nodes() const;
   friend class ReteSerializer;
 };

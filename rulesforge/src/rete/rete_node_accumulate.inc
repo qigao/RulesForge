@@ -22,14 +22,14 @@ void AccumulateNode::left_activate(StatefulSession& session, Token const& token)
     new_item.wme = wme;
     new_item.accumulator = accumulator_prototype->clone();
     new_item.result_fact = session.create_fact(result_fact_type);
-    bool is_mir_numeric = uses_mir_numeric_accumulate(info);
-    bool is_mir_collect = uses_mir_collect_accumulate(info);
+    bool is_numeric_accumulate = uses_numeric_accumulate(info);
+    bool is_collect_accumulate = uses_collect_accumulate(info);
     for (auto const& [fact_id, fact_ptr] : mem.right) {
         if (check_all_join_conditions(session, token, *fact_ptr, join_constraints, binding_to_token_idx)) {
-            if (is_mir_numeric) {
-                apply_mir_numeric_accumulate(session, info, new_item, *fact_ptr, &token, &binding_to_token_idx, 1);
-            } else if (is_mir_collect) {
-                apply_mir_collect_accumulate(session, info, new_item, fact_ptr, 1);
+            if (is_numeric_accumulate) {
+                apply_numeric_accumulate(session, info, new_item, *fact_ptr, &token, &binding_to_token_idx, 1);
+            } else if (is_collect_accumulate) {
+                apply_collect_accumulate(session, info, new_item, fact_ptr, 1);
             } else {
                 if (auto value_opt = get_accumulate_value(session, info, *fact_ptr, &token, &binding_to_token_idx)) {
                     new_item.accumulator->accumulate(*value_opt);
@@ -51,8 +51,8 @@ void AccumulateNode::right_activate(StatefulSession& session, Fact* fact, Propag
         }
     }
 
-    bool is_mir_numeric = uses_mir_numeric_accumulate(info);
-    bool is_mir_collect = uses_mir_collect_accumulate(info);
+    bool is_numeric_accumulate = uses_numeric_accumulate(info);
+    bool is_collect_accumulate = uses_collect_accumulate(info);
 
     // MODIFY requires full rebuild — the old field values are unknown
     if (p_type == PropagationType::MODIFY) {
@@ -60,15 +60,15 @@ void AccumulateNode::right_activate(StatefulSession& session, Fact* fact, Propag
         for (auto& [wme_ptr, item] : mem.left) {
             Token current_token{item.wme, PropagationType::ASSERT};
             item.accumulator->clear();
-            reset_mir_numeric_accumulate(item);
-            reset_mir_collect_accumulate(item);
+            reset_numeric_accumulate(item);
+            reset_collect_accumulate(item);
             for (auto const& [fact_id, f_ptr] : mem.right) {
                 if (check_all_join_conditions(session, current_token, *f_ptr, join_constraints,
                                               binding_to_token_idx)) {
-                    if (is_mir_numeric) {
-                        apply_mir_numeric_accumulate(session, info, item, *f_ptr, &current_token, &binding_to_token_idx, 1);
-                    } else if (is_mir_collect) {
-                        apply_mir_collect_accumulate(session, info, item, f_ptr, 1);
+                    if (is_numeric_accumulate) {
+                        apply_numeric_accumulate(session, info, item, *f_ptr, &current_token, &binding_to_token_idx, 1);
+                    } else if (is_collect_accumulate) {
+                        apply_collect_accumulate(session, info, item, f_ptr, 1);
                     } else {
                         if (auto value_opt = get_accumulate_value(session, info, *f_ptr, &current_token, &binding_to_token_idx)) {
                             item.accumulator->accumulate(*value_opt);
@@ -87,12 +87,12 @@ void AccumulateNode::right_activate(StatefulSession& session, Fact* fact, Propag
         for (auto& [wme_ptr, item] : mem.left) {
             Token token{item.wme, PropagationType::ASSERT};
             if (check_all_join_conditions(session, token, *fact, join_constraints, binding_to_token_idx)) {
-                if (is_mir_numeric) {
-                    if (apply_mir_numeric_accumulate(session, info, item, *fact, &token, &binding_to_token_idx, 1)) {
+                if (is_numeric_accumulate) {
+                    if (apply_numeric_accumulate(session, info, item, *fact, &token, &binding_to_token_idx, 1)) {
                         update_and_propagate_result(session, item);
                     }
-                } else if (is_mir_collect) {
-                    if (apply_mir_collect_accumulate(session, info, item, fact, 1)) {
+                } else if (is_collect_accumulate) {
+                    if (apply_collect_accumulate(session, info, item, fact, 1)) {
                         update_and_propagate_result(session, item);
                     }
                 } else {
@@ -111,12 +111,12 @@ void AccumulateNode::right_activate(StatefulSession& session, Fact* fact, Propag
     for (auto& [wme_ptr, item] : mem.left) {
         Token token{item.wme, PropagationType::ASSERT};
         if (check_all_join_conditions(session, token, *fact, join_constraints, binding_to_token_idx)) {
-            if (is_mir_numeric) {
-                if (apply_mir_numeric_accumulate(session, info, item, *fact, &token, &binding_to_token_idx, -1)) {
+            if (is_numeric_accumulate) {
+                if (apply_numeric_accumulate(session, info, item, *fact, &token, &binding_to_token_idx, -1)) {
                     update_and_propagate_result(session, item);
                 }
-            } else if (is_mir_collect) {
-                if (apply_mir_collect_accumulate(session, info, item, fact, -1)) {
+            } else if (is_collect_accumulate) {
+                if (apply_collect_accumulate(session, info, item, fact, -1)) {
                     update_and_propagate_result(session, item);
                 }
             } else {
@@ -132,8 +132,8 @@ void AccumulateNode::right_activate(StatefulSession& session, Fact* fact, Propag
 
 void AccumulateNode::right_activate_batch(StatefulSession& session, std::vector<Fact*>& facts, PropagationType p_type) {
     auto& mem = session.net_mem().accumulate[mem_slot];
-    bool is_mir_numeric = uses_mir_numeric_accumulate(info);
-    bool is_mir_collect = uses_mir_collect_accumulate(info);
+    bool is_numeric_accumulate = uses_numeric_accumulate(info);
+    bool is_collect_accumulate = uses_collect_accumulate(info);
 
     // Store all facts into right memory first
     for (auto& fact : facts) {
@@ -146,12 +146,12 @@ void AccumulateNode::right_activate_batch(StatefulSession& session, std::vector<
         bool changed = false;
         for (auto& fact : facts) {
             if (check_all_join_conditions(session, token, *fact, join_constraints, binding_to_token_idx)) {
-                if (is_mir_numeric) {
-                    if (apply_mir_numeric_accumulate(session, info, item, *fact, &token, &binding_to_token_idx, 1)) {
+                if (is_numeric_accumulate) {
+                    if (apply_numeric_accumulate(session, info, item, *fact, &token, &binding_to_token_idx, 1)) {
                         changed = true;
                     }
-                } else if (is_mir_collect) {
-                    if (apply_mir_collect_accumulate(session, info, item, fact, 1)) {
+                } else if (is_collect_accumulate) {
+                    if (apply_collect_accumulate(session, info, item, fact, 1)) {
                         changed = true;
                     }
                 } else {
@@ -193,10 +193,10 @@ bool AccumulateNode::flush_pending(StatefulSession& session) {
 void AccumulateNode::update_and_propagate_result(StatefulSession& session, NetworkMemory::AccumulateMem::LeftMemoryItem& item) {
     bool is_new_fact = (item.result_fact->id == 0);
     auto modifier = [&](Fact& f) {
-        if (uses_mir_collect_accumulate(info)) {
-            f.fields["result"] = mir_collect_accumulate_result(session, info, item);
-        } else if (uses_mir_numeric_accumulate(info)) {
-            ConstraintValue result_val = mir_numeric_accumulate_result(info, item);
+        if (uses_collect_accumulate(info)) {
+            f.fields["result"] = collect_accumulate_result(session, info, item);
+        } else if (uses_numeric_accumulate(info)) {
+            ConstraintValue result_val = numeric_accumulate_result(info, item);
             f.fields["result"] = result_val;
 
             double numeric_result = 0.0;

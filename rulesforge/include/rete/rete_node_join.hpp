@@ -12,7 +12,7 @@ public:
   AlphaNode() : ReteNode(NodeKind::Alpha) {}
   explicit AlphaNode(ParsedConstraint const& constraint);
   AlphaNode(ParsedConstraint const& constraint,
-            std::optional<rulesforge::MirRuntimePredicateRef> mir_runtime_predicate);
+            std::optional<rulesforge::RuntimePredicateRef> runtime_predicate_ref);
   void left_activate(StatefulSession&, Token const&) override;
   void right_activate(StatefulSession&,
                       Fact*,
@@ -32,7 +32,7 @@ public:
 
 private:
   ParsedConstraint constraint;
-  std::optional<rulesforge::MirRuntimePredicateRef> mir_runtime_predicate_;
+  std::optional<rulesforge::RuntimePredicateRef> runtime_predicate_ref_;
   bool check_constraint(StatefulSession const& session, Fact const& fact) const;
 };
 
@@ -76,7 +76,8 @@ public:
 
   HashedJoinNode(std::vector<ParsedConstraint> joins,
                  std::map<std::string, int> bindings,
-                 std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates,
+                 std::map<std::string, std::string> scalar_binding_fields,
+                 std::vector<std::optional<rulesforge::RuntimePredicateRef>> runtime_predicates,
                  std::pair<std::string, int> left_hash_key,
                  std::string right_hash_key);
   void left_activate(StatefulSession& session,
@@ -118,7 +119,8 @@ public:
 
   CrossProductJoinNode(std::vector<ParsedConstraint> joins,
                        std::map<std::string, int> bindings,
-                       std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates = {});
+                       std::map<std::string, std::string> scalar_binding_fields = {},
+                       std::vector<std::optional<rulesforge::RuntimePredicateRef>> runtime_predicates = {});
   void left_activate(StatefulSession& session,
                      Token const& token) override;
   void right_activate(StatefulSession& session,
@@ -145,7 +147,8 @@ public:
   NotNode() : BetaConditionNode(NodeKind::Not, {}, {}) {}
   NotNode(std::vector<ParsedConstraint> const& joins,
           std::map<std::string, int> const& bindings,
-          std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates = {});
+          std::map<std::string, std::string> scalar_binding_fields = {},
+          std::vector<std::optional<rulesforge::RuntimePredicateRef>> runtime_predicates = {});
   void print_node(std::ostream& os) const override;
 
 protected:
@@ -167,7 +170,8 @@ public:
   ExistsNode() : BetaConditionNode(NodeKind::Exists, {}, {}) {}
   ExistsNode(std::vector<ParsedConstraint> const& joins,
              std::map<std::string, int> const& bindings,
-             std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates = {});
+             std::map<std::string, std::string> scalar_binding_fields = {},
+             std::vector<std::optional<rulesforge::RuntimePredicateRef>> runtime_predicates = {});
   void print_node(std::ostream& os) const override;
 
 protected:

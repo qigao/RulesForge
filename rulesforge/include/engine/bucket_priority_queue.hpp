@@ -1,8 +1,8 @@
 #ifndef BUCKET_PRIORITY_QUEUE_HPP
 #define BUCKET_PRIORITY_QUEUE_HPP
 
-// BucketPriorityQueue has been moved to TurboNet
-// Include from TurboNet shared utils
+// BucketPriorityQueue has been moved to TurboUtils
+// Include from TurboUtils shared utils
 #include "bucket_priority_queue.h"
 
 // Priority enum is now defined in priority_types.hpp
@@ -15,9 +15,9 @@
 #include <vector>
 
 /**
- * @brief C++ wrapper for TurboNet's bucket_priority_queue (single-threaded)
+ * @brief C++ wrapper for TurboUtils's bucket_priority_queue (single-threaded)
  *
- * This is a thin wrapper around TurboNet's C API for backward compatibility.
+ * This is a thin wrapper around TurboUtils's C API for backward compatibility.
  * For new code, consider using PriorityRingBuffer (SPSC) or PriorityDisruptor (MPMC).
  *
  * PERFORMANCE:
@@ -151,11 +151,11 @@ public:
     /**
      * @brief Shrink to fit (no-op for compatibility)
      *
-     * Note: TurboNet's bucket_priority_queue doesn't support shrinking.
+     * Note: TurboUtils's bucket_priority_queue doesn't support shrinking.
      * This method is provided for API compatibility but does nothing.
      */
     void shrink_to_fit() {
-        // No-op: TurboNet doesn't support shrinking
+        // No-op: TurboUtils doesn't support shrinking
     }
 
     /**

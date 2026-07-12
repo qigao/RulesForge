@@ -58,6 +58,21 @@ ruleforge_validation_mode_t parse_validation_mode(const std::string &mode) {
   throw std::runtime_error("Invalid validation mode: " + mode + " (expected none|warn|strict)");
 }
 
+ruleforge_execution_mode_t parse_execution_mode(const std::string &mode) {
+  if (mode == "default") {
+    return RULES_FORGE_EXECUTION_MODE_DEFAULT;
+  }
+  if (mode == "standard" || mode == "v1") {
+    return RULES_FORGE_EXECUTION_MODE_V1_STANDARD;
+  }
+  if (mode == "high_performance" || mode == "v2") {
+    return RULES_FORGE_EXECUTION_MODE_V2_HIGH_PERFORMANCE;
+  }
+  throw std::runtime_error(
+      "Invalid execution mode: " + mode + " (expected default|v1|v2|standard|high_performance)");
+}
+
+
 struct TurboJsonDeleter {
   void operator()(json_value_t *value) const {
     if (value) {
@@ -117,7 +132,7 @@ TurboJsonHandle filter_fact_json(const json_value_t *fact) {
 
 // Load facts from JSON array and optionally keep stable fact handles.
 int load_facts_from_json(ruleforge_stateful_session_t session, const json_value_t *facts_array,
-                         const std::string &fact_type, bool verbose,
+                         const std::string &schema_path, const std::string &fact_type, bool verbose,
                          std::vector<ruleforge_fact_t> *loaded_facts) {
   int loaded = 0;
   if (!facts_array || turbo_json_type(facts_array) != TURBO_JSON_ARRAY) {
@@ -140,8 +155,8 @@ int load_facts_from_json(ruleforge_stateful_session_t session, const json_value_
 
     std::string json_str(json_text.get(), json_len);
     ruleforge_fact_t fact = nullptr;
-    if (check_result(ruleforge_session_add_fact_json_ex(session, fact_type.c_str(), json_str.c_str(),
-                                                        &fact),
+    if (check_result(ruleforge_session_add_fact_json_schema(
+                         session, schema_path.c_str(), fact_type.c_str(), json_str.c_str(), &fact),
                      "Add fact")) {
       if (loaded_facts && fact) {
         loaded_facts->push_back(fact);
@@ -263,6 +278,7 @@ int main(int argc, char *argv[]) {
   // clang-format off
   options.add_options()
       ("r,rfl", "RFL rules file path", cxxopts::value<std::string>())
+      ("s,schema", "Schema file path for all external input data", cxxopts::value<std::string>())
       ("j,json", "JSON facts file path", cxxopts::value<std::string>())
       ("c,csv", "CSV facts file path (header row required)", cxxopts::value<std::string>())
       ("T,csv-type", "Fact type for CSV rows", cxxopts::value<std::string>())
@@ -273,6 +289,8 @@ int main(int argc, char *argv[]) {
       ("q,query", "Query name to execute after firing rules", cxxopts::value<std::string>())
       ("b,binding", "Binding name for query results", cxxopts::value<std::string>()->default_value("$result"))
       ("f,fields", "Comma-separated field names to display from results", cxxopts::value<std::string>())
+      ("mode", "Execution mode: default|v1|v2 (v2/high_performance is usually 20%-30% faster)",
+                 cxxopts::value<std::string>()->default_value("default"))
       ("validation", "Validation mode: none|warn|strict", cxxopts::value<std::string>()->default_value("none"))
       ("trace", "Print execution trace after firing rules", cxxopts::value<bool>()->default_value("false"))
       ("trace-network", "Include RETE network events in trace output", cxxopts::value<bool>()->default_value("false"))
@@ -290,38 +308,46 @@ int main(int argc, char *argv[]) {
       std::cout << options.help() << std::endl;
       std::cout << "\nExamples:" << std::endl;
       std::cout << "  # Single fact type with auto-detect array" << std::endl;
-      std::cout << "  capi_demo -r rules.rfl -j data.json -t com.example.Order -q AllOrders -b order"
+      std::cout << "  capi_demo -r rules.rfl -s data.schema -j data.json -t Order -q AllOrders -b order"
                 << std::endl;
       std::cout << std::endl;
       std::cout << "  # Multiple fact types with explicit mappings" << std::endl;
-      std::cout << "  capi_demo -r rules.rfl -j data.json \\" << std::endl;
-      std::cout << "    -m orders:com.shop.Order \\" << std::endl;
-      std::cout << "    -m customers:com.shop.Customer" << std::endl;
+      std::cout << "  capi_demo -r rules.rfl -s data.schema -j data.json \\" << std::endl;
+      std::cout << "    -m orders:Order \\" << std::endl;
+      std::cout << "    -m customers:Customer" << std::endl;
       std::cout << std::endl;
       std::cout << "  # CSV data source" << std::endl;
-      std::cout << "  capi_demo -r payments.rfl -c payments_test_data.csv \\"
+      std::cout << "  capi_demo -r payments.rfl -s payments.schema -c payments_test_data.csv \\"
                 << std::endl;
-      std::cout << "    -T com.example.pricing.Order -q OrdersWithDiscount \\"
+      std::cout << "    -T Order -q OrdersWithDiscount \\"
                 << std::endl;
       std::cout << "    -b order \\"
                 << std::endl;
       std::cout << "    -f quantity,unitPrice,finalPrice" << std::endl;
       std::cout << std::endl;
       std::cout << "  # Enable validation, tracing, and memory stats" << std::endl;
-      std::cout << "  capi_demo -r payments.rfl -c payments_test_data.csv \\" << std::endl;
-      std::cout << "    -T com.example.pricing.Order --validation warn --trace --memory \\" << std::endl;
+      std::cout << "  capi_demo -r payments.rfl -s payments.schema -c payments_test_data.csv \\" << std::endl;
+      std::cout << "    -T Order --mode v2 --validation warn --trace --memory \\" << std::endl;
       std::cout << "    -q OrdersWithDiscount -b order -f quantity,finalPrice" << std::endl;
       std::cout << std::endl;
       std::cout << "  # Run loan eligibility example" << std::endl;
-      std::cout << "  capi_demo -r loan-eligibility.rfl -j loan-applications-sample.json \\"
+      std::cout << "  capi_demo -r loan-eligibility.rfl -s loan.schema -j loan-applications-sample.json \\"
                 << std::endl;
-      std::cout << "    -m applications:com.bank.loan.LoanApplication \\" << std::endl;
+      std::cout << "    -m applications:LoanApplication \\" << std::endl;
       std::cout << "    -q LoanDecisions -b decision \\" << std::endl;
       std::cout << "    -f applicationId,approved,approvedAmount,reason" << std::endl;
       return result.count("help") ? 0 : 1;
     }
 
     std::string drl_path = result["rfl"].as<std::string>();
+    std::string schema_path;
+    if (result.count("json") || result.count("csv")) {
+      if (!result.count("schema")) {
+        std::cerr << "Error: --schema is required for external JSON/CSV input" << std::endl;
+        return 1;
+      }
+      schema_path = result["schema"].as<std::string>();
+    }
     bool verbose = result["verbose"].as<bool>();
 
     // Initialize RulesForge
@@ -330,18 +356,19 @@ int main(int argc, char *argv[]) {
     std::cout << "=== RulesForge C API Demo ===" << std::endl;
     std::cout << "Version: " << ruleforge_get_version() << std::endl << std::endl;
 
-    // Read and compile RFL
-    std::string drl_content = read_file(drl_path);
-    if (verbose) {
-      std::cout << "Loaded rules from: " << drl_path << std::endl;
-    }
-
     ruleforge_knowledge_base_t kb = nullptr;
     if (!check_result(ruleforge_kb_create(&kb), "Create Knowledge Base")) {
       return 1;
     }
+    if (!check_result(ruleforge_kb_set_execution_mode(
+                          kb, parse_execution_mode(result["mode"].as<std::string>())),
+                      "Set execution mode")) {
+      ruleforge_kb_destroy(kb);
+      return 1;
+    }
 
-    if (!check_result(ruleforge_kb_load_drl(kb, drl_content.c_str()), "Load RFL rules")) {
+    if (!check_result(ruleforge_kb_load_drl_file(kb, drl_path.c_str(), nullptr, 0),
+                      "Load RFL rules")) {
       ruleforge_kb_destroy(kb);
       return 1;
     }
@@ -455,7 +482,8 @@ int main(int argc, char *argv[]) {
           continue;
         }
 
-        int loaded = load_facts_from_json(session, array_value, fact_type, verbose, &loaded_facts);
+        int loaded = load_facts_from_json(session, array_value, schema_path, fact_type, verbose,
+                                          &loaded_facts);
         std::cout << "Loaded " << loaded << " " << fact_type << " facts from '" << array_key << "'"
                   << std::endl;
         total_facts_loaded += loaded;
@@ -473,10 +501,11 @@ int main(int argc, char *argv[]) {
 
       std::string csv_path = result["csv"].as<std::string>();
       std::string fact_type = result["csv-type"].as<std::string>();
+      std::string csv_content = read_file(csv_path);
       ruleforge_fact_t *csv_facts = nullptr;
-      if (!check_result(ruleforge_session_add_facts_csv_file_ex(
-                            session, fact_type.c_str(), csv_path.c_str(), &csv_facts,
-                            &total_facts_loaded),
+      if (!check_result(ruleforge_session_add_facts_csv_schema(
+                            session, schema_path.c_str(), fact_type.c_str(), csv_content.c_str(),
+                            &csv_facts, &total_facts_loaded),
                         "Load CSV facts")) {
         ruleforge_session_destroy(session);
         ruleforge_kb_destroy(kb);

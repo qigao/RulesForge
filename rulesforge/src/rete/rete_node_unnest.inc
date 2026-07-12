@@ -4,13 +4,13 @@ UnnestNode::UnnestNode(
     std::string target_fact_type,
     std::map<std::string, int> const& bindings,
     std::vector<ParsedConstraint> constraints,
-    std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> mir_runtime_predicates) :
+    std::vector<std::optional<rulesforge::RuntimePredicateRef>> runtime_predicates) :
     ReteNode(NodeKind::Unnest),
     info(unnest_info),
     target_fact_type_(std::move(target_fact_type)),
     binding_to_token_idx(bindings),
     constraints_(std::move(constraints)),
-    mir_runtime_predicates_(std::move(mir_runtime_predicates)) {
+    runtime_predicates_(std::move(runtime_predicates)) {
     for (auto& constraint : constraints_) {
         if (constraint.left_field.find('.') != std::string::npos
             || constraint.left_field.find('[') != std::string::npos) {
@@ -56,13 +56,13 @@ void UnnestNode::left_activate(StatefulSession& session, Token const& token) {
             }
             auto new_wme = session.get_or_create_wme(token.wme, item_fact);
             Token new_token{new_wme, PropagationType::ASSERT};
-            if (!check_all_mir_constraints(
+            if (!check_all_runtime_constraints(
                     session,
                     new_token,
                     *item_fact,
                     constraints_,
                     binding_to_token_idx,
-                    &mir_runtime_predicates_)) {
+                    &runtime_predicates_)) {
                 continue;
             }
             child_wmes.push_back(new_wme);

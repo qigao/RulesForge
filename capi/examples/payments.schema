@@ -1,0 +1,7 @@
+schema Pricing [id(1), version(1), byte_order(little)];
+
+message Order {
+    int32 quantity;
+    double unitPrice;
+    double finalPrice;
+}

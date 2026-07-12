@@ -200,10 +200,10 @@ void analyze_constraint_node_recursive(ConstraintNode* node,
       }
     }
 
-    // LHS arithmetic constraints are lowered by the MIR plan; semantic analysis
+    // LHS arithmetic constraints are lowered by the runtime evaluator; semantic analysis
     // preserves the source expression and lets backend lowering decide support.
     if (constraint.right_arith_expr.has_value() && !constraint.right_arith_expr->empty()) {
-      logd("  -> Preserved MIR constraint expression: {}", *constraint.right_arith_expr);
+      logd("  -> Preserved runtime constraint expression: {}", *constraint.right_arith_expr);
     }
   } else {
     for (auto const& child : node->children) {
@@ -545,10 +545,10 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
           bool is_accumulate_expr = is_accumulate_expression_text(arg.field);
 
           if (is_accumulate_expr) {
-            // MIR coverage owns expression support. Semantic analysis only checks
+            // runtime evaluator owns expression support. Semantic analysis only checks
             // that referenced bindings exist and preserves unsupported shapes for
             // build-time lowering diagnostics.
-            arg.uses_mir_value_expression = true;
+            arg.uses_runtime_value_expression = true;
             std::regex binding_regex(R"(\$[a-zA-Z_][a-zA-Z0-9_]*)");
             std::sregex_iterator iter(arg.field.begin(), arg.field.end(), binding_regex);
             std::sregex_iterator end;
@@ -575,7 +575,7 @@ void SemanticAnalyzer::analyze_pattern(ParsedPattern& pattern,
               return;
             }
 
-            logd("    -> Preserved accumulate expression for MIR lowering: {}", arg.field);
+            logd("    -> Preserved accumulate expression for runtime evaluation: {}", arg.field);
 
             field_to_accumulate = arg.field;
             type_to_check_against = arg.source_pattern->fact_type;

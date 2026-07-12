@@ -2,35 +2,35 @@
 EvalNode::EvalNode(std::string expr,
                    std::map<std::string, int> bindings,
                    std::map<std::string, std::string> scalar_binding_fields,
-                   std::optional<rulesforge::MirRuntimePredicateRef> mir_eval_expression_predicate,
-                   std::vector<std::string> mir_eval_expression_variables,
+                   std::optional<rulesforge::RuntimePredicateRef> eval_runtime_predicate,
+                   std::vector<std::string> eval_runtime_variables,
                    std::vector<EvalRuntimeArgument> runtime_arguments) :
     ReteNode(NodeKind::Eval),
     expression(std::move(expr)),
     binding_to_token_idx(std::move(bindings)),
     scalar_binding_to_field(std::move(scalar_binding_fields)),
-    mir_eval_expression_predicate_(std::move(mir_eval_expression_predicate)),
-    mir_eval_expression_variables_(std::move(mir_eval_expression_variables)),
+    eval_runtime_predicate_(std::move(eval_runtime_predicate)),
+    eval_runtime_variables_(std::move(eval_runtime_variables)),
     runtime_arguments_(std::move(runtime_arguments)) {
     if (runtime_arguments_.empty()) {
-        runtime_arguments_.reserve(mir_eval_expression_variables_.size());
-        for (auto const& variable : mir_eval_expression_variables_) {
+        runtime_arguments_.reserve(eval_runtime_variables_.size());
+        for (auto const& variable : eval_runtime_variables_) {
             runtime_arguments_.push_back(
                 EvalRuntimeArgument{EvalRuntimeArgument::Kind::Variable, variable, NilValue{}});
         }
     }
-    if (!expression.empty() && mir_eval_expression_predicate_) {
+    if (!expression.empty() && eval_runtime_predicate_) {
         for (auto const& runtime_arg : runtime_arguments_) {
             if (runtime_arg.kind != EvalRuntimeArgument::Kind::Variable) {
                 continue;
             }
             auto const& var_name = runtime_arg.text;
             EvalResolvedVar r{};
-            std::string binding_name = trim_runtime_name(var_name);
+            std::string binding_name = trim_ascii_copy(var_name);
             size_t dot_pos = var_name.find('.');
             if (dot_pos != std::string::npos) {
-                binding_name = trim_runtime_name(var_name.substr(0, dot_pos));
-                r.field_name = trim_runtime_name(var_name.substr(dot_pos + 1));
+                binding_name = trim_ascii_copy(var_name.substr(0, dot_pos));
+                r.field_name = trim_ascii_copy(var_name.substr(dot_pos + 1));
             } else {
                 auto field_it = scalar_binding_to_field.find(binding_name);
                 if (field_it != scalar_binding_to_field.end()) {
@@ -63,18 +63,12 @@ void EvalNode::left_activate(StatefulSession& session, Token const& token) {
     bool result = false;
     if (expression.empty()) {
         result = true;
-    } else if (mir_eval_expression_predicate_) {
+    } else if (eval_runtime_predicate_) {
         auto kb = session.get_knowledge_base();
         if (!kb) {
             throw std::runtime_error("KnowledgeBase is required for eval(...) predicate");
         }
-        if (mir_eval_expression_predicate_->backend == rulesforge::RuntimePredicateBackend::MirJit
-            && !kb->has_mir_execution_plan()) {
-            throw std::runtime_error("MIR execution plan is required for eval(...) predicate");
-        }
         std::vector<ConstraintValue> args;
-        bool const requires_numeric_args =
-            mir_eval_expression_predicate_->backend == rulesforge::RuntimePredicateBackend::MirJit;
         args.reserve(runtime_arguments_.size());
         for (auto const& runtime_arg : runtime_arguments_) {
             if (runtime_arg.kind == EvalRuntimeArgument::Kind::Literal) {
@@ -86,22 +80,20 @@ void EvalNode::left_activate(StatefulSession& session, Token const& token) {
                 if (current_fact == nullptr) {
                     return;
                 }
-                auto expression_args = resolve_mir_value_expression_arguments(
-                    *kb,
-                    runtime_arg.expression_id,
+                auto expression_value = evaluate_runtime_expression(
+                    runtime_arg.text,
                     *current_fact,
                     &token,
-                    &binding_to_token_idx);
-                if (!expression_args) {
+                    &binding_to_token_idx,
+                    &scalar_binding_to_field);
+                if (!expression_value) {
                     return;
                 }
-                auto value = kb->mir_runtime_numeric_value_expression(
-                    runtime_arg.expression_id,
-                    *expression_args);
-                if (!value) {
-                    throw_lhs_runtime_not_lowered("eval(...) native argument expression");
+                auto numeric = numeric_value(*expression_value);
+                if (!numeric) {
+                    return;
                 }
-                args.push_back(*value);
+                args.push_back(*numeric);
                 continue;
             }
 
@@ -123,20 +115,30 @@ void EvalNode::left_activate(StatefulSession& session, Token const& token) {
                 if (!field_value) {
                     return;
                 }
-                if (requires_numeric_args && !is_numeric_value(*field_value)) {
-                    return;
-                }
                 value = std::move(*field_value);
             }
             args.push_back(std::move(value));
         }
-        auto mir_result = kb->runtime_predicate(*mir_eval_expression_predicate_, args);
-        if (!mir_result) {
-            throw_lhs_runtime_predicate_failed(*mir_eval_expression_predicate_, "eval(...) predicate");
+        auto runtime_result = kb->runtime_predicate(*eval_runtime_predicate_, args);
+        if (!runtime_result) {
+            throw_lhs_runtime_predicate_failed(*eval_runtime_predicate_, "eval(...) predicate");
         }
-        result = *mir_result;
+        result = *runtime_result;
     } else {
-        throw_lhs_runtime_not_lowered("eval(...) predicate");
+        auto const* current_fact = token.get_fact();
+        if (current_fact == nullptr) {
+            return;
+        }
+        auto evaluated = evaluate_runtime_boolean_expression(
+            expression,
+            *current_fact,
+            &token,
+            &binding_to_token_idx,
+            &scalar_binding_to_field);
+        if (!evaluated) {
+            return;
+        }
+        result = *evaluated;
     }
     if (result) {
         mem.memory[wme] = wme;
@@ -153,12 +155,8 @@ void EvalNode::print_node(std::ostream& os) const {
         os << name << "->" << idx;
         first = false;
     }
-    if (mir_eval_expression_predicate_) {
-        if (mir_eval_expression_predicate_->backend == rulesforge::RuntimePredicateBackend::Native) {
-            os << "\\nNative eval predicate: " << mir_eval_expression_predicate_->external_name;
-        } else {
-            os << "\\nMIR eval predicate: #" << mir_eval_expression_predicate_->predicate_id;
-        }
+    if (eval_runtime_predicate_) {
+        os << "\\nNative eval predicate: " << eval_runtime_predicate_->external_name;
     }
     os << "\", shape=underline, style=filled, fillcolor=orchid];";
 }

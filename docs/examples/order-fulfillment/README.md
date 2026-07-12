@@ -134,9 +134,9 @@ OrderStatus (derived)
 
 ## Running the Example
 
-### Quick Run with capi_demo
+### capi_demo Status
 
-This example is runnable after one preprocessing step.
+This example needs schema migration and one preprocessing step before it can use the current public C API.
 
 Flatten the nested scenario file:
 
@@ -147,21 +147,7 @@ python tools/flatten_example_data.py \
   docs/examples/order-fulfillment/order-flat.json
 ```
 
-Then run:
-
-```bash
-./build/bin/capi_demo \
-  -r docs/examples/order-fulfillment/order-fulfillment.rfl \
-  -j docs/examples/order-fulfillment/order-flat.json \
-  -m warehouses:com.ecommerce.Warehouse \
-  -m inventory:com.ecommerce.Inventory \
-  -m promotions:com.ecommerce.Promotion \
-  -m orders:com.ecommerce.Order \
-  -m orderItems:com.ecommerce.OrderItem \
-  -q FulfillmentPlans \
-  -b plan \
-  -f orderId,itemId,warehouseId,carrier,shippingMethod,shippingCost
-```
+Then add a `.schema` file for the external input facts, import it from the RFL file with `import schema "...schema"`, and pass the same schema with `capi_demo -s`.
 
 Why preprocessing is required:
 

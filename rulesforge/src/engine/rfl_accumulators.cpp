@@ -31,9 +31,7 @@ void SumAccumulator::clear() {
     is_double = false;
 }
 
-std::unique_ptr<IAccumulator> SumAccumulator::clone() const {
-    return std::make_unique<SumAccumulator>(*this);
-}
+
 
 // Note: The AccumulateNode's non-reversible path handles the logic.
 // These methods can be minimal.
@@ -56,9 +54,7 @@ void CollectAccumulator::clear() {
     // No-op.
 }
 
-std::unique_ptr<IAccumulator> CollectAccumulator::clone() const {
-    return std::make_unique<CollectAccumulator>(*this);
-}
+
 
 // --- AverageAccumulator ---
 void AverageAccumulator::accumulate(ConstraintValue const& value) {
@@ -91,9 +87,7 @@ void AverageAccumulator::clear() {
     count = 0;
 }
 
-std::unique_ptr<IAccumulator> AverageAccumulator::clone() const {
-    return std::make_unique<AverageAccumulator>(*this);
-}
+
 
 // --- MinAccumulator ---
 void MinAccumulator::accumulate(ConstraintValue const& value) {
@@ -128,9 +122,7 @@ void MinAccumulator::clear() {
     is_double = false;
 }
 
-std::unique_ptr<IAccumulator> MinAccumulator::clone() const {
-    return std::make_unique<MinAccumulator>(*this);
-}
+
 
 // --- MaxAccumulator ---
 void MaxAccumulator::accumulate(ConstraintValue const& value) {
@@ -165,9 +157,7 @@ void MaxAccumulator::clear() {
     is_double = false;
 }
 
-std::unique_ptr<IAccumulator> MaxAccumulator::clone() const {
-    return std::make_unique<MaxAccumulator>(*this);
-}
+
 
 // --- CollectSetAccumulator ---
 void CollectSetAccumulator::accumulate(ConstraintValue const& value) {
@@ -188,8 +178,6 @@ void CollectSetAccumulator::clear() {
     // No-op.
 }
 
-std::unique_ptr<IAccumulator> CollectSetAccumulator::clone() const {
-    return std::make_unique<CollectSetAccumulator>(*this);
-}
+
 
 

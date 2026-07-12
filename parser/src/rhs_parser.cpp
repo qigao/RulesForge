@@ -60,8 +60,6 @@ RhsParser::Token RhsParser::Lexer::scan_identifier() {
     type = Token::TOK_HALT;
   else if (text == "setFocus")
     type = Token::TOK_SET_FOCUS;
-  else if (text == "invoke")
-    type = Token::TOK_INVOKE;
   else if (text == "if")
     type = Token::TOK_IF;
   else if (text == "else")
@@ -397,8 +395,6 @@ CompiledAction RhsParser::Parser::parse_action() {
     return parse_halt();
   case Token::TOK_SET_FOCUS:
     return parse_set_focus();
-  case Token::TOK_INVOKE:
-    return parse_invoke();
   case Token::TOK_IF:
     return parse_if();
   case Token::TOK_FOR:
@@ -412,7 +408,7 @@ CompiledAction RhsParser::Parser::parse_action() {
   case Token::TOK_CONTINUE:
     return parse_continue();
   default:
-    error("Expected action keyword (update, insert, retract, halt, setFocus, invoke, if, for, "
+    error("Expected action keyword (update, insert, retract, halt, setFocus, if, for, "
           "while, switch, break, continue)");
     return {};
   }
@@ -498,28 +494,6 @@ CompiledAction RhsParser::Parser::parse_set_focus() {
   Token group = consume(Token::TOK_STRING, "Expected string argument for setFocus");
   action.focus_group = group.text;
   consume(Token::TOK_RPAREN, "Expected ')' after group name");
-
-  return action;
-}
-
-CompiledAction RhsParser::Parser::parse_invoke() {
-  CompiledAction action;
-  action.type = RhsActionType::INVOKE;
-
-  advance(); // consume 'invoke'
-  Token fn = consume(Token::TOK_IDENTIFIER, "Expected function name after 'invoke'");
-  action.invoke_function = fn.text;
-
-  consume(Token::TOK_LPAREN, "Expected '(' after function name");
-  if (!check(Token::TOK_RPAREN)) {
-    action.invoke_args.push_back(parse_value());
-    while (match(Token::TOK_COMMA)) {
-      if (check(Token::TOK_RPAREN))
-        break;
-      action.invoke_args.push_back(parse_value());
-    }
-  }
-  consume(Token::TOK_RPAREN, "Expected ')' after invoke arguments");
 
   return action;
 }
@@ -759,18 +733,14 @@ std::vector<FieldAssignment> RhsParser::Parser::parse_field_assignments() {
 FieldAssignment RhsParser::Parser::parse_value() {
   FieldAssignment assign;
 
-  // Check if the identifier is a standard math/string/date function
-  bool is_builtin_func = false;
-  if (check(Token::TOK_IDENTIFIER) && lexer_.peek().type == Token::TOK_LPAREN) {
-    if (is_exprtk_builtin(current_.text)) {
-      is_builtin_func = true;
-    }
+  if (check(Token::TOK_IDENTIFIER) && lexer_.peek().type == Token::TOK_LPAREN
+      && !is_exprtk_builtin(current_.text)) {
+    error("External function calls are not supported in RHS assignments: " + current_.text);
+    return assign;
   }
 
   // Determine value type based on next token
-  if (check(Token::TOK_IDENTIFIER) && lexer_.peek().type == Token::TOK_LPAREN && !is_builtin_func) {
-    assign = parse_native_call_value();
-  } else if (check(Token::TOK_STRING)) {
+  if (check(Token::TOK_STRING)) {
     assign.type = RhsValueType::STRING;
     assign.string_literal = advance().text;
     assign.has_precomputed_literal = true;
@@ -859,27 +829,6 @@ FieldAssignment RhsParser::Parser::parse_value() {
   return assign;
 }
 
-FieldAssignment RhsParser::Parser::parse_native_call_value() {
-  FieldAssignment assign;
-  assign.type = RhsValueType::NATIVE_CALL;
-
-  Token name = consume(Token::TOK_IDENTIFIER, "Expected native function name");
-  assign.native_call_name = name.text;
-
-  consume(Token::TOK_LPAREN, "Expected '(' after native function name");
-  if (!check(Token::TOK_RPAREN)) {
-    assign.native_call_args.push_back(parse_value());
-    while (match(Token::TOK_COMMA)) {
-      if (check(Token::TOK_RPAREN))
-        break;
-      assign.native_call_args.push_back(parse_value());
-    }
-  }
-  consume(Token::TOK_RPAREN, "Expected ')' after native function arguments");
-
-  return assign;
-}
-
 FieldAssignment RhsParser::Parser::parse_field_assignment() {
   FieldAssignment assign;
 
@@ -894,8 +843,6 @@ FieldAssignment RhsParser::Parser::parse_field_assignment() {
   assign.numeric_expr = std::move(value.numeric_expr);
   assign.string_literal = std::move(value.string_literal);
   assign.var_ref = std::move(value.var_ref);
-  assign.native_call_name = std::move(value.native_call_name);
-  assign.native_call_args = std::move(value.native_call_args);
   assign.has_precomputed_literal = value.has_precomputed_literal;
   assign.precomputed_literal = std::move(value.precomputed_literal);
 

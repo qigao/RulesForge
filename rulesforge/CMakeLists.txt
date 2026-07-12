@@ -12,14 +12,13 @@ add_library(${TARGET_NAME} STATIC ${SOURCES})
 
 target_link_libraries(
     ${TARGET_NAME}
-    PUBLIC  TurboNet::Utils Threads::Threads
-    PRIVATE mir_static
+    PUBLIC  TurboUtils::Core Threads::Threads
 )
 target_include_directories(
     ${TARGET_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                           $<INSTALL_INTERFACE:include/rulesforge>
                    PRIVATE ${CMAKE_SOURCE_DIR}/parser/include
-                           ${CMAKE_SOURCE_DIR}/tools/mir
+
 )
 if(MSVC)
     target_compile_options(${TARGET_NAME} PUBLIC /bigobj)
@@ -39,13 +38,17 @@ if(WIN32)
     target_compile_definitions(
         ${TARGET_NAME} PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN
     )
+    # Keep runtime DLLs beside every generated executable.
     add_custom_command(
         TARGET ${TARGET_NAME}
         POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:TurboScript::TurboScript>
-                $<TARGET_FILE_DIR:${TARGET_NAME}>
+                $<TARGET_FILE:TurboUtils::Parser>
+                $<TARGET_FILE:TurboUtils::Mustache>
+                $<TARGET_FILE:TurboUtils::Core>
+                "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
         COMMAND_EXPAND_LISTS
+        VERBATIM
     )
 endif()
 

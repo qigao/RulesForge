@@ -1,11 +1,12 @@
 find_package(cxxopts REQUIRED)
 
 add_executable(capi_demo capi_demo.cpp)
-target_link_libraries(capi_demo PRIVATE rule_forge cxxopts::cxxopts TurboNet::Parser TurboNet::Utils)
+target_link_libraries(capi_demo PRIVATE rule_forge cxxopts::cxxopts TurboUtils::Parser TurboUtils::Core)
 set_target_properties(capi_demo PROPERTIES FOLDER capi/examples)
 
 # Copy sample files to output directory
 configure_file(payments.rfl ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/payments.rfl COPYONLY)
+configure_file(payments.schema ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/payments.schema COPYONLY)
 configure_file(payments_test_data.csv ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/payments_test_data.csv COPYONLY)
 configure_file(payments_test_data.json ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/payments_test_data.json COPYONLY)
 
@@ -15,8 +16,9 @@ if(BUILD_TESTING OR ENABLE_TESTS)
     COMMAND
       $<TARGET_FILE:capi_demo>
       -r payments.rfl
+      -s payments.schema
       -j payments_test_data.json
-      -m testOrders:com.example.pricing.Order
+      -m testOrders:Order
       -q OrdersWithDiscount
       -b order
       -f quantity,unitPrice,finalPrice
@@ -27,8 +29,9 @@ if(BUILD_TESTING OR ENABLE_TESTS)
     COMMAND
       $<TARGET_FILE:capi_demo>
       -r payments.rfl
+      -s payments.schema
       -c payments_test_data.csv
-      -T com.example.pricing.Order
+      -T Order
       -q OrdersWithDiscount
       -b order
       -f quantity,unitPrice,finalPrice
@@ -39,8 +42,9 @@ if(BUILD_TESTING OR ENABLE_TESTS)
     COMMAND
       $<TARGET_FILE:capi_demo>
       -r payments.rfl
+      -s payments.schema
       -c payments_test_data.csv
-      -T com.example.pricing.Order
+      -T Order
       --validation warn
       --trace
       --memory

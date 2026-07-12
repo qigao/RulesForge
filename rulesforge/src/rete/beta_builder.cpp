@@ -60,18 +60,6 @@ void collect_leaf_constraints(ConstraintNode const* node, std::vector<ParsedCons
     }
 }
 
-std::optional<rulesforge::MirRuntimePredicateRef>
-make_mir_runtime_predicate(rulesforge::MirRuntimePredicateKind kind,
-                           std::optional<std::size_t> predicate_id,
-                           CompareOp compare_op = CompareOp::None,
-                           TemporalOp temporal_op = TemporalOp::None,
-                           std::int64_t window_ms = 0) {
-    if (!predicate_id) {
-        return std::nullopt;
-    }
-    return rulesforge::MirRuntimePredicateRef{kind, *predicate_id, compare_op, temporal_op, window_ms};
-}
-
 struct FieldInfo {
     FieldType type = FT_Unknown;
     std::vector<TypeParameter> type_params;
@@ -195,7 +183,7 @@ bool is_declared_numeric_field(std::optional<FieldType> type) {
     }
 }
 
-bool is_declared_mir_scalar_field(std::optional<FieldType> type) {
+bool is_declared_runtime_scalar_field(std::optional<FieldType> type) {
     if (!type.has_value()) return false;
     switch (*type) {
         case FT_String:
@@ -259,7 +247,7 @@ bool is_fact_list_projection(FieldInfo const* first_field_info,
         && (path.size() > 1 || field_name.find('.') != std::string::npos);
 }
 
-enum class MirCompareFieldKind {
+enum class RuntimeCompareFieldKind {
     None,
     Scalar,
     List,
@@ -268,60 +256,60 @@ enum class MirCompareFieldKind {
     FactList,
 };
 
-MirCompareFieldKind mir_compare_field_kind(FieldInfo const* field_info, std::optional<FieldType> type) {
-    if (is_declared_mir_scalar_field(type)) {
-        return MirCompareFieldKind::Scalar;
+RuntimeCompareFieldKind runtime_compare_field_kind(FieldInfo const* field_info, std::optional<FieldType> type) {
+    if (is_declared_runtime_scalar_field(type)) {
+        return RuntimeCompareFieldKind::Scalar;
     }
     if (field_info != nullptr) {
         if (is_declared_fact_list_field(field_info)) {
-            return MirCompareFieldKind::FactList;
+            return RuntimeCompareFieldKind::FactList;
         }
         type = field_info->type;
     }
     if (!type.has_value()) {
-        return MirCompareFieldKind::None;
+        return RuntimeCompareFieldKind::None;
     }
     switch (*type) {
         case FT_List:
-            return MirCompareFieldKind::List;
+            return RuntimeCompareFieldKind::List;
         case FT_Set:
-            return MirCompareFieldKind::Set;
+            return RuntimeCompareFieldKind::Set;
         case FT_Map:
-            return MirCompareFieldKind::Map;
+            return RuntimeCompareFieldKind::Map;
         default:
-            return MirCompareFieldKind::None;
+            return RuntimeCompareFieldKind::None;
     }
 }
 
-bool is_mir_compare_value_supported(ConstraintValue const& value) {
+bool is_runtime_compare_value_supported(ConstraintValue const& value) {
     return std::holds_alternative<int64_t>(value)
         || std::holds_alternative<double>(value)
         || std::holds_alternative<std::string>(value)
         || std::holds_alternative<NilValue>(value);
 }
 
-bool is_mir_compare_literal_supported(ConstraintValue const& value, MirCompareFieldKind field_kind) {
+bool is_runtime_compare_literal_supported(ConstraintValue const& value, RuntimeCompareFieldKind field_kind) {
     if (std::holds_alternative<NilValue>(value)) {
         return true;
     }
     switch (field_kind) {
-        case MirCompareFieldKind::Scalar:
-            return is_mir_compare_value_supported(value);
-        case MirCompareFieldKind::List:
+        case RuntimeCompareFieldKind::Scalar:
+            return is_runtime_compare_value_supported(value);
+        case RuntimeCompareFieldKind::List:
             return std::holds_alternative<std::shared_ptr<TypedList>>(value);
-        case MirCompareFieldKind::Set:
+        case RuntimeCompareFieldKind::Set:
             return std::holds_alternative<std::shared_ptr<ValueSet>>(value);
-        case MirCompareFieldKind::Map:
+        case RuntimeCompareFieldKind::Map:
             return std::holds_alternative<std::shared_ptr<ValueMap>>(value);
-        case MirCompareFieldKind::FactList:
+        case RuntimeCompareFieldKind::FactList:
             return std::holds_alternative<FactList>(value);
-        case MirCompareFieldKind::None:
+        case RuntimeCompareFieldKind::None:
             return false;
     }
     return false;
 }
 
-bool is_mir_map_key_supported(ConstraintValue const& value) {
+bool is_runtime_map_key_supported(ConstraintValue const& value) {
     return std::holds_alternative<int64_t>(value)
         || std::holds_alternative<double>(value)
         || std::holds_alternative<std::string>(value)
@@ -332,10 +320,10 @@ bool is_mir_map_key_supported(ConstraintValue const& value) {
         || std::holds_alternative<std::shared_ptr<ValueMap>>(value);
 }
 
-bool is_mir_value_list_supported(std::vector<ConstraintValue> const& values) {
+bool is_runtime_value_list_supported(std::vector<ConstraintValue> const& values) {
     return !values.empty()
         && std::all_of(values.begin(), values.end(), [](ConstraintValue const& value) {
-            return is_mir_compare_value_supported(value);
+            return is_runtime_compare_value_supported(value);
         });
 }
 
@@ -348,19 +336,19 @@ bool supported_compare_constraint(ParsedConstraint const& constraint,
         && constraint.op != CompareOp::LT && constraint.op != CompareOp::GE && constraint.op != CompareOp::LE) {
         return false;
     }
-    auto const left_kind = mir_compare_field_kind(left_field_info, left_field_type);
-    if (left_kind == MirCompareFieldKind::None) {
+    auto const left_kind = runtime_compare_field_kind(left_field_info, left_field_type);
+    if (left_kind == RuntimeCompareFieldKind::None) {
         return false;
     }
     bool const equality_op = constraint.op == CompareOp::EQ || constraint.op == CompareOp::NE;
     if (constraint.right_literal) {
-        if (!equality_op && left_kind != MirCompareFieldKind::Scalar) {
+        if (!equality_op && left_kind != RuntimeCompareFieldKind::Scalar) {
             return false;
         }
         if (std::holds_alternative<NilValue>(*constraint.right_literal) && !equality_op) {
             return false;
         }
-        return is_mir_compare_literal_supported(*constraint.right_literal, left_kind);
+        return is_runtime_compare_literal_supported(*constraint.right_literal, left_kind);
     }
     if (constraint.right_bound_field) {
         auto const right_type = lookup_bound_field_type(field_types, binding_fact_types, *constraint.right_bound_field);
@@ -368,20 +356,20 @@ bool supported_compare_constraint(ParsedConstraint const& constraint,
             field_types,
             binding_fact_types,
             *constraint.right_bound_field);
-        auto const right_kind = mir_compare_field_kind(right_field_info, right_type);
-        if (left_kind == MirCompareFieldKind::Scalar) {
-            return right_kind == MirCompareFieldKind::Scalar;
+        auto const right_kind = runtime_compare_field_kind(right_field_info, right_type);
+        if (left_kind == RuntimeCompareFieldKind::Scalar) {
+            return right_kind == RuntimeCompareFieldKind::Scalar;
         }
         return equality_op && left_kind == right_kind;
     }
-    return left_kind == MirCompareFieldKind::Scalar;
+    return left_kind == RuntimeCompareFieldKind::Scalar;
 }
 
-bool is_declared_mir_map_key_field(FieldInfo const* field_info) {
+bool is_declared_runtime_map_key_field(FieldInfo const* field_info) {
     if (field_info == nullptr) {
         return false;
     }
-    if (is_declared_mir_scalar_field(field_info->type)) {
+    if (is_declared_runtime_scalar_field(field_info->type)) {
         return true;
     }
     return field_info->type == FT_List
@@ -429,14 +417,14 @@ bool supported_collection_constraint(ParsedConstraint const& constraint,
         if (is_declared_fact_list_field(left_field_info)) {
             if (is_fact_list_projection(left_field_info, constraint.cached_left_field_path, constraint.left_field)) {
                 if (constraint.right_literal) {
-                    return is_mir_compare_value_supported(*constraint.right_literal);
+                    return is_runtime_compare_value_supported(*constraint.right_literal);
                 }
                 if (constraint.right_bound_field) {
                     auto const right_type = lookup_bound_field_type(
                         field_types,
                         binding_fact_types,
                         *constraint.right_bound_field);
-                    return is_declared_mir_scalar_field(right_type);
+                    return is_declared_runtime_scalar_field(right_type);
                 }
                 return false;
             }
@@ -455,7 +443,7 @@ bool supported_collection_constraint(ParsedConstraint const& constraint,
         if (!is_declared_scalar_collection_field(left_field_info)) {
             return false;
         }
-        if (constraint.right_literal && is_mir_compare_value_supported(*constraint.right_literal)) {
+        if (constraint.right_literal && is_runtime_compare_value_supported(*constraint.right_literal)) {
             return true;
         }
         if (constraint.right_bound_field) {
@@ -463,7 +451,7 @@ bool supported_collection_constraint(ParsedConstraint const& constraint,
                 field_types,
                 binding_fact_types,
                 *constraint.right_bound_field);
-            return is_declared_mir_scalar_field(right_type);
+            return is_declared_runtime_scalar_field(right_type);
         }
         return false;
     }
@@ -480,7 +468,7 @@ bool supported_collection_constraint(ParsedConstraint const& constraint,
                 return true;
             }
         }
-        if (!is_declared_mir_scalar_field(left_field_info ? std::optional<FieldType>{left_field_info->type}
+        if (!is_declared_runtime_scalar_field(left_field_info ? std::optional<FieldType>{left_field_info->type}
                                                          : std::nullopt)
             || !constraint.right_bound_field) {
             return false;
@@ -516,7 +504,7 @@ bool supported_map_key_constraint(ParsedConstraint const& constraint,
                                                  : std::nullopt)) {
         return false;
     }
-    if (constraint.right_literal && is_mir_map_key_supported(*constraint.right_literal)) {
+    if (constraint.right_literal && is_runtime_map_key_supported(*constraint.right_literal)) {
         return true;
     }
     if (constraint.right_bound_field) {
@@ -524,12 +512,12 @@ bool supported_map_key_constraint(ParsedConstraint const& constraint,
             field_types,
             binding_fact_types,
             *constraint.right_bound_field);
-        return is_declared_mir_map_key_field(right_field_info);
+        return is_declared_runtime_map_key_field(right_field_info);
     }
     return false;
 }
 
-std::optional<rulesforge::MirRuntimePredicateRef>
+std::optional<rulesforge::RuntimePredicateRef>
 build_runtime_predicate_for_constraint(
     KnowledgeBase const& kb,
     ParsedConstraint const& constraint,
@@ -538,10 +526,11 @@ build_runtime_predicate_for_constraint(
     FieldInfo const* left_field_info,
     std::optional<FieldType> left_field_type,
     std::optional<FieldType> right_field_type = std::nullopt) {
+    (void)kb;
     (void)right_field_type;
     if (constraint.temporal_constraint) {
-        return rulesforge::MirRuntimePredicateRef{
-            rulesforge::MirRuntimePredicateKind::Temporal,
+        return rulesforge::RuntimePredicateRef{
+            rulesforge::RuntimePredicateKind::Temporal,
             0,
             CompareOp::None,
             constraint.temporal_constraint->op,
@@ -552,15 +541,11 @@ build_runtime_predicate_for_constraint(
         if (!constraint.right_value_list) {
             return std::nullopt;
         }
-        auto predicate_id = kb.mir_value_list_predicate_id(constraint.op, *constraint.right_value_list);
-        if (predicate_id) {
-            return make_mir_runtime_predicate(rulesforge::MirRuntimePredicateKind::ValueList, predicate_id);
-        }
-        if (!is_mir_value_list_supported(*constraint.right_value_list)) {
+        if (!is_runtime_value_list_supported(*constraint.right_value_list)) {
             return std::nullopt;
         }
-        return rulesforge::MirRuntimePredicateRef{
-            rulesforge::MirRuntimePredicateKind::CollectionContains,
+        return rulesforge::RuntimePredicateRef{
+            rulesforge::RuntimePredicateKind::CollectionContains,
             0,
             constraint.op == CompareOp::In ? CompareOp::MemberOf : CompareOp::NotMemberOf};
     }
@@ -570,8 +555,8 @@ build_runtime_predicate_for_constraint(
             || !supported_string_rhs(constraint, field_types, binding_fact_types)) {
             return std::nullopt;
         }
-        return rulesforge::MirRuntimePredicateRef{
-            rulesforge::MirRuntimePredicateKind::StringMatches,
+        return rulesforge::RuntimePredicateRef{
+            rulesforge::RuntimePredicateKind::StringMatches,
             0,
             constraint.op};
     }
@@ -580,8 +565,8 @@ build_runtime_predicate_for_constraint(
             || !supported_string_rhs(constraint, field_types, binding_fact_types)) {
             return std::nullopt;
         }
-        return rulesforge::MirRuntimePredicateRef{
-            rulesforge::MirRuntimePredicateKind::StringAffix,
+        return rulesforge::RuntimePredicateRef{
+            rulesforge::RuntimePredicateKind::StringAffix,
             0,
             constraint.op};
     }
@@ -590,14 +575,14 @@ build_runtime_predicate_for_constraint(
             || !supported_string_rhs(constraint, field_types, binding_fact_types)) {
             return std::nullopt;
         }
-        return rulesforge::MirRuntimePredicateRef{rulesforge::MirRuntimePredicateKind::StringLengthIs};
+        return rulesforge::RuntimePredicateRef{rulesforge::RuntimePredicateKind::StringLengthIs};
     }
     if (constraint.op == CompareOp::ContainsKey || constraint.op == CompareOp::NotContainsKey) {
         if (!supported_map_key_constraint(constraint, left_field_info, field_types, binding_fact_types)) {
             return std::nullopt;
         }
-        return rulesforge::MirRuntimePredicateRef{
-            rulesforge::MirRuntimePredicateKind::MapContainsKey,
+        return rulesforge::RuntimePredicateRef{
+            rulesforge::RuntimePredicateKind::MapContainsKey,
             0,
             constraint.op};
     }
@@ -606,16 +591,16 @@ build_runtime_predicate_for_constraint(
             if (!supported_string_rhs(constraint, field_types, binding_fact_types)) {
                 return std::nullopt;
             }
-            return rulesforge::MirRuntimePredicateRef{
-                rulesforge::MirRuntimePredicateKind::StringContains,
+            return rulesforge::RuntimePredicateRef{
+                rulesforge::RuntimePredicateKind::StringContains,
                 0,
                 constraint.op};
         }
         if (!supported_collection_constraint(constraint, left_field_info, field_types, binding_fact_types)) {
             return std::nullopt;
         }
-        return rulesforge::MirRuntimePredicateRef{
-            rulesforge::MirRuntimePredicateKind::CollectionContains,
+        return rulesforge::RuntimePredicateRef{
+            rulesforge::RuntimePredicateKind::CollectionContains,
             0,
             constraint.op};
     }
@@ -623,22 +608,20 @@ build_runtime_predicate_for_constraint(
         if (!supported_collection_constraint(constraint, left_field_info, field_types, binding_fact_types)) {
             return std::nullopt;
         }
-        return rulesforge::MirRuntimePredicateRef{
-            rulesforge::MirRuntimePredicateKind::CollectionContains,
+        return rulesforge::RuntimePredicateRef{
+            rulesforge::RuntimePredicateKind::CollectionContains,
             0,
             constraint.op};
     }
 
     if (constraint.right_arith_expr) {
-        auto predicate_id = kb.mir_numeric_expression_predicate_id(constraint.op, *constraint.right_arith_expr);
-        return make_mir_runtime_predicate(rulesforge::MirRuntimePredicateKind::NumericExpression, predicate_id);
+        return std::nullopt;
     }
 
     if (constraint.right_literal && is_declared_numeric_field(left_field_type)
         && (std::holds_alternative<int64_t>(*constraint.right_literal)
             || std::holds_alternative<double>(*constraint.right_literal))) {
-        auto predicate_id = kb.mir_numeric_literal_predicate_id(constraint.op, *constraint.right_literal);
-        return make_mir_runtime_predicate(rulesforge::MirRuntimePredicateKind::NumericLiteral, predicate_id);
+        return std::nullopt;
     }
 
     if (supported_compare_constraint(
@@ -647,20 +630,19 @@ build_runtime_predicate_for_constraint(
             left_field_type,
             field_types,
             binding_fact_types)) {
-        auto predicate_id = kb.mir_compare_predicate_id(constraint.op);
-        return make_mir_runtime_predicate(rulesforge::MirRuntimePredicateKind::Compare, predicate_id);
+        return std::nullopt;
     }
 
     return std::nullopt;
 }
 
-std::vector<std::optional<rulesforge::MirRuntimePredicateRef>>
+std::vector<std::optional<rulesforge::RuntimePredicateRef>>
 build_runtime_predicates(KnowledgeBase const& kb,
                          FieldTypeIndex const& field_types,
                          std::map<std::string, std::string> const& binding_fact_types,
                          std::string const& fact_type,
                          std::vector<ParsedConstraint> const& constraints) {
-    std::vector<std::optional<rulesforge::MirRuntimePredicateRef>> result;
+    std::vector<std::optional<rulesforge::RuntimePredicateRef>> result;
     result.reserve(constraints.size());
     for (auto const& constraint : constraints) {
         FieldInfo const* left_field_info = nullptr;
@@ -723,9 +705,6 @@ build_runtime_predicates(KnowledgeBase const& kb,
             left_field_info,
             left_type,
             right_type);
-        if (!predicate && constraint.op != CompareOp::None) {
-            throw std::runtime_error("MIR lowering failed for constraint: " + constraint_to_string(constraint));
-        }
         result.push_back(std::move(predicate));
     }
     return result;
@@ -979,7 +958,7 @@ BetaNetworkBuilder::create_standard_node(int pattern_depth,
 
     std::shared_ptr<BaseJoinNode> join_node;
     auto const field_types = build_field_type_index(kb_.get_parser_state().parsed_declarations);
-    auto mir_runtime_predicates = build_runtime_predicates(
+    auto runtime_predicates = build_runtime_predicates(
         kb_,
         field_types,
         binding_to_fact_type_,
@@ -992,11 +971,12 @@ BetaNetworkBuilder::create_standard_node(int pattern_depth,
         key.kind = NodeKind::CrossProductJoin;
         key.constraints = join_constraints;
         key.bindings = binding_to_idx_;
+        key.eval_scalar_fields = inline_binding_to_field_;
 
         logd("  -> Creating/Sharing initial CrossProductJoinNode with {} join constraints", join_constraints.size());
         join_node = std::static_pointer_cast<BaseJoinNode>(
             network_.find_or_create_beta_node<CrossProductJoinNode>(parents, std::move(key),
-                join_constraints, binding_to_idx_, mir_runtime_predicates)
+                join_constraints, binding_to_idx_, inline_binding_to_field_, runtime_predicates)
         );
         return join_node;
     }
@@ -1021,12 +1001,13 @@ BetaNetworkBuilder::create_standard_node(int pattern_depth,
         key.kind = NodeKind::HashedJoin;
         key.constraints = join_constraints;
         key.bindings = binding_to_idx_;
+        key.eval_scalar_fields = inline_binding_to_field_;
         key.left_hash_info = *left_hash_info;
         key.right_hash_field = *right_hash_field;
 
         join_node = std::static_pointer_cast<BaseJoinNode>(
             network_.find_or_create_beta_node<HashedJoinNode>(parents, std::move(key),
-                join_constraints, binding_to_idx_, mir_runtime_predicates,
+                join_constraints, binding_to_idx_, inline_binding_to_field_, runtime_predicates,
                 *left_hash_info, *right_hash_field)
         );
     } else {
@@ -1036,10 +1017,11 @@ BetaNetworkBuilder::create_standard_node(int pattern_depth,
         key.kind = NodeKind::CrossProductJoin;
         key.constraints = join_constraints;
         key.bindings = binding_to_idx_;
+        key.eval_scalar_fields = inline_binding_to_field_;
 
         join_node = std::static_pointer_cast<BaseJoinNode>(
              network_.find_or_create_beta_node<CrossProductJoinNode>(parents, std::move(key),
-                 join_constraints, binding_to_idx_, mir_runtime_predicates)
+                 join_constraints, binding_to_idx_, inline_binding_to_field_, runtime_predicates)
         );
     }
 
@@ -1059,9 +1041,10 @@ BetaNetworkBuilder::create_negative_node(ParsedPattern& not_pattern,
     key.kind = NodeKind::Not;
     key.constraints = join_constraints;
     key.bindings = binding_to_idx_;
+    key.eval_scalar_fields = inline_binding_to_field_;
 
     auto const field_types = build_field_type_index(kb_.get_parser_state().parsed_declarations);
-    auto mir_runtime_predicates = build_runtime_predicates(
+    auto runtime_predicates = build_runtime_predicates(
         kb_,
         field_types,
         binding_to_fact_type_,
@@ -1072,7 +1055,8 @@ BetaNetworkBuilder::create_negative_node(ParsedPattern& not_pattern,
         std::move(key),
         join_constraints,
         binding_to_idx_,
-        mir_runtime_predicates);
+        inline_binding_to_field_,
+        runtime_predicates);
     return node;
 }
 
@@ -1089,9 +1073,10 @@ BetaNetworkBuilder::create_existential_node(ParsedPattern& exists_pattern,
     key.kind = NodeKind::Exists;
     key.constraints = join_constraints;
     key.bindings = binding_to_idx_;
+    key.eval_scalar_fields = inline_binding_to_field_;
 
     auto const field_types = build_field_type_index(kb_.get_parser_state().parsed_declarations);
-    auto mir_runtime_predicates = build_runtime_predicates(
+    auto runtime_predicates = build_runtime_predicates(
         kb_,
         field_types,
         binding_to_fact_type_,
@@ -1102,7 +1087,8 @@ BetaNetworkBuilder::create_existential_node(ParsedPattern& exists_pattern,
         std::move(key),
         join_constraints,
         binding_to_idx_,
-        mir_runtime_predicates);
+        inline_binding_to_field_,
+        runtime_predicates);
     return node;
 }
 
@@ -1116,20 +1102,11 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::create_eval_node(ParsedPattern& p)
     key.bindings = binding_to_idx_;
     key.eval_scalar_fields = inline_binding_to_field_;
 
-    std::optional<rulesforge::MirRuntimePredicateRef> mir_eval_expression_predicate;
-    std::vector<std::string> mir_eval_expression_variables;
+    std::optional<rulesforge::RuntimePredicateRef> eval_runtime_predicate;
+    std::vector<std::string> eval_runtime_variables;
     std::vector<EvalNode::EvalRuntimeArgument> runtime_arguments;
     if (p.eval_expression) {
-        mir_eval_expression_predicate = make_mir_runtime_predicate(
-            rulesforge::MirRuntimePredicateKind::EvalExpression,
-            kb_.mir_eval_expression_predicate_id(*p.eval_expression));
-        if (mir_eval_expression_predicate) {
-            auto const* variables = kb_.mir_eval_expression_predicate_variables(
-                mir_eval_expression_predicate->predicate_id);
-            if (variables != nullptr) {
-                mir_eval_expression_variables = *variables;
-            }
-        } else if (auto external_call = parse_external_eval_call(*p.eval_expression)) {
+        if (auto external_call = parse_external_eval_call(*p.eval_expression)) {
             bool supported_arguments = true;
             runtime_arguments.clear();
             runtime_arguments.reserve(external_call->arguments.size());
@@ -1144,23 +1121,16 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::create_eval_node(ParsedPattern& p)
                     case ExternalEvalArgumentKind::Literal:
                         runtime_argument.kind = EvalNode::EvalRuntimeArgument::Kind::Literal;
                         break;
-                    case ExternalEvalArgumentKind::NumericExpression: {
+                    case ExternalEvalArgumentKind::NumericExpression:
                         runtime_argument.kind = EvalNode::EvalRuntimeArgument::Kind::NumericExpression;
-                        auto expression_id = kb_.mir_numeric_value_expression_id(argument.text);
-                        if (!expression_id) {
-                            supported_arguments = false;
-                            break;
-                        }
-                        runtime_argument.expression_id = *expression_id;
                         break;
-                    }
                 }
                 runtime_arguments.push_back(std::move(runtime_argument));
             }
             if (supported_arguments) {
-                mir_eval_expression_predicate = rulesforge::RuntimePredicateRef{
+                eval_runtime_predicate = rulesforge::RuntimePredicateRef{
                     rulesforge::RuntimePredicateBackend::Native,
-                    rulesforge::MirRuntimePredicateKind::External,
+                    rulesforge::RuntimePredicateKind::External,
                     0,
                     CompareOp::None,
                     TemporalOp::None,
@@ -1176,8 +1146,8 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::create_eval_node(ParsedPattern& p)
         std::move(p.eval_expression.value_or("")),
         binding_to_idx_,
         inline_binding_to_field_,
-        mir_eval_expression_predicate,
-        std::move(mir_eval_expression_variables),
+        eval_runtime_predicate,
+        std::move(eval_runtime_variables),
         std::move(runtime_arguments));
 
     logd("  -> Created/Shared EvalNode (ID: {}), code: '{}'", node->id, p.eval_expression.value_or(""));
@@ -1238,7 +1208,7 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::create_unnest_node(ParsedPattern& 
     collect_leaf_constraints(p.constraint_root.get(), constraints);
 
     auto const field_types = build_field_type_index(kb_.get_parser_state().parsed_declarations);
-    auto mir_runtime_predicates = build_runtime_predicates(
+    auto runtime_predicates = build_runtime_predicates(
         kb_,
         field_types,
         binding_to_fact_type_,
@@ -1250,7 +1220,7 @@ std::shared_ptr<ReteNode> BetaNetworkBuilder::create_unnest_node(ParsedPattern& 
         p.fact_type,
         binding_to_idx_,
         std::move(constraints),
-        std::move(mir_runtime_predicates));
+        std::move(runtime_predicates));
 
     if (last_node_) {
         logd("    -> Attaching UnnestNode ID {} to previous node ID {}", node->id, last_node_->id);

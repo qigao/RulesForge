@@ -71,3 +71,60 @@ inline bool operator==(ValueSet const &a, ValueSet const &b) { return a.values =
 inline bool operator!=(ValueSet const &a, ValueSet const &b) { return !(a == b); }
 inline bool operator==(ValueMap const &a, ValueMap const &b) { return a.entries == b.entries; }
 inline bool operator!=(ValueMap const &a, ValueMap const &b) { return !(a == b); }
+
+// ---------------------------------------------------------------------------
+// TMP Utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief 编译期检测 T 是否为 ConstraintValue 的合法成员类型。
+ *
+ * 单一事实源：修改 ConstraintValue 的 variant 定义时只需在此同步，
+ * 所有使用此 concept 的接口约束自动更新。
+ *
+ * 使用示例（C++20 requires）：
+ * @code
+ *   template <ConstraintValueMember T>
+ *   std::optional<T> getFieldAs(std::string_view field) const;
+ * @endcode
+ */
+template <typename T>
+concept ConstraintValueMember =
+    std::is_same_v<T, std::string>                 ||
+    std::is_same_v<T, int64_t>                     ||
+    std::is_same_v<T, double>                      ||
+    std::is_same_v<T, FactList>                    ||
+    std::is_same_v<T, NilValue>                    ||
+    std::is_same_v<T, std::shared_ptr<TypedList>>  ||
+    std::is_same_v<T, std::shared_ptr<ValueSet>>   ||
+    std::is_same_v<T, std::shared_ptr<ValueMap>>;
+
+/**
+ * @brief 编译期检测 T 是否为 getFieldAs 支持的安全提取类型。
+ *
+ * 除 ConstraintValue 的直接成员外，还包含 bool（从 int64_t 0/1 转换）。
+ */
+template <typename T>
+concept ConstraintValueExtractable =
+    ConstraintValueMember<T> || std::is_same_v<T, bool>;
+
+/**
+ * @brief 变参继承 Mixin（标准 overloaded 惯用法）。
+ *
+ * 用于以 lambda 列表直接访问 std::variant，消除手写 visitor 样板。
+ *
+ * 使用示例：
+ * @code
+ *   std::visit(overloaded{
+ *       [](std::string const& s) { ... },
+ *       [](int64_t i)            { ... },
+ *       [](auto&&)               { ... },  // 兜底分支
+ *   }, constraint_value);
+ * @endcode
+ */
+template <typename... Fs>
+struct overloaded : Fs... { using Fs::operator()...; };
+
+// C++17 推导指引（CTAD），C++20 中可省略但保留以兼容混合编译单元
+template <typename... Fs>
+overloaded(Fs...) -> overloaded<Fs...>;

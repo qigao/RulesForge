@@ -8,8 +8,8 @@
             "name": "win-paths",
             "hidden": true,
             "cacheVariables": {
-                "TURBONET_ROOT": "c:/projects/cpp/external/pkgs/turbonet",
-                "TURBOSCRIPT_ROOT": "c:/projects/cpp/external/pkgs/turbo_script",
+                "TURBO_UTILS_ROOT": "C:/projects/cpp/external/pkgs/turboutils",
+                "CMAKE_INSTALL_PREFIX": "C:/projects/cpp/external/pkgs/rules_forge/",
                 "CMAKE_MAKE_PROGRAM": "C:/Users/lockg/scoop/shims/ninja.exe",
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
                 "VCPKG_MANIFEST_MODE": "ON"
@@ -31,8 +31,7 @@
             "hidden": true,
             "cacheVariables": {
                 "VCPKG_TARGET_TRIPLET": "x64-linux",
-                "TURBONET_ROOT": "/opt/turbonet",
-                "TURBOSCRIPT_ROOT": "/opt/turboscript",
+                "TURBO_UTILS_ROOT": "/opt/turboutils",
                 "CMAKE_MAKE_PROGRAM": "/usr/bin/ninja"
             },
             "environment": {

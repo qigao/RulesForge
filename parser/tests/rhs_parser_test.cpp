@@ -124,34 +124,6 @@ suite("RhsParser") {
         }
     }
 
-    group("invoke") {
-        it("parses invoke with mixed args") {
-            auto actions = RhsParser::parse(
-                R"(invoke sendWebhook($user.id, "alert", true, 42))", make_bindings());
-
-            check(actions.size() == 1);
-            check(actions[0].type == RhsActionType::INVOKE);
-            check(actions[0].invoke_function == "sendWebhook");
-            check(actions[0].invoke_args.size() == 4);
-            check(actions[0].invoke_args[0].type == RhsValueType::VAR_REF);
-            check(actions[0].invoke_args[1].type == RhsValueType::STRING);
-            check(actions[0].invoke_args[2].type == RhsValueType::BOOLEAN);
-            check(actions[0].invoke_args[3].type == RhsValueType::NUMERIC);
-        }
-
-        it("parses native call in assignment") {
-            auto actions = RhsParser::parse(
-                R"(update $user { score = pluginMetric($item.price, 2) })", make_bindings());
-
-            check(actions.size() == 1);
-            check(actions[0].type == RhsActionType::UPDATE);
-            check(actions[0].assignments.size() == 1);
-            check(actions[0].assignments[0].type == RhsValueType::NATIVE_CALL);
-            check(actions[0].assignments[0].native_call_name == "pluginMetric");
-            check(actions[0].assignments[0].native_call_args.size() == 2);
-        }
-    }
-
     // ========================================================================
     // Field Assignment Value Types
     // ========================================================================
@@ -508,6 +480,25 @@ suite("RhsParser") {
     // ========================================================================
 
     group("errors") {
+        it("rejects external invoke actions") {
+            std::string error;
+            auto actions = RhsParser::parse(
+                R"(invoke sendWebhook($user.id))", make_bindings(), &error);
+
+            check_empty(actions);
+            check_string_contains(error, "Expected action keyword");
+        }
+
+        it("rejects external calls in assignments") {
+            std::string error;
+            auto actions = RhsParser::parse(
+                R"(update $user { score = pluginMetric($item.price, 2) })",
+                make_bindings(), &error);
+
+            check_empty(actions);
+            check_not_empty(error);
+        }
+
         it("returns empty on invalid syntax") {
             std::string err;
             auto actions = RhsParser::parse(

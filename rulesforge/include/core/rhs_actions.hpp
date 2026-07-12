@@ -22,7 +22,6 @@ enum class RhsActionType : uint8_t {
     RETRACT,
     HALT,
     SET_FOCUS,
-    INVOKE,
     IF,
     FOR,
     WHILE,
@@ -35,8 +34,7 @@ enum class RhsValueType : uint8_t {
     NUMERIC,      // Compiled numeric expression
     STRING,       // String literal
     VAR_REF,      // Variable reference ($var or $var.field)
-    BOOLEAN,      // Boolean literal (true/false)
-    NATIVE_CALL   // Native function call: fn(arg1, arg2)
+    BOOLEAN       // Boolean literal (true/false)
 };
 
 struct FieldAssignment {
@@ -45,8 +43,6 @@ struct FieldAssignment {
     std::shared_ptr<rulesforge::ExpressionDescriptor> numeric_expr;
     std::string string_literal;
     std::string var_ref;  // For VAR_REF type: "$var" or "$var.field"
-    std::string native_call_name;
-    std::vector<FieldAssignment> native_call_args;
     RhsValueType type = RhsValueType::STRING;
     bool has_precomputed_literal = false;
     ConstraintValue precomputed_literal;
@@ -77,6 +73,4 @@ struct CompiledAction {
     int max_iterations = 1000;        // WHILE safety limit
     std::shared_ptr<rulesforge::ExpressionDescriptor> switch_expr;  // SWITCH expression
     std::vector<SwitchCase> switch_cases;  // SWITCH cases
-    std::string invoke_function;       // INVOKE function name
-    std::vector<FieldAssignment> invoke_args;  // INVOKE arguments
 };

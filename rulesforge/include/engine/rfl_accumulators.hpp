@@ -31,6 +31,28 @@ struct IAccumulator {
     virtual bool supports_reverse() const { return false; }
 };
 
+/**
+ * @brief CRTP Mixin ：自動为派生类实现 clone()。
+ *
+ * 使用方式：派生类继承 AccumulatorBase<自身>而非直接继承 IAccumulator。
+ * CRTP 展开后等价于手写 `return std::make_unique<Derived>(*this);`，
+ * 但消除了每个子类的样板重复。
+ *
+ * @tparam Derived 具体的 Accumulator 子类（必须是可拷贝构造的）
+ *
+ * 注意：static_assert 放在 clone() 内部而非类定义处，因为 CRTP 声明时
+ * Derived 是不完全类型，只有方法实例化时才能检测 CopyConstructible。
+ */
+template <typename Derived>
+struct AccumulatorBase : IAccumulator {
+    std::unique_ptr<IAccumulator> clone() const final {
+        // static_assert 必须在此处（方法体内），Derived 在实例化 clone() 时已完整定义
+        static_assert(std::is_copy_constructible_v<Derived>,
+            "AccumulatorBase<Derived>: Derived must be copy constructible to support clone()");
+        return std::make_unique<Derived>(static_cast<Derived const&>(*this));
+    }
+};
+
 // --- Accumulator Registry for Extensibility ---
 class AccumulatorRegistry {
 public:
@@ -50,7 +72,7 @@ private:
 
 // --- Example Implementations ---
 
-class SumAccumulator : public IAccumulator {
+class SumAccumulator : public AccumulatorBase<SumAccumulator> {
 public:
     void accumulate(ConstraintValue const& value) override;
     void reverse(ConstraintValue const& value) override;
@@ -59,14 +81,13 @@ public:
     bool supports_reverse() const override { return true; }
 
     void clear() override;
-    std::unique_ptr<IAccumulator> clone() const override;
 
 private:
     double sum = 0.0;
     bool is_double = false;
 };
 
-class CountAccumulator : public IAccumulator {
+class CountAccumulator : public AccumulatorBase<CountAccumulator> {
 public:
     void accumulate(ConstraintValue const& value) override { count++; }
 
@@ -76,15 +97,13 @@ public:
 
     void clear() override { count = 0; }
 
-    std::unique_ptr<IAccumulator> clone() const override { return std::make_unique<CountAccumulator>(*this); }
-
     bool supports_reverse() const override { return true; }
 
 private:
     int64_t count = 0;
 };
 
-class AverageAccumulator : public IAccumulator {
+class AverageAccumulator : public AccumulatorBase<AverageAccumulator> {
 public:
     void accumulate(ConstraintValue const& value) override;
     void reverse(ConstraintValue const& value) override;
@@ -93,14 +112,13 @@ public:
     bool supports_reverse() const override { return true; }
 
     void clear() override;
-    std::unique_ptr<IAccumulator> clone() const override;
 
 private:
     double sum = 0.0;
     int64_t count = 0;
 };
 
-class MinAccumulator : public IAccumulator {
+class MinAccumulator : public AccumulatorBase<MinAccumulator> {
 public:
     void accumulate(ConstraintValue const& value) override;
     void reverse(ConstraintValue const& value) override;
@@ -109,7 +127,6 @@ public:
     bool supports_reverse() const override { return true; }
 
     void clear() override;
-    std::unique_ptr<IAccumulator> clone() const override;
 
 private:
     // We need to keep track of all values to correctly handle reverse
@@ -117,7 +134,7 @@ private:
     bool is_double = false;
 };
 
-class MaxAccumulator : public IAccumulator {
+class MaxAccumulator : public AccumulatorBase<MaxAccumulator> {
 public:
     void accumulate(ConstraintValue const& value) override;
     void reverse(ConstraintValue const& value) override;
@@ -126,7 +143,6 @@ public:
     bool supports_reverse() const override { return true; }
 
     void clear() override;
-    std::unique_ptr<IAccumulator> clone() const override;
 
 private:
     std::multiset<double> values;
@@ -134,24 +150,22 @@ private:
 };
 
 // Implements `collectList` (and is the target for `collect`)
-class CollectAccumulator : public IAccumulator {
+class CollectAccumulator : public AccumulatorBase<CollectAccumulator> {
 public:
     void accumulate(ConstraintValue const& value) override;
     void reverse(ConstraintValue const& value) override;
     ConstraintValue get_result() const override;
     void clear() override;
-    std::unique_ptr<IAccumulator> clone() const override;
     bool supports_reverse() const override { return true; }
 };
 
 // Implements `collectSet`
-class CollectSetAccumulator : public IAccumulator {
+class CollectSetAccumulator : public AccumulatorBase<CollectSetAccumulator> {
 public:
     void accumulate(ConstraintValue const& value) override;
     void reverse(ConstraintValue const& value) override;
     ConstraintValue get_result() const override;
     void clear() override;
-    std::unique_ptr<IAccumulator> clone() const override;
     bool supports_reverse() const override { return true; }
 };
 

@@ -3,7 +3,7 @@
  * @brief C ABI value bridge for RulesForge fact construction
  *
  * Provides C-compatible Value API that wraps RulesForge's C++ ConstraintValue.
- * Host code and TurboScript integration layers can use this bridge to build a
+ * Host code and native integration layers can use this bridge to build a
  * structured Value tree and convert it to a RulesForge Fact before insertion.
  */
 
