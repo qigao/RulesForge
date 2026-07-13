@@ -195,11 +195,24 @@ CXX_C_API ruleforge_status_t ruleforge_continuous_push_json_schema(
     int64_t event_time_ms, const char *fact_json,
     ruleforge_continuous_result_t *out_result);
 
+// Parses one schema-bound YAML mapping and commits it as one event step.
+CXX_C_API ruleforge_status_t ruleforge_continuous_push_yaml_schema(
+    ruleforge_continuous_session_t session, const char *schema_path,
+    const char *fact_type, const char *event_id, const char *entry_point,
+    int64_t event_time_ms, const char *fact_yaml,
+    ruleforge_continuous_result_t *out_result);
+
 // Selects all matching records, reads per-event metadata from bound fields,
-// and commits the selected records as one atomic continuous batch.
+// and commits the selected records as one atomic continuous batch. YAML paths
+// use YPATH syntax (for example, /events/*).
 CXX_C_API ruleforge_status_t ruleforge_continuous_push_json_path_schema(
     ruleforge_continuous_session_t session, const char *schema_path,
     const char *fact_type, const char *json_source, const char *json_path,
+    const char *event_id_field, const char *event_time_field,
+    const char *entry_point, ruleforge_continuous_result_t *out_result);
+CXX_C_API ruleforge_status_t ruleforge_continuous_push_yaml_path_schema(
+    ruleforge_continuous_session_t session, const char *schema_path,
+    const char *fact_type, const char *yaml_source, const char *yaml_path,
     const char *event_id_field, const char *event_time_field,
     const char *entry_point, ruleforge_continuous_result_t *out_result);
 CXX_C_API ruleforge_status_t ruleforge_continuous_push_csv_path_schema(
@@ -225,18 +238,28 @@ CXX_C_API ruleforge_status_t ruleforge_continuous_get_metrics(
     ruleforge_continuous_session_t session,
     ruleforge_continuous_metrics_t *out_metrics);
 
-// Incremental JSON DataBind adapter. Event metadata is fixed at creation;
+// Incremental JSON/YAML DataBind adapters. Event metadata is fixed at creation;
 // finish parses the complete object and commits exactly one event step.
 CXX_C_API ruleforge_status_t ruleforge_continuous_data_bind_stream_json_create(
+    ruleforge_continuous_session_t session, const char *schema_path,
+    const char *fact_type, const char *event_id, const char *entry_point,
+    int64_t event_time_ms, ruleforge_continuous_data_bind_stream_t *out_stream);
+CXX_C_API ruleforge_status_t ruleforge_continuous_data_bind_stream_yaml_create(
     ruleforge_continuous_session_t session, const char *schema_path,
     const char *fact_type, const char *event_id, const char *entry_point,
     int64_t event_time_ms, ruleforge_continuous_data_bind_stream_t *out_stream);
 
 // Incremental path-selected batch adapters. Metadata field names and entry
 // point are fixed at creation; finish atomically commits all selected events.
+// YAML paths use YPATH syntax.
 CXX_C_API ruleforge_status_t ruleforge_continuous_data_bind_stream_json_path_create(
     ruleforge_continuous_session_t session, const char *schema_path,
     const char *fact_type, const char *json_path, const char *event_id_field,
+    const char *event_time_field, const char *entry_point,
+    ruleforge_continuous_data_bind_stream_t *out_stream);
+CXX_C_API ruleforge_status_t ruleforge_continuous_data_bind_stream_yaml_path_create(
+    ruleforge_continuous_session_t session, const char *schema_path,
+    const char *fact_type, const char *yaml_path, const char *event_id_field,
     const char *event_time_field, const char *entry_point,
     ruleforge_continuous_data_bind_stream_t *out_stream);
 CXX_C_API ruleforge_status_t ruleforge_continuous_data_bind_stream_csv_path_create(
@@ -306,6 +329,33 @@ ruleforge_session_add_facts_json_path_schema(ruleforge_stateful_session_t sessio
                                              ruleforge_fact_t **out_facts,
                                              int *out_loaded_count);
 
+// Adds one schema-bound YAML fact.
+CXX_C_API ruleforge_status_t
+ruleforge_session_add_fact_yaml_schema(ruleforge_stateful_session_t session,
+                                       const char *schema_path,
+                                       const char *fact_type,
+                                       const char *fact_yaml,
+                                       ruleforge_fact_t *out_fact);
+
+// Adds the first schema-bound fact selected by a non-empty YPATH expression.
+CXX_C_API ruleforge_status_t
+ruleforge_session_add_fact_yaml_path_schema(ruleforge_stateful_session_t session,
+                                            const char *schema_path,
+                                            const char *fact_type,
+                                            const char *fact_yaml,
+                                            const char *yaml_path,
+                                            ruleforge_fact_t *out_fact);
+
+// Adds all schema-bound facts selected by a non-empty YPATH expression.
+CXX_C_API ruleforge_status_t
+ruleforge_session_add_facts_yaml_path_schema(ruleforge_stateful_session_t session,
+                                             const char *schema_path,
+                                             const char *fact_type,
+                                             const char *fact_yaml,
+                                             const char *yaml_path,
+                                             ruleforge_fact_t **out_facts,
+                                             int *out_loaded_count);
+
 // Adds one schema-bound binary fact.
 CXX_C_API ruleforge_status_t
 ruleforge_session_add_fact_binary_schema(ruleforge_stateful_session_t session,
@@ -345,7 +395,8 @@ ruleforge_session_add_facts_xml_schema(ruleforge_stateful_session_t session,
                                        ruleforge_fact_t **out_facts,
                                        int *out_loaded_count);
 
-// Creates incremental schema-bound input streams. Feed chunks as they arrive,
+// Creates incremental schema-bound input streams. YAML path parameters use
+// YPATH syntax. Feed chunks as they arrive,
 // then call finish to validate the complete result and batch-insert its facts.
 // A stream and its session must be used from the same thread. Destroying a
 // session with an active stream is rejected.
@@ -362,6 +413,20 @@ CXX_C_API ruleforge_status_t ruleforge_data_bind_stream_json_path_create(
 CXX_C_API ruleforge_status_t ruleforge_data_bind_stream_json_path_all_create(
     ruleforge_stateful_session_t session, const char *schema_path,
     const char *fact_type, const char *json_path,
+    ruleforge_data_bind_stream_t *out_stream);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_stream_yaml_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, ruleforge_data_bind_stream_t *out_stream);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_stream_yaml_all_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, ruleforge_data_bind_stream_t *out_stream);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_stream_yaml_path_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, const char *yaml_path,
+    ruleforge_data_bind_stream_t *out_stream);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_stream_yaml_path_all_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, const char *yaml_path,
     ruleforge_data_bind_stream_t *out_stream);
 CXX_C_API ruleforge_status_t ruleforge_data_bind_stream_csv_all_create(
     ruleforge_stateful_session_t session, const char *schema_path,

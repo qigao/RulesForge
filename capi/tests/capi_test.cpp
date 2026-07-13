@@ -356,6 +356,94 @@ end
             ruleforge_cleanup();
         }
 
+        it("loads YAML roots and YPATH-selected facts through TurboUtils DataBind") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+            auto schema_path = write_temp_schema(
+                "rulesforge_capi_databind_yaml.schema",
+                "schema Market [id(37), version(1), byte_order(little)]; "
+                "message Customer { int32 age; string name; }");
+            std::string drl = std::string("import \"") + schema_path.generic_string() + R"(";
+query "Adults"
+    $customer : Customer(age >= 18)
+end
+)";
+            check_int_eq(ruleforge_kb_load_drl(kb, drl.c_str()), RULES_FORGE_OK);
+
+            char const* root_yaml = "name: Alice\nage: 30\n";
+            ruleforge_stateful_session_t root_session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &root_session), RULES_FORGE_OK);
+            ruleforge_fact_t root_fact = nullptr;
+            check_int_eq(ruleforge_session_add_fact_yaml_schema(
+                             root_session, schema_path.string().c_str(), "Customer",
+                             root_yaml, &root_fact), RULES_FORGE_OK);
+            check_not_null(root_fact);
+
+            char const* yaml =
+                "customers:\n"
+                "  - name: Alice\n"
+                "    age: 30\n"
+                "  - name: Bob\n"
+                "    age: 17\n"
+                "ignored:\n"
+                "  - name: Mallory\n"
+                "    age: 40\n";
+            char const* yaml_path = "/customers/*";
+
+            ruleforge_stateful_session_t complete_session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &complete_session), RULES_FORGE_OK);
+            ruleforge_fact_t* complete_facts = nullptr;
+            int complete_count = 0;
+            check_int_eq(ruleforge_session_add_facts_yaml_path_schema(
+                             complete_session, schema_path.string().c_str(), "Customer",
+                             yaml, yaml_path, &complete_facts, &complete_count),
+                         RULES_FORGE_OK);
+            check_int_eq(complete_count, 2);
+
+            ruleforge_stateful_session_t first_session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &first_session), RULES_FORGE_OK);
+            ruleforge_fact_t first_fact = nullptr;
+            check_int_eq(ruleforge_session_add_fact_yaml_path_schema(
+                             first_session, schema_path.string().c_str(), "Customer",
+                             yaml, yaml_path, &first_fact), RULES_FORGE_OK);
+            char name[16] = {0};
+            size_t name_length = 0;
+            check_int_eq(ruleforge_fact_get_field_as_string(
+                             first_fact, "name", name, sizeof(name), &name_length),
+                         RULES_FORGE_OK);
+            check_str_eq(name, "Alice");
+
+            ruleforge_stateful_session_t stream_session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &stream_session), RULES_FORGE_OK);
+            ruleforge_data_bind_stream_t stream = nullptr;
+            check_int_eq(ruleforge_data_bind_stream_yaml_path_all_create(
+                             stream_session, schema_path.string().c_str(), "Customer",
+                             yaml_path, &stream), RULES_FORGE_OK);
+            size_t split = std::strlen(yaml) / 2;
+            check_int_eq(ruleforge_data_bind_stream_feed(stream, yaml, split), RULES_FORGE_OK);
+            check_int_eq(ruleforge_data_bind_stream_feed(
+                             stream, yaml + split, std::strlen(yaml) - split),
+                         RULES_FORGE_OK);
+            ruleforge_fact_t* stream_facts = nullptr;
+            int stream_count = 0;
+            check_int_eq(ruleforge_data_bind_stream_finish(
+                             stream, &stream_facts, &stream_count), RULES_FORGE_OK);
+            check_int_eq(stream_count, complete_count);
+            check_size_eq(ruleforge_session_get_fact_count(stream_session), 2);
+
+            ruleforge_fact_array_free(stream_facts);
+            ruleforge_fact_array_free(complete_facts);
+            check_int_eq(ruleforge_data_bind_stream_destroy(stream), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_destroy(stream_session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_destroy(first_session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_destroy(complete_session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_destroy(root_session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            std::filesystem::remove(schema_path);
+            ruleforge_cleanup();
+        }
+
         it("adds schema-bound extended scalar facts through TurboUtils DataBind") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;
@@ -1157,14 +1245,25 @@ end
             check_int_eq(ruleforge_continuous_result_destroy(result), RULES_FORGE_OK);
 
             result = nullptr;
-            check_int_eq(ruleforge_continuous_advance_watermark(session, 200, &result),
+            check_int_eq(ruleforge_continuous_push_yaml_schema(
+                             session, schema_path.string().c_str(), "Event", "event-2",
+                             "events", 101, "value: 8\n", &result),
+                         RULES_FORGE_OK);
+            check_int_eq(ruleforge_continuous_result_get_rules_fired(result), 1);
+            check_int_eq(ruleforge_continuous_acknowledge(
+                             session, ruleforge_continuous_result_get_batch_id(result)),
+                         RULES_FORGE_OK);
+            check_int_eq(ruleforge_continuous_result_destroy(result), RULES_FORGE_OK);
+
+            result = nullptr;
+            check_int_eq(ruleforge_continuous_advance_watermark(session, 201, &result),
                          RULES_FORGE_OK);
             int64_t watermark = 0;
             int has_watermark = 0;
             check_int_eq(ruleforge_continuous_result_get_watermark(
                              result, &watermark, &has_watermark), RULES_FORGE_OK);
             check_int_eq(has_watermark, 1);
-            check_int_eq(static_cast<int>(watermark), 200);
+            check_int_eq(static_cast<int>(watermark), 201);
             check_int_eq(ruleforge_continuous_acknowledge(
                              session, ruleforge_continuous_result_get_batch_id(result)),
                          RULES_FORGE_OK);
@@ -1172,7 +1271,7 @@ end
 
             ruleforge_continuous_metrics_t metrics{};
             check_int_eq(ruleforge_continuous_get_metrics(session, &metrics), RULES_FORGE_OK);
-            check_size_eq(metrics.accepted_events, 1);
+            check_size_eq(metrics.accepted_events, 2);
             check_size_eq(metrics.active_events, 0);
 
             check_int_eq(ruleforge_continuous_session_destroy(session), RULES_FORGE_OK);
@@ -1241,7 +1340,7 @@ end
             ruleforge_cleanup();
         }
 
-        it("commits path-selected JSON CSV and XML batches from documents and streams") {
+        it("commits path-selected JSON YAML CSV and XML batches from documents and streams") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;
             check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
@@ -1314,6 +1413,52 @@ end
             verify_batch(json_stream_session, result);
             check_int_eq(ruleforge_continuous_data_bind_stream_destroy(stream), RULES_FORGE_OK);
             check_int_eq(ruleforge_continuous_session_destroy(json_stream_session),
+                         RULES_FORGE_OK);
+
+            char const* yaml =
+                "events:\n"
+                "  - event_id: yaml-1\n"
+                "    event_time: 150\n"
+                "    value: 7\n"
+                "    region: west\n"
+                "  - event_id: yaml-2\n"
+                "    event_time: 151\n"
+                "    value: 9\n"
+                "    region: west\n"
+                "ignored:\n"
+                "  - event_id: yaml-3\n"
+                "    event_time: 152\n"
+                "    value: 11\n"
+                "    region: east\n";
+            char const* yaml_path = "/events/*";
+            auto yaml_complete = create_session();
+            result = nullptr;
+            check_int_eq(ruleforge_continuous_push_yaml_path_schema(
+                             yaml_complete, schema_path.string().c_str(), "Event", yaml,
+                             yaml_path, "event_id", "event_time", "events", &result),
+                         RULES_FORGE_OK);
+            verify_batch(yaml_complete, result);
+            check_int_eq(ruleforge_continuous_session_destroy(yaml_complete), RULES_FORGE_OK);
+
+            auto yaml_stream_session = create_session();
+            stream = nullptr;
+            check_int_eq(ruleforge_continuous_data_bind_stream_yaml_path_create(
+                             yaml_stream_session, schema_path.string().c_str(), "Event",
+                             yaml_path, "event_id", "event_time", "events", &stream),
+                         RULES_FORGE_OK);
+            size_t yaml_split = std::strlen(yaml) / 2;
+            check_int_eq(ruleforge_continuous_data_bind_stream_feed(
+                             stream, yaml, yaml_split), RULES_FORGE_OK);
+            check_int_eq(ruleforge_continuous_data_bind_stream_feed(
+                             stream, yaml + yaml_split, std::strlen(yaml) - yaml_split),
+                         RULES_FORGE_OK);
+            result = nullptr;
+            check_int_eq(ruleforge_continuous_data_bind_stream_finish(stream, &result),
+                         RULES_FORGE_OK);
+            verify_batch(yaml_stream_session, result);
+            check_int_eq(ruleforge_continuous_data_bind_stream_destroy(stream),
+                         RULES_FORGE_OK);
+            check_int_eq(ruleforge_continuous_session_destroy(yaml_stream_session),
                          RULES_FORGE_OK);
 
             char const* csv =

@@ -1198,6 +1198,41 @@ ruleforge_status_t ruleforge_continuous_push_json_schema(
                                      event_time_ms, value.get(), out_result);
 }
 
+ruleforge_status_t ruleforge_continuous_push_yaml_schema(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *event_id, char const *entry_point,
+    int64_t event_time_ms, char const *fact_yaml,
+    ruleforge_continuous_result_t *out_result) {
+  if (out_result) {
+    *out_result = nullptr;
+  }
+  if (!session || !schema_path || !fact_type || !event_id || !entry_point
+      || !fact_yaml || !out_result) {
+    set_error("Continuous YAML event arguments are invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+  auto type_status = require_schema_imported_fact_type(*wrapper->kb, fact_type);
+  if (type_status != RULES_FORGE_OK) {
+    return type_status;
+  }
+  auto codec = create_data_bind_or_set_error(schema_path);
+  if (!codec) {
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindValue *raw_value = nullptr;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindStatus bind_status = data_bind_parse_yaml(
+      codec.get(), fact_type, fact_yaml, std::strlen(fact_yaml), &raw_value, &error);
+  DataBindValueHandle value(raw_value);
+  if (bind_status != DATA_BIND_OK) {
+    set_error_fmt("DataBind YAML parse failed: ", data_bind_error_detail(bind_status, error));
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return push_continuous_bound_value(wrapper, fact_type, event_id, entry_point,
+                                     event_time_ms, value.get(), out_result);
+}
+
 ruleforge_status_t ruleforge_continuous_push_json_path_schema(
     ruleforge_continuous_session_t session, char const *schema_path,
     char const *fact_type, char const *json_source, char const *json_path,
@@ -1222,6 +1257,37 @@ ruleforge_status_t ruleforge_continuous_push_json_path_schema(
   DataBindValueHandle value(raw_value);
   if (status != DATA_BIND_OK) {
     set_error_fmt("Continuous DataBind JSON path parse failed: ",
+                  data_bind_error_detail(status, error));
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return push_continuous_bound_list(wrapper, fact_type, event_id_field,
+                                    event_time_field, entry_point, value.get(), out_result);
+}
+
+ruleforge_status_t ruleforge_continuous_push_yaml_path_schema(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *yaml_source, char const *yaml_path,
+    char const *event_id_field, char const *event_time_field,
+    char const *entry_point, ruleforge_continuous_result_t *out_result) {
+  auto validation = validate_continuous_path_arguments(
+      session, schema_path, fact_type, yaml_source, yaml_path, event_id_field,
+      event_time_field, entry_point, out_result);
+  if (validation != RULES_FORGE_OK) {
+    return validation;
+  }
+  auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+  auto codec = create_data_bind_or_set_error(schema_path);
+  if (!codec) {
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindValue *raw_value = nullptr;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindStatus status = data_bind_parse_yaml_path_all(
+      codec.get(), fact_type, yaml_source, std::strlen(yaml_source), yaml_path,
+      &raw_value, &error);
+  DataBindValueHandle value(raw_value);
+  if (status != DATA_BIND_OK) {
+    set_error_fmt("Continuous DataBind YAML path parse failed: ",
                   data_bind_error_detail(status, error));
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
@@ -1407,6 +1473,49 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_json_create(
   }
 }
 
+ruleforge_status_t ruleforge_continuous_data_bind_stream_yaml_create(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *event_id, char const *entry_point,
+    int64_t event_time_ms, ruleforge_continuous_data_bind_stream_t *out_stream) {
+  if (out_stream) {
+    *out_stream = nullptr;
+  }
+  if (!session || !schema_path || !fact_type || !event_id || !entry_point || !out_stream) {
+    set_error("Continuous DataBind stream arguments are invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*wrapper->kb, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
+    auto handle = std::make_unique<ruleforge_continuous_data_bind_stream_handle_s>();
+    handle->session_wrapper = wrapper;
+    handle->codec = create_data_bind_or_set_error(schema_path);
+    handle->fact_type = fact_type;
+    handle->event_id = event_id;
+    handle->entry_point = entry_point;
+    handle->event_time_ms = event_time_ms;
+    if (!handle->codec) {
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+    handle->stream.reset(data_bind_stream_yaml_create(
+        handle->codec.get(), fact_type, &handle->output_value, &handle->error));
+    if (!handle->stream) {
+      set_error_fmt("DataBind stream creation failed: ",
+                    data_bind_error_detail(DATA_BIND_ERR_INVALID_ARG, handle->error));
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+    ++wrapper->active_data_bind_streams;
+    *out_stream = handle.release();
+    last_error[0] = '\0';
+    return RULES_FORGE_OK;
+  } catch (std::exception const &e) {
+    return map_continuous_exception(e);
+  }
+}
+
 ruleforge_status_t ruleforge_continuous_data_bind_stream_json_path_create(
     ruleforge_continuous_session_t session, char const *schema_path,
     char const *fact_type, char const *json_path, char const *event_id_field,
@@ -1421,6 +1530,23 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_json_path_create(
   }
   auto *stream = data_bind_stream_json_path_all_create(
       handle->codec.get(), fact_type, json_path, &handle->output_value, &handle->error);
+  return publish_continuous_path_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_continuous_data_bind_stream_yaml_path_create(
+    ruleforge_continuous_session_t session, char const *schema_path,
+    char const *fact_type, char const *yaml_path, char const *event_id_field,
+    char const *event_time_field, char const *entry_point,
+    ruleforge_continuous_data_bind_stream_t *out_stream) {
+  std::unique_ptr<ruleforge_continuous_data_bind_stream_handle_s> handle;
+  auto status = prepare_continuous_path_stream(
+      session, schema_path, fact_type, yaml_path, event_id_field,
+      event_time_field, entry_point, out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_yaml_path_all_create(
+      handle->codec.get(), fact_type, yaml_path, &handle->output_value, &handle->error);
   return publish_continuous_path_stream(std::move(handle), stream, out_stream);
 }
 
@@ -1760,6 +1886,78 @@ ruleforge_status_t ruleforge_data_bind_stream_json_path_all_create(
   }
   auto *stream = data_bind_stream_json_path_all_create(
       handle->codec.get(), fact_type, json_path, &handle->output_value, &handle->error);
+  return publish_data_bind_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_yaml_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, ruleforge_data_bind_stream_t *out_stream) {
+  std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
+  auto status = prepare_data_bind_stream(session, schema_path, fact_type, false,
+                                         out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_yaml_create(
+      handle->codec.get(), fact_type, &handle->output_value, &handle->error);
+  return publish_data_bind_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_yaml_all_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, ruleforge_data_bind_stream_t *out_stream) {
+  std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
+  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+                                         out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_yaml_all_create(
+      handle->codec.get(), fact_type, &handle->output_value, &handle->error);
+  return publish_data_bind_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_yaml_path_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, const char *yaml_path,
+    ruleforge_data_bind_stream_t *out_stream) {
+  if (!yaml_path || yaml_path[0] == '\0') {
+    if (out_stream) {
+      *out_stream = nullptr;
+    }
+    set_error("YAML path is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
+  auto status = prepare_data_bind_stream(session, schema_path, fact_type, false,
+                                         out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_yaml_path_create(
+      handle->codec.get(), fact_type, yaml_path, &handle->output_value, &handle->error);
+  return publish_data_bind_stream(std::move(handle), stream, out_stream);
+}
+
+ruleforge_status_t ruleforge_data_bind_stream_yaml_path_all_create(
+    ruleforge_stateful_session_t session, const char *schema_path,
+    const char *fact_type, const char *yaml_path,
+    ruleforge_data_bind_stream_t *out_stream) {
+  if (!yaml_path || yaml_path[0] == '\0') {
+    if (out_stream) {
+      *out_stream = nullptr;
+    }
+    set_error("YAML path is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
+  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+                                         out_stream, handle);
+  if (status != RULES_FORGE_OK) {
+    return status;
+  }
+  auto *stream = data_bind_stream_yaml_path_all_create(
+      handle->codec.get(), fact_type, yaml_path, &handle->output_value, &handle->error);
   return publish_data_bind_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2116,6 +2314,163 @@ ruleforge_session_add_facts_json_path_schema(ruleforge_stateful_session_t sessio
     return map_session_inconsistent(e);
   } catch (std::exception const &e) {
     set_error_fmt("Failed to add JSONPath-selected facts: ", e.what());
+    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
+  }
+}
+
+ruleforge_status_t
+ruleforge_session_add_fact_yaml_schema(ruleforge_stateful_session_t session,
+                                       const char *schema_path,
+                                       const char *fact_type,
+                                       const char *fact_yaml,
+                                       ruleforge_fact_t *out_fact) {
+  if (!session || !schema_path || !fact_type || !fact_yaml) {
+    set_error("Session handle, schema path, fact type, or fact YAML is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  if (out_fact) {
+    *out_fact = nullptr;
+  }
+  try {
+    auto *session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*session_wrapper->session, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
+    auto codec = create_data_bind_or_set_error(schema_path);
+    if (!codec) {
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+
+    DataBindValue *raw_value = nullptr;
+    DataBindError error = DATA_BIND_ERROR_INIT;
+    DataBindStatus bind_status = data_bind_parse_yaml(
+        codec.get(), fact_type, fact_yaml, std::strlen(fact_yaml), &raw_value, &error);
+    DataBindValueHandle value(raw_value);
+    if (bind_status != DATA_BIND_OK) {
+      set_error_fmt("DataBind YAML parse failed: ",
+                    data_bind_error_detail(bind_status, error));
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+
+    auto status = insert_data_bind_fact(*session_wrapper->session, fact_type,
+                                        value.get(), out_fact);
+    if (status == RULES_FORGE_OK) {
+      last_error[0] = '\0';
+    }
+    return status;
+  } catch (SessionInconsistentException const &e) {
+    return map_session_inconsistent(e);
+  } catch (std::exception const &e) {
+    set_error_fmt("Failed to add schema-bound YAML fact: ", e.what());
+    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
+  }
+}
+
+ruleforge_status_t
+ruleforge_session_add_fact_yaml_path_schema(ruleforge_stateful_session_t session,
+                                            const char *schema_path,
+                                            const char *fact_type,
+                                            const char *fact_yaml,
+                                            const char *yaml_path,
+                                            ruleforge_fact_t *out_fact) {
+  if (out_fact) {
+    *out_fact = nullptr;
+  }
+  if (!session || !schema_path || !fact_type || !fact_yaml
+      || !yaml_path || yaml_path[0] == '\0') {
+    set_error("Session, schema, fact type, YAML source, or YAML path is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto *session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*session_wrapper->session, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
+    auto codec = create_data_bind_or_set_error(schema_path);
+    if (!codec) {
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+
+    DataBindValue *raw_value = nullptr;
+    DataBindError error = DATA_BIND_ERROR_INIT;
+    DataBindStatus bind_status = data_bind_parse_yaml_path(
+        codec.get(), fact_type, fact_yaml, std::strlen(fact_yaml), yaml_path,
+        &raw_value, &error);
+    DataBindValueHandle value(raw_value);
+    if (bind_status != DATA_BIND_OK) {
+      set_error_fmt("DataBind YAML path parse failed: ",
+                    data_bind_error_detail(bind_status, error));
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+
+    auto status = insert_data_bind_fact(*session_wrapper->session, fact_type,
+                                        value.get(), out_fact);
+    if (status == RULES_FORGE_OK) {
+      last_error[0] = '\0';
+    }
+    return status;
+  } catch (SessionInconsistentException const &e) {
+    return map_session_inconsistent(e);
+  } catch (std::exception const &e) {
+    set_error_fmt("Failed to add YPATH-selected fact: ", e.what());
+    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
+  }
+}
+
+ruleforge_status_t
+ruleforge_session_add_facts_yaml_path_schema(ruleforge_stateful_session_t session,
+                                             const char *schema_path,
+                                             const char *fact_type,
+                                             const char *fact_yaml,
+                                             const char *yaml_path,
+                                             ruleforge_fact_t **out_facts,
+                                             int *out_loaded_count) {
+  if (out_facts) {
+    *out_facts = nullptr;
+  }
+  if (out_loaded_count) {
+    *out_loaded_count = 0;
+  }
+  if (!session || !schema_path || !fact_type || !fact_yaml
+      || !yaml_path || yaml_path[0] == '\0') {
+    set_error("Session, schema, fact type, YAML source, or YAML path is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto *session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+    auto type_status = require_schema_imported_fact_type(*session_wrapper->session, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
+    auto codec = create_data_bind_or_set_error(schema_path);
+    if (!codec) {
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+
+    DataBindValue *raw_value = nullptr;
+    DataBindError error = DATA_BIND_ERROR_INIT;
+    DataBindStatus bind_status = data_bind_parse_yaml_path_all(
+        codec.get(), fact_type, fact_yaml, std::strlen(fact_yaml), yaml_path,
+        &raw_value, &error);
+    DataBindValueHandle value(raw_value);
+    if (bind_status != DATA_BIND_OK) {
+      set_error_fmt("DataBind YAML path parse failed: ",
+                    data_bind_error_detail(bind_status, error));
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+
+    auto status = insert_data_bind_fact_list(*session_wrapper->session, fact_type,
+                                             value.get(), out_facts, out_loaded_count);
+    if (status == RULES_FORGE_OK) {
+      last_error[0] = '\0';
+    }
+    return status;
+  } catch (SessionInconsistentException const &e) {
+    return map_session_inconsistent(e);
+  } catch (std::exception const &e) {
+    set_error_fmt("Failed to add YPATH-selected facts: ", e.what());
     return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
   }
 }
