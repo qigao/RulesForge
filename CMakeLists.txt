@@ -46,6 +46,26 @@ endif()
 find_package(OpenSSL REQUIRED)
 
 find_package(TurboUtils CONFIG REQUIRED PATHS "${TURBO_UTILS_ROOT}")
+
+include(CheckCSourceCompiles)
+set(CMAKE_REQUIRED_LIBRARIES TurboUtils::DataBind)
+unset(RULESFORGE_HAS_DATABIND_1_10 CACHE)
+check_c_source_compiles([[
+  #include <data_bind.h>
+  #if DATA_BIND_VERSION < 11000
+  #error "RulesForge requires DataBind 1.10.0 or newer"
+  #endif
+  int main() {
+    DataBindValue *copy = NULL;
+    return data_bind_value_clone(NULL, &copy) == DATA_BIND_ERR_INVALID_ARG ? 0 : 1;
+  }
+]] RULESFORGE_HAS_DATABIND_1_10)
+unset(CMAKE_REQUIRED_LIBRARIES)
+if(NOT RULESFORGE_HAS_DATABIND_1_10)
+    message(FATAL_ERROR
+            "RulesForge requires DataBind 1.10.0 or newer with data_bind_value_clone()")
+endif()
+
 # Output files directory
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_EXECUTABLE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")

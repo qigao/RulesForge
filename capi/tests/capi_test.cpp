@@ -1,5 +1,6 @@
 #include "tinytest.h"
 #include "rule_forge.h"
+#include "data_bind.h"
 
 #include <string>
 #include <cstdio>
@@ -27,8 +28,136 @@ std::filesystem::path write_temp_schema(std::string const& name, std::string con
 suite("CAPI") {
     group("Initialization and Cleanup") {
         it("initializes and cleans up") {
+            check(DATA_BIND_VERSION >= 11000);
+            check_int_eq(data_bind_library_version(), DATA_BIND_VERSION);
+            check_int_eq(data_bind_abi_version(), DATA_BIND_ABI_VERSION);
+            check_not_null(data_bind_version_string());
             check_int_eq(ruleforge_init(), RULES_FORGE_OK);
             check_int_eq(ruleforge_cleanup(), RULES_FORGE_OK);
+        }
+
+        it("deep clones all DataBind value storage independently") {
+            char const* schema =
+                "composite Header { uint32 seq; uint64 ts; } "
+                "message CloneFact { Header header; list<uint32> values; "
+                "set<string> tags; map<string,int32> attrs; bytes raw; uuid id; "
+                "datetime at; date d; time t; duration span; decimal price; "
+                "bigint count; money total; }";
+            char const* json =
+                R"({"header":{"seq":7,"ts":99},"values":[3,4],)"
+                R"("tags":["alpha","beta"],"attrs":{"x":30,"y":40},"raw":"Az",)"
+                R"("id":"01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001",)"
+                R"("at":"Sat, 04 Mar 2006 13:27:54 GMT","d":"2026-06-28",)"
+                R"("t":"09:30:05.123","span":"1h30m5s250ms","price":"123.4500",)"
+                R"("count":"000123456789012345678901234567890",)"
+                R"("total":{"amount":"99.9900","currency":"EUR"}})";
+            DataBind* codec = nullptr;
+            DataBindValue* source = nullptr;
+            DataBindValue* copy = nullptr;
+            DataBindError error = DATA_BIND_ERROR_INIT;
+
+            check_int_eq(data_bind_create_from_text(
+                             schema, std::strlen(schema), &codec, &error), DATA_BIND_OK);
+            check_not_null(codec);
+            if (codec) {
+                check_int_eq(data_bind_parse_json(
+                                 codec, "CloneFact", json, std::strlen(json),
+                                 &source, &error), DATA_BIND_OK);
+                check_not_null(source);
+            }
+            if (source) {
+                auto const* source_header = data_bind_value_get(source, "header");
+                auto const* source_values = data_bind_value_get(source, "values");
+                auto const* source_tags = data_bind_value_get(source, "tags");
+                auto const* source_attrs = data_bind_value_get(source, "attrs");
+                size_t source_bytes_len = 0;
+                auto const* source_bytes = data_bind_value_as_bytes(
+                    data_bind_value_get(source, "raw"), &source_bytes_len);
+                char const* source_bigint = data_bind_value_as_bigint_string(
+                    data_bind_value_get(source, "count"));
+
+                check_int_eq(data_bind_value_clone(source, &copy), DATA_BIND_OK);
+                check_not_null(copy);
+                if (copy) {
+                    check_ptr_ne(copy, source);
+                    check_ptr_ne(data_bind_value_get(copy, "header"), source_header);
+                    check_ptr_ne(data_bind_value_get(copy, "values"), source_values);
+                    check_ptr_ne(data_bind_value_get(copy, "tags"), source_tags);
+                    check_ptr_ne(data_bind_value_get(copy, "attrs"), source_attrs);
+                    size_t copy_bytes_len = 0;
+                    auto const* copy_bytes = data_bind_value_as_bytes(
+                        data_bind_value_get(copy, "raw"), &copy_bytes_len);
+                    check_size_eq(copy_bytes_len, source_bytes_len);
+                    check_ptr_ne(copy_bytes, source_bytes);
+                    check_ptr_ne(data_bind_value_as_bigint_string(
+                                     data_bind_value_get(copy, "count")), source_bigint);
+                }
+            }
+
+            data_bind_value_free(source);
+            source = nullptr;
+            if (copy) {
+                auto const* header = data_bind_value_get(copy, "header");
+                check_int_eq(data_bind_value_as_int(data_bind_value_get(header, "seq")), 7);
+
+                auto const* values = data_bind_value_get(copy, "values");
+                check(data_bind_value_kind(values) == DATA_BIND_VALUE_LIST);
+                check_size_eq(data_bind_value_count(values), 2);
+                check_int_eq(data_bind_value_as_int(data_bind_value_at(values, 1)), 4);
+
+                auto const* tags = data_bind_value_get(copy, "tags");
+                check(data_bind_value_kind(tags) == DATA_BIND_VALUE_SET);
+                check_size_eq(data_bind_value_count(tags), 2);
+                check_str_eq(data_bind_value_as_string(data_bind_value_at(tags, 1)), "beta");
+
+                auto const* attrs = data_bind_value_get(copy, "attrs");
+                check(data_bind_value_kind(attrs) == DATA_BIND_VALUE_MAP);
+                check_size_eq(data_bind_value_count(attrs), 2);
+                DataBindMapEntry first_attr = data_bind_value_map_entry_at(attrs, 0);
+                check_str_eq(first_attr.key, "x");
+                check_int_eq(data_bind_value_as_int(first_attr.value), 30);
+
+                size_t bytes_len = 0;
+                auto const* bytes = data_bind_value_as_bytes(
+                    data_bind_value_get(copy, "raw"), &bytes_len);
+                check_size_eq(bytes_len, 2);
+                check_mem_eq(bytes, "Az", 2);
+
+                char text[64] = {0};
+                check_str_eq(data_bind_value_as_uuid_string(
+                                 data_bind_value_get(copy, "id"), text, sizeof(text)),
+                             "01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001");
+                check_double_eq(data_bind_value_as_datetime_timestamp(
+                                    data_bind_value_get(copy, "at")),
+                                1141478874.0, 0.001);
+
+                DataBindDate date{};
+                check_int_eq(data_bind_value_get_date(
+                                 data_bind_value_get(copy, "d"), &date), DATA_BIND_OK);
+                check_int_eq(date.year, 2026);
+                DataBindTime time{};
+                check_int_eq(data_bind_value_get_time(
+                                 data_bind_value_get(copy, "t"), &time), DATA_BIND_OK);
+                check_int_eq(time.millisecond, 123);
+                check_int_eq(static_cast<int>(data_bind_value_as_duration_milliseconds(
+                                 data_bind_value_get(copy, "span"))), 5405250);
+
+                DataBindDecimal decimal{};
+                check_int_eq(data_bind_value_get_decimal(
+                                 data_bind_value_get(copy, "price"), &decimal), DATA_BIND_OK);
+                check_int_eq(static_cast<int>(decimal.mantissa), 12345);
+                check_int_eq(decimal.scale, 2);
+                check_str_eq(data_bind_value_as_bigint_string(
+                                 data_bind_value_get(copy, "count")),
+                             "123456789012345678901234567890");
+                DataBindMoney money{};
+                check_int_eq(data_bind_value_get_money(
+                                 data_bind_value_get(copy, "total"), &money), DATA_BIND_OK);
+                check_str_eq(money.currency, "EUR");
+                check_int_eq(static_cast<int>(money.amount.mantissa), 9999);
+            }
+            data_bind_value_free(copy);
+            data_bind_free(codec);
         }
     }
 

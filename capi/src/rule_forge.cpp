@@ -144,6 +144,8 @@ using DataBindHandle = std::unique_ptr<DataBind, DataBindHandleDeleter>;
 using DataBindValueHandle = std::unique_ptr<DataBindValue, DataBindValueDeleter>;
 using DataBindStreamHandle = std::unique_ptr<data_bind_stream_t, DataBindStreamDeleter>;
 
+constexpr int kMinimumDataBindVersion = 11000;
+
 static ConstraintValue data_bind_value_to_constraint(DataBindValue const *value) {
   if (!value) {
     return NilValue{};
@@ -389,6 +391,15 @@ struct KnowledgeBaseWrapper {
 } // namespace
 
 ruleforge_status_t ruleforge_init() {
+  int const library_version = data_bind_library_version();
+  int const library_abi = data_bind_abi_version();
+  if (library_version < kMinimumDataBindVersion || library_abi != DATA_BIND_ABI_VERSION) {
+    fmt(last_error, sizeof(last_error),
+        "Incompatible DataBind library: need version >= 1.10.0 with ABI {}, got {} with ABI {}",
+        DATA_BIND_ABI_VERSION,
+        data_bind_version_string() ? data_bind_version_string() : "<unknown>", library_abi);
+    return RULES_FORGE_ERROR_GENERIC;
+  }
   last_error[0] = '\0';
   return RULES_FORGE_OK;
 }
