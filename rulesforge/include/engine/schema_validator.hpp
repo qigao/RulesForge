@@ -218,6 +218,8 @@ private:
                 return (FT_INT_COMPAT & expected) != 0;
             } else if constexpr (std::is_same_v<T, double>) {
                 return (FT_DOUBLE_COMPAT & expected) != 0;
+            } else if constexpr (std::is_same_v<T, turbo_uuid_t>) {
+                return (FT_UUID_COMPAT & expected) != 0;
             } else if constexpr (std::is_same_v<T, NilValue>) {
                 return true;  // Nil is valid for any type
             } else if constexpr (std::is_same_v<T, FactList>) {
@@ -240,6 +242,7 @@ private:
             if constexpr (std::is_same_v<T, std::string>) return "String";
             else if constexpr (std::is_same_v<T, int64_t>) return "int";
             else if constexpr (std::is_same_v<T, double>) return "double";
+            else if constexpr (std::is_same_v<T, turbo_uuid_t>) return "uuid";
             else if constexpr (std::is_same_v<T, NilValue>) return "nil";
             else if constexpr (std::is_same_v<T, FactList>) return "List";
             else if constexpr (std::is_same_v<T, std::shared_ptr<TypedList>>) return "List";
@@ -261,6 +264,7 @@ private:
             case FT_List: return "List";
             case FT_Set: return "Set";
             case FT_Map: return "Map";
+            case FT_Uuid: return "uuid";
             case FT_Object: return "Object";
             default: return "unknown";
         }

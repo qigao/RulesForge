@@ -10,6 +10,7 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -136,12 +137,17 @@ struct DataBindValueDeleter {
   void operator()(DataBindValue *value) const { data_bind_value_free(value); }
 };
 
+struct DataBindObjectDeleter {
+  void operator()(DataBindObject *object) const { data_bind_object_free(object); }
+};
+
 struct DataBindStreamDeleter {
   void operator()(data_bind_stream_t *stream) const { data_bind_stream_destroy(stream); }
 };
 
 using DataBindHandle = std::unique_ptr<DataBind, DataBindHandleDeleter>;
 using DataBindValueHandle = std::unique_ptr<DataBindValue, DataBindValueDeleter>;
+using DataBindObjectHandle = std::unique_ptr<DataBindObject, DataBindObjectDeleter>;
 using DataBindStreamHandle = std::unique_ptr<data_bind_stream_t, DataBindStreamDeleter>;
 
 constexpr int kMinimumDataBindVersion = 11000;
@@ -217,8 +223,14 @@ static ConstraintValue data_bind_value_to_constraint(DataBindValue const *value)
     return map;
   }
   case DATA_BIND_VALUE_UUID: {
-    char text[64] = {0};
-    return data_bind_text_or_nil(data_bind_value_as_uuid_string(value, text, sizeof(text)));
+    turbo_uuid_t uuid{};
+    DataBindStatus status = data_bind_value_get_uuid(value, uuid.bytes);
+    if (status != DATA_BIND_OK) {
+      char const *status_name = data_bind_status_name(status);
+      throw std::runtime_error(std::string("Failed to extract DataBind UUID: ")
+                               + (status_name ? status_name : "unknown DataBind error"));
+    }
+    return uuid;
   }
   case DATA_BIND_VALUE_DATETIME: {
     char text[64] = {0};
@@ -288,6 +300,18 @@ static ruleforge_status_t insert_data_bind_fact(StatefulSession &session,
     *out_fact = reinterpret_cast<ruleforge_fact_t>(fact);
   }
   return RULES_FORGE_OK;
+}
+
+static ruleforge_status_t insert_data_bind_object(
+    StatefulSession &session, DataBindObject const *object,
+    ruleforge_fact_t *out_fact) {
+  if (!object) {
+    set_error("DataBindObject is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return insert_data_bind_fact(
+      session, data_bind_object_type_name(object),
+      data_bind_object_value(object), out_fact);
 }
 
 static ruleforge_status_t insert_data_bind_fact_list(StatefulSession &session,
@@ -714,7 +738,111 @@ struct ruleforge_data_bind_stream_handle_s {
   bool finished = false;
 };
 
+struct ruleforge_data_bind_object_handle_s {
+  DataBindObjectHandle object;
+};
+
 namespace {
+
+using DataBindObjectTextParser = DataBindStatus (*)(
+    DataBind *, char const *, char const *, size_t, DataBindObject **,
+    DataBindError *);
+using DataBindObjectSerializer = DataBindStatus (*)(
+    DataBindObject const *, char **, size_t *, DataBindError *);
+using DataBindObjectWriter = DataBindStatus (*)(
+    DataBindObject const *, DataBindWriteFn, void *, DataBindError *);
+
+static ruleforge_status_t map_data_bind_object_error(
+    char const *operation, DataBindStatus status, DataBindError const &error) {
+  set_error_fmt(operation, data_bind_error_detail(status, error));
+  if (status == DATA_BIND_ERR_OOM) {
+    return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
+  }
+  if (status == DATA_BIND_ERR_IO || status == DATA_BIND_ERR_RUNTIME) {
+    return RULES_FORGE_ERROR_GENERIC;
+  }
+  return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+}
+
+static ruleforge_status_t publish_data_bind_object(
+    DataBindObjectHandle object, ruleforge_data_bind_object_t *out_object) {
+  try {
+    auto handle = std::make_unique<ruleforge_data_bind_object_handle_s>();
+    handle->object = std::move(object);
+    *out_object = handle.release();
+    last_error[0] = '\0';
+    return RULES_FORGE_OK;
+  } catch (std::bad_alloc const &) {
+    set_error("Failed to allocate DataBindObject handle");
+    return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
+  }
+}
+
+static ruleforge_status_t create_text_data_bind_object(
+    char const *schema_path, char const *fact_type, char const *text,
+    size_t len, ruleforge_data_bind_object_t *out_object,
+    DataBindObjectTextParser parse, char const *operation) {
+  if (out_object) {
+    *out_object = nullptr;
+  }
+  if (!schema_path || !fact_type || !text || !out_object) {
+    set_error("Schema path, fact type, text input, or output object is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto codec = create_data_bind_or_set_error(schema_path);
+  if (!codec) {
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindObject *raw_object = nullptr;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindStatus status = parse(codec.get(), fact_type, text, len,
+                                &raw_object, &error);
+  DataBindObjectHandle object(raw_object);
+  if (status != DATA_BIND_OK) {
+    return map_data_bind_object_error(operation, status, error);
+  }
+  return publish_data_bind_object(std::move(object), out_object);
+}
+
+static ruleforge_status_t serialize_data_bind_object(
+    ruleforge_data_bind_object_t object, char **out_text, size_t *out_len,
+    DataBindObjectSerializer serialize, char const *operation) {
+  if (out_text) {
+    *out_text = nullptr;
+  }
+  if (out_len) {
+    *out_len = 0;
+  }
+  auto *handle = reinterpret_cast<ruleforge_data_bind_object_handle_s *>(object);
+  if (!handle || !handle->object || !out_text) {
+    set_error("DataBindObject handle or serialized output pointer is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindStatus status = serialize(handle->object.get(), out_text, out_len, &error);
+  if (status != DATA_BIND_OK) {
+    return map_data_bind_object_error(operation, status, error);
+  }
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
+static ruleforge_status_t write_data_bind_object(
+    ruleforge_data_bind_object_t object, ruleforge_write_fn write, void *user,
+    DataBindObjectWriter writer, char const *operation) {
+  auto *handle = reinterpret_cast<ruleforge_data_bind_object_handle_s *>(object);
+  if (!handle || !handle->object || !write) {
+    set_error("DataBindObject handle or byte sink is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindStatus status = writer(handle->object.get(), write, user, &error);
+  if (status != DATA_BIND_OK) {
+    return map_data_bind_object_error(operation, status, error);
+  }
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
 
 static ruleforge_status_t prepare_data_bind_stream(
     ruleforge_stateful_session_t session, char const *schema_path,
@@ -856,6 +984,22 @@ static ruleforge_status_t push_continuous_bound_value(
   } catch (std::exception const &e) {
     return map_continuous_exception(e);
   }
+}
+
+static ruleforge_status_t push_continuous_bound_object(
+    ContinuousSessionWrapper *wrapper, DataBindObject const *object,
+    char const *event_id, char const *entry_point, int64_t event_time_ms,
+    ruleforge_continuous_result_t *out_result) {
+  if (!object) {
+    if (out_result) {
+      *out_result = nullptr;
+    }
+    set_error("DataBindObject is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return push_continuous_bound_value(
+      wrapper, data_bind_object_type_name(object), event_id, entry_point,
+      event_time_ms, data_bind_object_value(object), out_result);
 }
 
 static ruleforge_status_t push_continuous_bound_list(
@@ -1042,6 +1186,180 @@ static ruleforge_status_t publish_continuous_path_stream(
 
 } // namespace
 
+ruleforge_status_t ruleforge_data_bind_object_from_binary(
+    char const *schema_path, char const *fact_type, uint8_t const *data,
+    size_t len, ruleforge_data_bind_object_t *out_object) {
+  if (out_object) {
+    *out_object = nullptr;
+  }
+  if (!schema_path || !fact_type || !data || len == 0 || !out_object) {
+    set_error("Schema path, fact type, binary input, or output object is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto codec = create_data_bind_or_set_error(schema_path);
+  if (!codec) {
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindObject *raw_object = nullptr;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindStatus status = data_bind_object_from_bin(
+      codec.get(), fact_type, data, len, &raw_object, &error);
+  DataBindObjectHandle object(raw_object);
+  if (status != DATA_BIND_OK) {
+    return map_data_bind_object_error(
+        "DataBind binary object parse failed: ", status, error);
+  }
+  return publish_data_bind_object(std::move(object), out_object);
+}
+
+ruleforge_status_t ruleforge_data_bind_object_from_json(
+    char const *schema_path, char const *fact_type, char const *json,
+    size_t len, ruleforge_data_bind_object_t *out_object) {
+  return create_text_data_bind_object(
+      schema_path, fact_type, json, len, out_object,
+      data_bind_object_from_json, "DataBind JSON object parse failed: ");
+}
+
+ruleforge_status_t ruleforge_data_bind_object_from_yaml(
+    char const *schema_path, char const *fact_type, char const *yaml,
+    size_t len, ruleforge_data_bind_object_t *out_object) {
+  return create_text_data_bind_object(
+      schema_path, fact_type, yaml, len, out_object,
+      data_bind_object_from_yaml, "DataBind YAML object parse failed: ");
+}
+
+ruleforge_status_t ruleforge_data_bind_object_from_xml(
+    char const *schema_path, char const *fact_type, char const *xml,
+    size_t len, ruleforge_data_bind_object_t *out_object) {
+  return create_text_data_bind_object(
+      schema_path, fact_type, xml, len, out_object,
+      data_bind_object_from_xml, "DataBind XML object parse failed: ");
+}
+
+ruleforge_status_t ruleforge_data_bind_object_from_csv(
+    char const *schema_path, char const *fact_type, char const *csv,
+    size_t len, size_t row, ruleforge_data_bind_object_t *out_object) {
+  if (out_object) {
+    *out_object = nullptr;
+  }
+  if (!schema_path || !fact_type || !csv || !out_object) {
+    set_error("Schema path, fact type, CSV input, or output object is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto codec = create_data_bind_or_set_error(schema_path);
+  if (!codec) {
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindObject *raw_object = nullptr;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindStatus status = data_bind_object_from_csv(
+      codec.get(), fact_type, csv, len, row, &raw_object, &error);
+  DataBindObjectHandle object(raw_object);
+  if (status != DATA_BIND_OK) {
+    return map_data_bind_object_error(
+        "DataBind CSV object parse failed: ", status, error);
+  }
+  return publish_data_bind_object(std::move(object), out_object);
+}
+
+ruleforge_status_t ruleforge_data_bind_object_clone(
+    ruleforge_data_bind_object_t object,
+    ruleforge_data_bind_object_t *out_object) {
+  if (out_object) {
+    *out_object = nullptr;
+  }
+  auto *handle = reinterpret_cast<ruleforge_data_bind_object_handle_s *>(object);
+  if (!handle || !handle->object || !out_object) {
+    set_error("DataBindObject handle or clone output pointer is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindObject *raw_copy = nullptr;
+  DataBindStatus status = data_bind_object_clone(handle->object.get(), &raw_copy);
+  DataBindObjectHandle copy(raw_copy);
+  if (status != DATA_BIND_OK) {
+    if (status == DATA_BIND_ERR_OOM) {
+      set_error("Failed to allocate DataBindObject clone");
+      return RULES_FORGE_ERROR_MEMORY_ALLOCATION;
+    }
+    set_error("Failed to clone DataBindObject");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  return publish_data_bind_object(std::move(copy), out_object);
+}
+
+char const *ruleforge_data_bind_object_get_type_name(
+    ruleforge_data_bind_object_t object) {
+  auto *handle = reinterpret_cast<ruleforge_data_bind_object_handle_s *>(object);
+  if (!handle || !handle->object) {
+    set_error("DataBindObject handle is NULL");
+    return nullptr;
+  }
+  char const *type_name = data_bind_object_type_name(handle->object.get());
+  if (!type_name) {
+    set_error("DataBindObject type name is unavailable");
+    return nullptr;
+  }
+  last_error[0] = '\0';
+  return type_name;
+}
+
+ruleforge_status_t ruleforge_data_bind_object_serialize_json(
+    ruleforge_data_bind_object_t object, char **out_json, size_t *out_len) {
+  return serialize_data_bind_object(
+      object, out_json, out_len, data_bind_object_serialize_json,
+      "DataBind JSON object serialization failed: ");
+}
+
+ruleforge_status_t ruleforge_data_bind_object_serialize_yaml(
+    ruleforge_data_bind_object_t object, char **out_yaml, size_t *out_len) {
+  return serialize_data_bind_object(
+      object, out_yaml, out_len, data_bind_object_serialize_yaml,
+      "DataBind YAML object serialization failed: ");
+}
+
+ruleforge_status_t ruleforge_data_bind_object_serialize_xml(
+    ruleforge_data_bind_object_t object, char **out_xml, size_t *out_len) {
+  return serialize_data_bind_object(
+      object, out_xml, out_len, data_bind_object_serialize_xml,
+      "DataBind XML object serialization failed: ");
+}
+
+ruleforge_status_t ruleforge_data_bind_object_write_json(
+    ruleforge_data_bind_object_t object, ruleforge_write_fn write, void *user) {
+  return write_data_bind_object(
+      object, write, user, data_bind_object_write_json,
+      "DataBind JSON object write failed: ");
+}
+
+ruleforge_status_t ruleforge_data_bind_object_write_yaml(
+    ruleforge_data_bind_object_t object, ruleforge_write_fn write, void *user) {
+  return write_data_bind_object(
+      object, write, user, data_bind_object_write_yaml,
+      "DataBind YAML object write failed: ");
+}
+
+ruleforge_status_t ruleforge_data_bind_object_write_xml(
+    ruleforge_data_bind_object_t object, ruleforge_write_fn write, void *user) {
+  return write_data_bind_object(
+      object, write, user, data_bind_object_write_xml,
+      "DataBind XML object write failed: ");
+}
+
+void ruleforge_data_bind_serialized_free(char *data) {
+  data_bind_serialized_free(data);
+}
+
+ruleforge_status_t ruleforge_data_bind_object_destroy(
+    ruleforge_data_bind_object_t object) {
+  if (!object) {
+    set_error("DataBindObject handle is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  delete reinterpret_cast<ruleforge_data_bind_object_handle_s *>(object);
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
 ruleforge_status_t ruleforge_session_create(ruleforge_knowledge_base_t kb,
                                             ruleforge_stateful_session_t *out_session) {
   if (!kb) {
@@ -1174,6 +1492,37 @@ ruleforge_status_t ruleforge_continuous_session_destroy(
   return RULES_FORGE_OK;
 }
 
+ruleforge_status_t ruleforge_continuous_push_data_bind_object(
+    ruleforge_continuous_session_t session,
+    ruleforge_data_bind_object_t object, char const *event_id,
+    char const *entry_point, int64_t event_time_ms,
+    ruleforge_continuous_result_t *out_result) {
+  if (out_result) {
+    *out_result = nullptr;
+  }
+  auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
+  auto *object_handle =
+      reinterpret_cast<ruleforge_data_bind_object_handle_s *>(object);
+  if (!wrapper || !wrapper->session || !object_handle || !object_handle->object
+      || !event_id || !entry_point || !out_result) {
+    set_error("Continuous session, DataBindObject, event metadata, or output result is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  char const *fact_type = data_bind_object_type_name(object_handle->object.get());
+  DataBindValue const *value = data_bind_object_value(object_handle->object.get());
+  if (!fact_type || !value) {
+    set_error("DataBindObject type name or value is unavailable");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto type_status = require_schema_imported_fact_type(*wrapper->kb, fact_type);
+  if (type_status != RULES_FORGE_OK) {
+    return type_status;
+  }
+  return push_continuous_bound_object(
+      wrapper, object_handle->object.get(), event_id, entry_point,
+      event_time_ms, out_result);
+}
+
 ruleforge_status_t ruleforge_continuous_push_json_schema(
     ruleforge_continuous_session_t session, char const *schema_path,
     char const *fact_type, char const *event_id, char const *entry_point,
@@ -1196,17 +1545,18 @@ ruleforge_status_t ruleforge_continuous_push_json_schema(
   if (!codec) {
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
-  DataBindValue *raw_value = nullptr;
+  DataBindObject *raw_object = nullptr;
   DataBindError error = DATA_BIND_ERROR_INIT;
-  DataBindStatus bind_status = data_bind_parse_json(
-      codec.get(), fact_type, fact_json, std::strlen(fact_json), &raw_value, &error);
-  DataBindValueHandle value(raw_value);
+  DataBindStatus bind_status = data_bind_object_from_json(
+      codec.get(), fact_type, fact_json, std::strlen(fact_json),
+      &raw_object, &error);
+  DataBindObjectHandle object(raw_object);
   if (bind_status != DATA_BIND_OK) {
     set_error_fmt("DataBind JSON parse failed: ", data_bind_error_detail(bind_status, error));
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
-  return push_continuous_bound_value(wrapper, fact_type, event_id, entry_point,
-                                     event_time_ms, value.get(), out_result);
+  return push_continuous_bound_object(
+      wrapper, object.get(), event_id, entry_point, event_time_ms, out_result);
 }
 
 ruleforge_status_t ruleforge_continuous_push_yaml_schema(
@@ -1231,17 +1581,18 @@ ruleforge_status_t ruleforge_continuous_push_yaml_schema(
   if (!codec) {
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
-  DataBindValue *raw_value = nullptr;
+  DataBindObject *raw_object = nullptr;
   DataBindError error = DATA_BIND_ERROR_INIT;
-  DataBindStatus bind_status = data_bind_parse_yaml(
-      codec.get(), fact_type, fact_yaml, std::strlen(fact_yaml), &raw_value, &error);
-  DataBindValueHandle value(raw_value);
+  DataBindStatus bind_status = data_bind_object_from_yaml(
+      codec.get(), fact_type, fact_yaml, std::strlen(fact_yaml),
+      &raw_object, &error);
+  DataBindObjectHandle object(raw_object);
   if (bind_status != DATA_BIND_OK) {
     set_error_fmt("DataBind YAML parse failed: ", data_bind_error_detail(bind_status, error));
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
-  return push_continuous_bound_value(wrapper, fact_type, event_id, entry_point,
-                                     event_time_ms, value.get(), out_result);
+  return push_continuous_bound_object(
+      wrapper, object.get(), event_id, entry_point, event_time_ms, out_result);
 }
 
 ruleforge_status_t ruleforge_continuous_push_json_path_schema(
@@ -2173,6 +2524,46 @@ ruleforge_status_t ruleforge_data_bind_stream_destroy(ruleforge_data_bind_stream
   return RULES_FORGE_OK;
 }
 
+ruleforge_status_t ruleforge_session_add_data_bind_object(
+    ruleforge_stateful_session_t session, ruleforge_data_bind_object_t object,
+    ruleforge_fact_t *out_fact) {
+  if (out_fact) {
+    *out_fact = nullptr;
+  }
+  auto *session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+  auto *object_handle =
+      reinterpret_cast<ruleforge_data_bind_object_handle_s *>(object);
+  if (!session_wrapper || !session_wrapper->session || !object_handle
+      || !object_handle->object) {
+    set_error("Session or DataBindObject handle is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  char const *fact_type = data_bind_object_type_name(object_handle->object.get());
+  DataBindValue const *value = data_bind_object_value(object_handle->object.get());
+  if (!fact_type || !value) {
+    set_error("DataBindObject type name or value is unavailable");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto type_status =
+        require_schema_imported_fact_type(*session_wrapper->session, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
+    auto status = insert_data_bind_object(
+        *session_wrapper->session, object_handle->object.get(), out_fact);
+    if (status == RULES_FORGE_OK) {
+      last_error[0] = '\0';
+    }
+    return status;
+  } catch (SessionInconsistentException const &e) {
+    return map_session_inconsistent(e);
+  } catch (std::exception const &e) {
+    set_error_fmt("Failed to add DataBindObject fact: ", e.what());
+    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
+  }
+}
+
 ruleforge_status_t
 ruleforge_session_add_fact_json_schema(ruleforge_stateful_session_t session,
                                        const char *schema_path,
@@ -2197,18 +2588,20 @@ ruleforge_session_add_fact_json_schema(ruleforge_stateful_session_t session,
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
-    DataBindValue *raw_value = nullptr;
+    DataBindObject *raw_object = nullptr;
     DataBindError error = DATA_BIND_ERROR_INIT;
-    DataBindStatus bind_status = data_bind_parse_json(codec.get(), fact_type, fact_json,
-                                                      std::strlen(fact_json), &raw_value, &error);
-    DataBindValueHandle value(raw_value);
+    DataBindStatus bind_status = data_bind_object_from_json(
+        codec.get(), fact_type, fact_json, std::strlen(fact_json),
+        &raw_object, &error);
+    DataBindObjectHandle object(raw_object);
     if (bind_status != DATA_BIND_OK) {
       set_error_fmt("DataBind JSON parse failed: ",
                     data_bind_error_detail(bind_status, error));
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
-    auto status = insert_data_bind_fact(*session_wrapper->session, fact_type, value.get(), out_fact);
+    auto status = insert_data_bind_object(
+        *session_wrapper->session, object.get(), out_fact);
     if (status == RULES_FORGE_OK) {
       last_error[0] = '\0';
     }
@@ -2353,19 +2746,20 @@ ruleforge_session_add_fact_yaml_schema(ruleforge_stateful_session_t session,
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
-    DataBindValue *raw_value = nullptr;
+    DataBindObject *raw_object = nullptr;
     DataBindError error = DATA_BIND_ERROR_INIT;
-    DataBindStatus bind_status = data_bind_parse_yaml(
-        codec.get(), fact_type, fact_yaml, std::strlen(fact_yaml), &raw_value, &error);
-    DataBindValueHandle value(raw_value);
+    DataBindStatus bind_status = data_bind_object_from_yaml(
+        codec.get(), fact_type, fact_yaml, std::strlen(fact_yaml),
+        &raw_object, &error);
+    DataBindObjectHandle object(raw_object);
     if (bind_status != DATA_BIND_OK) {
       set_error_fmt("DataBind YAML parse failed: ",
                     data_bind_error_detail(bind_status, error));
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
-    auto status = insert_data_bind_fact(*session_wrapper->session, fact_type,
-                                        value.get(), out_fact);
+    auto status = insert_data_bind_object(
+        *session_wrapper->session, object.get(), out_fact);
     if (status == RULES_FORGE_OK) {
       last_error[0] = '\0';
     }
@@ -2511,18 +2905,19 @@ ruleforge_session_add_fact_binary_schema(ruleforge_stateful_session_t session,
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
-    DataBindValue *raw_value = nullptr;
+    DataBindObject *raw_object = nullptr;
     DataBindError error = DATA_BIND_ERROR_INIT;
-    DataBindStatus bind_status =
-        data_bind_parse(codec.get(), fact_type, fact_data, fact_len, &raw_value, &error);
-    DataBindValueHandle value(raw_value);
+    DataBindStatus bind_status = data_bind_object_from_bin(
+        codec.get(), fact_type, fact_data, fact_len, &raw_object, &error);
+    DataBindObjectHandle object(raw_object);
     if (bind_status != DATA_BIND_OK) {
       set_error_fmt("DataBind binary parse failed: ",
                     data_bind_error_detail(bind_status, error));
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
-    auto status = insert_data_bind_fact(*session_wrapper->session, fact_type, value.get(), out_fact);
+    auto status = insert_data_bind_object(
+        *session_wrapper->session, object.get(), out_fact);
     if (status == RULES_FORGE_OK) {
       last_error[0] = '\0';
     }

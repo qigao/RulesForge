@@ -14,7 +14,7 @@ RflLexer::RflLexer(std::string_view source, std::string const& file_name)
     , rhs_mode_(false)
 {}
 
-RflToken RflLexer::make_token(TokenType type, char const* start) const {
+RflToken RflLexer::make_token(enum TokenType type, char const* start) const {
     return {type, {start, static_cast<std::size_t>(cursor_ - start)},
             line_, static_cast<std::size_t>(start - line_start_ + 1)};
 }

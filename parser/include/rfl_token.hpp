@@ -123,7 +123,7 @@ enum class TokenType : uint8_t {
 };
 
 struct RflToken {
-    TokenType type;
+    enum TokenType type;
     std::string_view text;
     std::size_t line;
     std::size_t column;
@@ -140,7 +140,7 @@ struct RflLemonToken {
     std::string as_string() const { return std::string(text, text_len); }
 };
 
-inline char const* token_type_name(TokenType t) {
+inline char const* token_type_name(enum TokenType t) {
     switch (t) {
         case TokenType::TK_INTEGER:          return "INTEGER";
         case TokenType::TK_DOUBLE:           return "DOUBLE";

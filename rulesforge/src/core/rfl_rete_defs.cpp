@@ -2,8 +2,11 @@
 #include "core/rfl_rete_defs.hpp"
 #include "expression_descriptor.hpp"
 #include "core/logging_control.hpp"
+#include <turbo_hash.h>
 
+#include <algorithm>
 #include <sstream>
+#include <stdexcept>
 
 // --- TypeParameter copy operations ---
 TypeParameter::TypeParameter(TypeParameter const& other)
@@ -38,6 +41,10 @@ bool ConstraintValueCompare::operator()(ConstraintValue const& a, ConstraintValu
             return val_a < val_b;
         } else if constexpr (std::is_same_v<T, double>) {
             return val_a < val_b;
+        } else if constexpr (std::is_same_v<T, turbo_uuid_t>) {
+            return std::lexicographical_compare(
+                val_a.bytes, val_a.bytes + TURBO_UUID_SIZE,
+                val_b.bytes, val_b.bytes + TURBO_UUID_SIZE);
         } else if constexpr (std::is_same_v<T, FactList>) {
             auto fact_key = [](Fact const* fact) {
                 if (!fact) return std::pair<int64_t, uintptr_t>{0, 0};
@@ -197,6 +204,12 @@ std::string to_string(ConstraintValue const& val) {
                 return std::to_string(arg);
             } else if constexpr (std::is_same_v<T, double>) {
                 return std::to_string(arg);
+            } else if constexpr (std::is_same_v<T, turbo_uuid_t>) {
+                char text[TURBO_UUID_STRING_SIZE];
+                if (turbo_uuid_format(&arg, text, sizeof(text)) != TURBO_OK) {
+                    throw std::runtime_error("Failed to format turbo_uuid_t");
+                }
+                return text;
             } else if constexpr (std::is_same_v<T, FactList>) {
                 return "[FactList]";
             } else if constexpr (std::is_same_v<T, NilValue>) {
@@ -278,6 +291,8 @@ std::size_t ConstraintValueHasher::operator()(ConstraintValue const& v) const {
                     h ^= fact_hash + 0x9e3779b9 + (h << 6) + (h >> 2);
                 }
                 return h;
+            } else if constexpr (std::is_same_v<T, turbo_uuid_t>) {
+                return turbo_hash_bytes(arg.bytes, TURBO_UUID_SIZE, nullptr);
             } else if constexpr (std::is_same_v<T, NilValue>) {
                 return (size_t)0;
             } else if constexpr (std::is_same_v<T, std::shared_ptr<TypedList>>) {

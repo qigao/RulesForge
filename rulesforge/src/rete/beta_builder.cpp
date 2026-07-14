@@ -193,6 +193,7 @@ bool is_declared_runtime_scalar_field(std::optional<FieldType> type) {
         case FT_Float:
         case FT_Number:
         case FT_Boolean:
+        case FT_Uuid:
             return true;
         default:
             return false;
@@ -219,6 +220,7 @@ bool is_scalar_type_parameter(TypeParameter const& type) {
         case FT_Float:
         case FT_Number:
         case FT_Boolean:
+        case FT_Uuid:
             return true;
         default:
             return false;
@@ -285,6 +287,7 @@ bool is_runtime_compare_value_supported(ConstraintValue const& value) {
     return std::holds_alternative<int64_t>(value)
         || std::holds_alternative<double>(value)
         || std::holds_alternative<std::string>(value)
+        || std::holds_alternative<turbo_uuid_t>(value)
         || std::holds_alternative<NilValue>(value);
 }
 
@@ -313,6 +316,7 @@ bool is_runtime_map_key_supported(ConstraintValue const& value) {
     return std::holds_alternative<int64_t>(value)
         || std::holds_alternative<double>(value)
         || std::holds_alternative<std::string>(value)
+        || std::holds_alternative<turbo_uuid_t>(value)
         || std::holds_alternative<NilValue>(value)
         || std::holds_alternative<FactList>(value)
         || std::holds_alternative<std::shared_ptr<TypedList>>(value)

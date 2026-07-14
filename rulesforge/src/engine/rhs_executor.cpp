@@ -810,7 +810,8 @@ std::vector<::Fact*> RhsExecutor::collect_for_items(CompiledAction const& action
             Fact* iter_fact = callback_.create_fact("Iterator");
             std::visit([&](auto&& v) {
                 using T = std::decay_t<decltype(v)>;
-                if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, int64_t> || std::is_same_v<T, double>) {
+                if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, int64_t>
+                              || std::is_same_v<T, double> || std::is_same_v<T, turbo_uuid_t>) {
                     iter_fact->fields[std::string_view("value")] = v;
                 }
             }, cv);

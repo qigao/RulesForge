@@ -30,17 +30,17 @@ std::string read_file(std::string const& path) {
 }
 
 struct TurboJsonDeleter {
-    void operator()(json_value_t* value) const {
+    void operator()(turbo_json_doc_t* value) const {
         if (value) {
             turbo_free_json(&value);
         }
     }
 };
 
-using TurboJsonHandle = std::unique_ptr<json_value_t, TurboJsonDeleter>;
+using TurboJsonHandle = std::unique_ptr<turbo_json_doc_t, TurboJsonDeleter>;
 
 TurboJsonHandle parse_json_document(std::string const& content) {
-    json_value_t* root = nullptr;
+    turbo_json_doc_t* root = nullptr;
     int const rc =
         turbo_parse_json(reinterpret_cast<uint8_t const*>(content.data()), content.size(), &root);
     if (rc != 0 || root == nullptr) {

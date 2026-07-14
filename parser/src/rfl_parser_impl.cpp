@@ -13,7 +13,7 @@ void  RflParse(void* parser, int tokenType, RflLemonToken token);
 // Since we used %token_prefix TK_, the generated constants match our enum names.
 #include "rfl_grammar_lemon.h"
 
-static int token_type_to_lemon_id(TokenType t) {
+static int token_type_to_lemon_id(enum TokenType t) {
     switch (t) {
         case TokenType::TK_INTEGER:          return TOK_INTEGER;
         case TokenType::TK_DOUBLE:           return TOK_DOUBLE;

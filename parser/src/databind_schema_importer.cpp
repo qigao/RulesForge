@@ -45,8 +45,11 @@ FieldType schema_type_to_field_type(std::string_view type)
   if (type == "double") {
     return FT_Double;
   }
-  if (type == "uuid" || type == "datetime" || type == "date" || type == "time"
-      || type == "decimal" || type == "bigint" || type == "money") {
+  if (type == "uuid") {
+    return FT_Uuid;
+  }
+  if (type == "datetime" || type == "date" || type == "time" || type == "decimal"
+      || type == "bigint" || type == "money") {
     return FT_String;
   }
   if (type == "duration") {

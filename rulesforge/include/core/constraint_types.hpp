@@ -206,7 +206,8 @@ enum FieldType : uint16_t {
     FT_Object  = 1 << 8,
     FT_Unknown = 1 << 9,
     FT_Set     = 1 << 10,
-    FT_Map     = 1 << 11
+    FT_Map     = 1 << 11,
+    FT_Uuid    = 1 << 12
 };
 
 constexpr uint16_t FT_STRING_COMPAT = FT_String | FT_Object;
@@ -215,6 +216,7 @@ constexpr uint16_t FT_DOUBLE_COMPAT = FT_Double | FT_Float | FT_Number;
 constexpr uint16_t FT_LIST_COMPAT = FT_List;
 constexpr uint16_t FT_SET_COMPAT = FT_Set;
 constexpr uint16_t FT_MAP_COMPAT = FT_Map;
+constexpr uint16_t FT_UUID_COMPAT = FT_Uuid;
 
 inline FieldType parse_field_type(std::string_view s) {
     if (s == "String" || s == "string") return FT_String;
@@ -227,6 +229,7 @@ inline FieldType parse_field_type(std::string_view s) {
     if (s == "List" || s == "list") return FT_List;
     if (s == "Set" || s == "set") return FT_Set;
     if (s == "Map" || s == "map") return FT_Map;
+    if (s == "UUID" || s == "uuid") return FT_Uuid;
     if (s == "Object" || s == "object") return FT_Object;
     return FT_Unknown;
 }

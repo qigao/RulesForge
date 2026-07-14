@@ -1,6 +1,7 @@
 #include "tinytest.h"
 #include "rule_forge.h"
 #include "data_bind.h"
+#include "core/fact.hpp"
 
 #include <string>
 #include <cstdio>
@@ -22,6 +23,18 @@ std::filesystem::path write_temp_schema(std::string const& name, std::string con
     std::ofstream schema(path, std::ios::binary);
     schema << schema_text;
     return path;
+}
+
+int append_serialized_bytes(void const* data, size_t len, void* user) {
+    if (!data || !user) {
+        return -1;
+    }
+    static_cast<std::string*>(user)->append(static_cast<char const*>(data), len);
+    return 0;
+}
+
+int reject_serialized_bytes(void const*, size_t, void*) {
+    return -1;
 }
 }
 
@@ -179,6 +192,114 @@ suite("CAPI") {
         }
     }
 
+    group("DataBindObject") {
+        it("owns clones serializes and writes a schema-bound object") {
+            ruleforge_init();
+            auto schema_path = write_temp_schema(
+                "rulesforge_capi_databind_object.schema",
+                "schema ObjectApi [id(51), version(1), byte_order(little)]; "
+                "message Item { uint32 id; string name; }");
+            char const* json = R"({"id":7,"name":"alpha"})";
+            ruleforge_data_bind_object_t object = nullptr;
+            check_int_eq(ruleforge_data_bind_object_from_json(
+                             schema_path.string().c_str(), "Item", json,
+                             std::strlen(json), &object),
+                         RULES_FORGE_OK);
+            check_not_null(object);
+            check_str_eq(ruleforge_data_bind_object_get_type_name(object), "Item");
+
+            ruleforge_data_bind_object_t clone = nullptr;
+            check_int_eq(ruleforge_data_bind_object_clone(object, &clone), RULES_FORGE_OK);
+            check_not_null(clone);
+            check_int_eq(ruleforge_data_bind_object_destroy(object), RULES_FORGE_OK);
+            object = nullptr;
+
+            char* serialized = nullptr;
+            size_t serialized_len = 0;
+            check_int_eq(ruleforge_data_bind_object_serialize_json(
+                             clone, &serialized, &serialized_len), RULES_FORGE_OK);
+            check_not_null(serialized);
+            check_size_eq(serialized_len, std::strlen(serialized));
+            check_str_contains(serialized, "\"id\":7");
+            ruleforge_data_bind_serialized_free(serialized);
+
+            serialized = nullptr;
+            check_int_eq(ruleforge_data_bind_object_serialize_yaml(
+                             clone, &serialized, nullptr), RULES_FORGE_OK);
+            check_str_contains(serialized, "alpha");
+            ruleforge_data_bind_serialized_free(serialized);
+
+            serialized = nullptr;
+            check_int_eq(ruleforge_data_bind_object_serialize_xml(
+                             clone, &serialized, nullptr), RULES_FORGE_OK);
+            check_str_contains(serialized, "<id>7</id>");
+            ruleforge_data_bind_serialized_free(serialized);
+
+            std::string sink_output;
+            check_int_eq(ruleforge_data_bind_object_write_json(
+                             clone, append_serialized_bytes, &sink_output), RULES_FORGE_OK);
+            check_str_contains(sink_output.c_str(), "\"name\":\"alpha\"");
+            sink_output.clear();
+            check_int_eq(ruleforge_data_bind_object_write_yaml(
+                             clone, append_serialized_bytes, &sink_output), RULES_FORGE_OK);
+            check_str_contains(sink_output.c_str(), "alpha");
+            sink_output.clear();
+            check_int_eq(ruleforge_data_bind_object_write_xml(
+                             clone, append_serialized_bytes, &sink_output), RULES_FORGE_OK);
+            check_str_contains(sink_output.c_str(), "<name>alpha</name>");
+            check_int_eq(ruleforge_data_bind_object_write_json(
+                             clone, reject_serialized_bytes, nullptr),
+                         RULES_FORGE_ERROR_GENERIC);
+            check_str_contains(ruleforge_get_last_error_message(), "writer");
+
+            check_int_eq(ruleforge_data_bind_object_destroy(clone), RULES_FORGE_OK);
+            check_int_eq(ruleforge_data_bind_object_destroy(nullptr),
+                         RULES_FORGE_ERROR_INVALID_ARGUMENT);
+            std::filesystem::remove(schema_path);
+            ruleforge_cleanup();
+        }
+
+        it("constructs binary YAML XML and CSV objects") {
+            ruleforge_init();
+            auto schema_path = write_temp_schema(
+                "rulesforge_capi_databind_object_formats.schema",
+                "schema ObjectFormats [id(52), version(1), byte_order(little)]; "
+                "message Item { uint32 id; }");
+            uint8_t binary[4] = {0};
+            write_u32_le(binary, 0, 1);
+            char const* yaml = "id: 2\n";
+            char const* xml = "<Item><id>3</id></Item>";
+            char const* csv = "id\n4\n";
+
+            ruleforge_data_bind_object_t objects[4] = {};
+            check_int_eq(ruleforge_data_bind_object_from_binary(
+                             schema_path.string().c_str(), "Item", binary,
+                             sizeof(binary), &objects[0]), RULES_FORGE_OK);
+            check_int_eq(ruleforge_data_bind_object_from_yaml(
+                             schema_path.string().c_str(), "Item", yaml,
+                             std::strlen(yaml), &objects[1]), RULES_FORGE_OK);
+            check_int_eq(ruleforge_data_bind_object_from_xml(
+                             schema_path.string().c_str(), "Item", xml,
+                             std::strlen(xml), &objects[2]), RULES_FORGE_OK);
+            check_int_eq(ruleforge_data_bind_object_from_csv(
+                             schema_path.string().c_str(), "Item", csv,
+                             std::strlen(csv), 0, &objects[3]), RULES_FORGE_OK);
+
+            for (int i = 0; i < 4; ++i) {
+                check_not_null(objects[i]);
+                char* json = nullptr;
+                check_int_eq(ruleforge_data_bind_object_serialize_json(
+                                 objects[i], &json, nullptr), RULES_FORGE_OK);
+                std::string expected = "\"id\":" + std::to_string(i + 1);
+                check_str_contains(json, expected.c_str());
+                ruleforge_data_bind_serialized_free(json);
+                check_int_eq(ruleforge_data_bind_object_destroy(objects[i]), RULES_FORGE_OK);
+            }
+            std::filesystem::remove(schema_path);
+            ruleforge_cleanup();
+        }
+    }
+
     group("Knowledge Base Management") {
         it("creates and destroys knowledge base") {
             ruleforge_init();
@@ -276,6 +397,58 @@ end
     }
 
     group("Stateful Session and Fact Management") {
+        it("adds an independently owned DataBindObject without consuming it") {
+            ruleforge_init();
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+            auto schema_path = write_temp_schema(
+                "rulesforge_capi_databind_object_session.schema",
+                "schema ObjectSession [id(53), version(1), byte_order(little)]; "
+                "message ObjectFact { int32 value; }");
+            std::string rfl = std::string("import \"")
+                + schema_path.generic_string()
+                + R"(";
+query "FindObjectFact"
+    $fact : ObjectFact(value == 17)
+end
+)";
+            check_int_eq(ruleforge_kb_load_drl(kb, rfl.c_str()), RULES_FORGE_OK);
+
+            char const* json = R"({"value":17})";
+            ruleforge_data_bind_object_t object = nullptr;
+            check_int_eq(ruleforge_data_bind_object_from_json(
+                             schema_path.string().c_str(), "ObjectFact", json,
+                             std::strlen(json), &object), RULES_FORGE_OK);
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            ruleforge_fact_t fact = nullptr;
+            check_int_eq(ruleforge_session_add_data_bind_object(
+                             session, object, &fact), RULES_FORGE_OK);
+            check_not_null(fact);
+
+            char* serialized = nullptr;
+            check_int_eq(ruleforge_data_bind_object_serialize_json(
+                             object, &serialized, nullptr), RULES_FORGE_OK);
+            check_str_contains(serialized, "\"value\":17");
+            ruleforge_data_bind_serialized_free(serialized);
+            check_int_eq(ruleforge_data_bind_object_destroy(object), RULES_FORGE_OK);
+
+            int64_t value = 0;
+            check_int_eq(ruleforge_fact_get_field_as_int(fact, "value", &value),
+                         RULES_FORGE_OK);
+            check_int_eq(static_cast<int>(value), 17);
+            ruleforge_query_result_t result = nullptr;
+            check_int_eq(ruleforge_session_query(
+                             session, "FindObjectFact", &result), RULES_FORGE_OK);
+            check_int_eq(ruleforge_query_result_get_size(result), 1);
+
+            check_int_eq(ruleforge_query_result_destroy(result), RULES_FORGE_OK);
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            std::filesystem::remove(schema_path);
+            ruleforge_cleanup();
+        }
+
         it("adds schema-bound JSON fact through TurboUtils DataBind") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;
@@ -594,13 +767,18 @@ end
                 + R"(";
                     query "FindScalar"
                         $s : ScalarFact(
-                            id == "01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001",
                             trade_date == "2026-06-28",
                             trade_time == "09:30:05.123",
                             latency == 5405250,
                             price == "123.45",
                             sequence == "123456789012345678901234567890",
                             total == "USD 123.45"
+                        )
+                    end
+
+                    query "StringUuidDoesNotMatch"
+                        $s : ScalarFact(
+                            id == "01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001"
                         )
                     end
                 )";
@@ -630,6 +808,26 @@ end
                 RULES_FORGE_OK);
             check_not_null(fact);
 
+            auto const* internal_fact = reinterpret_cast<Fact const*>(fact);
+            auto id_field = internal_fact->fields.find("id");
+            check(id_field != internal_fact->fields.end());
+            auto const* uuid = id_field != internal_fact->fields.end()
+                ? std::get_if<turbo_uuid_t>(&id_field->second)
+                : nullptr;
+            check_not_null(uuid);
+            turbo_uuid_t expected_uuid{};
+            check_int_eq(
+                turbo_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &expected_uuid),
+                TURBO_OK);
+            check(uuid != nullptr && turbo_uuid_equal(uuid, &expected_uuid));
+
+            char uuid_text_buffer[64] = {0};
+            size_t uuid_text_length = 0;
+            check(
+                ruleforge_fact_get_field_as_string(
+                    fact, "id", uuid_text_buffer, sizeof(uuid_text_buffer), &uuid_text_length)
+                != RULES_FORGE_OK);
+
             int64_t latency = 0;
             check_int_eq(ruleforge_fact_get_field_as_int(fact, "latency", &latency), RULES_FORGE_OK);
             check_int_eq((int)latency, 5405250);
@@ -650,6 +848,14 @@ end
             check_int_eq(ruleforge_session_query(session, "FindScalar", &query_result), RULES_FORGE_OK);
             check_not_null(query_result);
             check_int_eq(ruleforge_query_result_get_size(query_result), 1);
+
+            check_int_eq(ruleforge_query_result_destroy(query_result), RULES_FORGE_OK);
+            query_result = nullptr;
+            check_int_eq(
+                ruleforge_session_query(session, "StringUuidDoesNotMatch", &query_result),
+                RULES_FORGE_OK);
+            check_not_null(query_result);
+            check_int_eq(ruleforge_query_result_get_size(query_result), 0);
 
             check_int_eq(ruleforge_query_result_destroy(query_result), RULES_FORGE_OK);
             check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
@@ -1384,15 +1590,31 @@ end
                          RULES_FORGE_OK);
             check_int_eq(ruleforge_continuous_result_destroy(result), RULES_FORGE_OK);
 
+            char const* object_json = R"({"value":9})";
+            ruleforge_data_bind_object_t object = nullptr;
+            check_int_eq(ruleforge_data_bind_object_from_json(
+                             schema_path.string().c_str(), "Event", object_json,
+                             std::strlen(object_json), &object), RULES_FORGE_OK);
             result = nullptr;
-            check_int_eq(ruleforge_continuous_advance_watermark(session, 201, &result),
+            check_int_eq(ruleforge_continuous_push_data_bind_object(
+                             session, object, "event-3", "events", 102, &result),
+                         RULES_FORGE_OK);
+            check_int_eq(ruleforge_continuous_result_get_rules_fired(result), 1);
+            check_int_eq(ruleforge_continuous_acknowledge(
+                             session, ruleforge_continuous_result_get_batch_id(result)),
+                         RULES_FORGE_OK);
+            check_int_eq(ruleforge_continuous_result_destroy(result), RULES_FORGE_OK);
+            check_int_eq(ruleforge_data_bind_object_destroy(object), RULES_FORGE_OK);
+
+            result = nullptr;
+            check_int_eq(ruleforge_continuous_advance_watermark(session, 202, &result),
                          RULES_FORGE_OK);
             int64_t watermark = 0;
             int has_watermark = 0;
             check_int_eq(ruleforge_continuous_result_get_watermark(
                              result, &watermark, &has_watermark), RULES_FORGE_OK);
             check_int_eq(has_watermark, 1);
-            check_int_eq(static_cast<int>(watermark), 201);
+            check_int_eq(static_cast<int>(watermark), 202);
             check_int_eq(ruleforge_continuous_acknowledge(
                              session, ruleforge_continuous_result_get_batch_id(result)),
                          RULES_FORGE_OK);
@@ -1400,7 +1622,7 @@ end
 
             ruleforge_continuous_metrics_t metrics{};
             check_int_eq(ruleforge_continuous_get_metrics(session, &metrics), RULES_FORGE_OK);
-            check_size_eq(metrics.accepted_events, 2);
+            check_size_eq(metrics.accepted_events, 3);
             check_size_eq(metrics.active_events, 0);
 
             check_int_eq(ruleforge_continuous_session_destroy(session), RULES_FORGE_OK);

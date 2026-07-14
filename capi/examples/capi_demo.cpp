@@ -74,14 +74,14 @@ ruleforge_execution_mode_t parse_execution_mode(const std::string &mode) {
 
 
 struct TurboJsonDeleter {
-  void operator()(json_value_t *value) const {
+  void operator()(turbo_json_doc_t *value) const {
     if (value) {
       turbo_free_json(&value);
     }
   }
 };
 
-using TurboJsonHandle = std::unique_ptr<json_value_t, TurboJsonDeleter>;
+using TurboJsonHandle = std::unique_ptr<turbo_json_doc_t, TurboJsonDeleter>;
 
 struct TurboJsonStringDeleter {
   void operator()(char *value) const {
@@ -94,7 +94,7 @@ struct TurboJsonStringDeleter {
 using TurboJsonStringHandle = std::unique_ptr<char, TurboJsonStringDeleter>;
 
 TurboJsonHandle parse_json_document(const std::string &content) {
-  json_value_t *root = nullptr;
+  turbo_json_doc_t *root = nullptr;
   int rc = turbo_parse_json(reinterpret_cast<const uint8_t *>(content.data()), content.size(), &root);
   if (rc != 0 || !root) {
     if (root) {

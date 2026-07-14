@@ -48,11 +48,17 @@ typedef struct ruleforge_fact_handle_s *ruleforge_fact_t;
 typedef struct ruleforge_knowledge_base_handle_s *ruleforge_knowledge_base_t;
 typedef struct ruleforge_stateful_session_handle_s *ruleforge_stateful_session_t;
 typedef struct ruleforge_query_result_handle_s *ruleforge_query_result_t;
+typedef struct ruleforge_data_bind_object_handle_s *ruleforge_data_bind_object_t;
 typedef struct ruleforge_data_bind_stream_handle_s *ruleforge_data_bind_stream_t;
 typedef struct ruleforge_continuous_session_handle_s *ruleforge_continuous_session_t;
 typedef struct ruleforge_continuous_result_handle_s *ruleforge_continuous_result_t;
 typedef struct ruleforge_continuous_data_bind_stream_handle_s
     *ruleforge_continuous_data_bind_stream_t;
+
+// Byte sink used by DataBindObject writers. Each callback supplies an arbitrary
+// byte chunk; callback count and chunk boundaries have no business semantics.
+// Return zero to continue, or non-zero to abort the write.
+typedef int (*ruleforge_write_fn)(const void *data, size_t len, void *user);
 
 #define RULEFORGE_CONTINUOUS_CONFIG_ABI_V1 1u
 
@@ -116,6 +122,75 @@ CXX_C_API const char *ruleforge_get_version(void);
 // The returned pointer remains valid until the next RulesForge API call on the
 // same thread.
 CXX_C_API const char *ruleforge_get_last_error_message(void);
+
+// --- Schema-bound DataBind Objects ---
+// Each constructor loads schema_path and returns an independently owned object.
+// The object remains valid after the internal DataBind codec is released and
+// must be destroyed with ruleforge_data_bind_object_destroy(). Text inputs are
+// length-delimited UTF-8 and need not be NUL-terminated.
+//
+// Common parameters:
+//   schema_path: trusted DataBind schema file used to bind the object.
+//   fact_type: schema message type copied into the returned object.
+//   data/text + len: length-delimited source payload.
+//   out_object: receives NULL on failure and a caller-owned handle on success.
+// Returns RULES_FORGE_OK, RULES_FORGE_ERROR_INVALID_ARGUMENT for schema/input
+// errors, RULES_FORGE_ERROR_MEMORY_ALLOCATION for allocation failure, or
+// RULES_FORGE_ERROR_GENERIC for runtime/I/O failure. Detailed diagnostics are
+// available through ruleforge_get_last_error_message().
+//
+// Example:
+//   ruleforge_data_bind_object_t object = NULL;
+//   const char json[] = "{\"id\":7}";
+//   if (ruleforge_data_bind_object_from_json(
+//           "item.schema", "Item", json, sizeof(json) - 1, &object)
+//       == RULES_FORGE_OK) {
+//     ruleforge_data_bind_object_destroy(object);
+//   }
+CXX_C_API ruleforge_status_t ruleforge_data_bind_object_from_binary(
+    const char *schema_path, const char *fact_type, const uint8_t *data,
+    size_t len, ruleforge_data_bind_object_t *out_object);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_object_from_json(
+    const char *schema_path, const char *fact_type, const char *json,
+    size_t len, ruleforge_data_bind_object_t *out_object);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_object_from_yaml(
+    const char *schema_path, const char *fact_type, const char *yaml,
+    size_t len, ruleforge_data_bind_object_t *out_object);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_object_from_xml(
+    const char *schema_path, const char *fact_type, const char *xml,
+    size_t len, ruleforge_data_bind_object_t *out_object);
+// csv must include a header row; row is the zero-based data-row index.
+CXX_C_API ruleforge_status_t ruleforge_data_bind_object_from_csv(
+    const char *schema_path, const char *fact_type, const char *csv,
+    size_t len, size_t row, ruleforge_data_bind_object_t *out_object);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_object_clone(
+    ruleforge_data_bind_object_t object,
+    ruleforge_data_bind_object_t *out_object);
+
+// Returns a borrowed type-name view valid until object is destroyed.
+CXX_C_API const char *ruleforge_data_bind_object_get_type_name(
+    ruleforge_data_bind_object_t object);
+
+// Serialized JSON/YAML/XML buffers are owned by the caller and must be released
+// with ruleforge_data_bind_serialized_free(). CSV and binary object serialization
+// are not provided by DataBind 1.10.0. out_len is optional; output buffers are
+// set to NULL on failure. Writers return RULES_FORGE_ERROR_GENERIC when the sink
+// rejects a chunk and otherwise use the same status mapping as serialization.
+CXX_C_API ruleforge_status_t ruleforge_data_bind_object_serialize_json(
+    ruleforge_data_bind_object_t object, char **out_json, size_t *out_len);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_object_serialize_yaml(
+    ruleforge_data_bind_object_t object, char **out_yaml, size_t *out_len);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_object_serialize_xml(
+    ruleforge_data_bind_object_t object, char **out_xml, size_t *out_len);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_object_write_json(
+    ruleforge_data_bind_object_t object, ruleforge_write_fn write, void *user);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_object_write_yaml(
+    ruleforge_data_bind_object_t object, ruleforge_write_fn write, void *user);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_object_write_xml(
+    ruleforge_data_bind_object_t object, ruleforge_write_fn write, void *user);
+CXX_C_API void ruleforge_data_bind_serialized_free(char *data);
+CXX_C_API ruleforge_status_t ruleforge_data_bind_object_destroy(
+    ruleforge_data_bind_object_t object);
 
 // --- Knowledge Base (Rules) Management ---
 // Creates a new, empty Knowledge Base.
@@ -187,6 +262,16 @@ CXX_C_API ruleforge_status_t ruleforge_continuous_session_create(
     ruleforge_continuous_session_t *out_session);
 CXX_C_API ruleforge_status_t ruleforge_continuous_session_destroy(
     ruleforge_continuous_session_t session);
+
+// Commits an existing DataBindObject as one event. The session copies the
+// object's value; ownership remains with the caller. event_id and entry_point
+// must be non-NULL and out_result receives NULL on failure. The object's schema
+// type must already be imported by the knowledge base.
+CXX_C_API ruleforge_status_t ruleforge_continuous_push_data_bind_object(
+    ruleforge_continuous_session_t session,
+    ruleforge_data_bind_object_t object, const char *event_id,
+    const char *entry_point, int64_t event_time_ms,
+    ruleforge_continuous_result_t *out_result);
 
 // Parses one schema-bound JSON object and commits it as one event step.
 CXX_C_API ruleforge_status_t ruleforge_continuous_push_json_schema(
@@ -301,6 +386,15 @@ CXX_C_API ruleforge_status_t ruleforge_continuous_result_get_output(
     ruleforge_continuous_result_t result, int index, ruleforge_fact_t *out_fact);
 CXX_C_API ruleforge_status_t ruleforge_continuous_result_destroy(
     ruleforge_continuous_result_t result);
+
+// Adds an existing DataBindObject as one fact. The session copies the object's
+// value; ownership remains with the caller and the object may be reused. out_fact
+// is optional. The object's schema type must already be imported by the session's
+// knowledge base; insertion and consistency errors use the existing session
+// status codes and ruleforge_get_last_error_message().
+CXX_C_API ruleforge_status_t ruleforge_session_add_data_bind_object(
+    ruleforge_stateful_session_t session, ruleforge_data_bind_object_t object,
+    ruleforge_fact_t *out_fact);
 
 // Adds one schema-bound JSON fact.
 CXX_C_API ruleforge_status_t

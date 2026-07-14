@@ -145,7 +145,7 @@ suite("RFL Engine") {
                 schema << "schema Market [id(7), version(1), byte_order(little)]; "
                           "enum Tier <uint8> { Bronze = 1; Silver = 2; } "
                           "message Customer { int32 age; Tier tier; list<string> tags; "
-                          "map<string,int32> scores; string name; }";
+                          "map<string,int32> scores; string name; uuid id; }";
             }
 
             std::string const drl = std::string("import \"")
@@ -172,7 +172,7 @@ suite("RFL Engine") {
                                    });
             check(it != declarations.end());
             if (it != declarations.end()) {
-                check(it->fields.size() == 5);
+                check(it->fields.size() == 6);
                 check(it->fields[0].name == "age");
                 check(it->fields[0].type == FT_Int);
                 check(it->fields[1].name == "tier");
@@ -183,6 +183,8 @@ suite("RFL Engine") {
                 check(it->fields[3].type == FT_Map);
                 check(it->fields[4].name == "name");
                 check(it->fields[4].type == FT_String);
+                check(it->fields[5].name == "id");
+                check(it->fields[5].type == FT_Uuid);
             }
             check(kb->get_parser_state().parsed_enums.size() == 1);
         }

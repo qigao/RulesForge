@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core/rfl_strings.hpp"
+#include <turbo_uuid.h>
+
 #include <chrono>
 #include <cstdint>
 #include <map>
@@ -23,9 +25,17 @@ struct TypedList;
 struct ValueSet;
 struct ValueMap;
 
+inline bool operator==(turbo_uuid_t const &a, turbo_uuid_t const &b) {
+  return turbo_uuid_equal(&a, &b);
+}
+
+inline bool operator!=(turbo_uuid_t const &a, turbo_uuid_t const &b) {
+  return !(a == b);
+}
+
 using ConstraintValue =
     std::variant<std::string, int64_t, double, FactList, NilValue, std::shared_ptr<TypedList>,
-                 std::shared_ptr<ValueSet>, std::shared_ptr<ValueMap>>;
+                 std::shared_ptr<ValueSet>, std::shared_ptr<ValueMap>, turbo_uuid_t>;
 
 struct ConstraintValueCompare {
   bool operator()(ConstraintValue const &a, ConstraintValue const &b) const;
@@ -97,7 +107,8 @@ concept ConstraintValueMember =
     std::is_same_v<T, NilValue>                    ||
     std::is_same_v<T, std::shared_ptr<TypedList>>  ||
     std::is_same_v<T, std::shared_ptr<ValueSet>>   ||
-    std::is_same_v<T, std::shared_ptr<ValueMap>>;
+    std::is_same_v<T, std::shared_ptr<ValueMap>>   ||
+    std::is_same_v<T, turbo_uuid_t>;
 
 /**
  * @brief 编译期检测 T 是否为 getFieldAs 支持的安全提取类型。

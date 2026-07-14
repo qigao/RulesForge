@@ -19,7 +19,7 @@ private:
     RflToken scan_rhs();
     void skip_whitespace_and_comments();
 
-    RflToken make_token(TokenType type, char const* start) const;
+    RflToken make_token(enum TokenType type, char const* start) const;
 
     std::string_view source_;
     std::string file_name_;
