@@ -18,7 +18,7 @@ arbitrary host functions.
 
 ## Public Contract
 
-The installed C contract is [`include/rule_forge.h`](../include/rule_forge.h).
+The installed C contract is [`include/rules_forge.h`](../include/rules_forge.h).
 It defines ownership, thread affinity, status codes, DataBind input functions,
 and continuous-session functions. The C++ headers under `rulesforge/include`
 are intended for applications that need direct engine integration.

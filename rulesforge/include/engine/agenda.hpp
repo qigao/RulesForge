@@ -2,10 +2,15 @@
 #define AGENDA_HPP
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <queue>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "core/token.hpp"
@@ -14,10 +19,6 @@
 
 class Agenda {
 public:
-    struct PoppedActivation {
-        int salience;
-        size_t hash;
-    };
     struct PoppedActivationItem {
         int salience;
         Activation activation;
@@ -128,49 +129,6 @@ public:
         return std::nullopt;
     }
 
-    std::vector<PoppedActivation> pop_next_batch(size_t max_items) {
-        std::vector<PoppedActivation> out;
-        out.reserve(max_items);
-        if (max_items == 0) return out;
-
-        size_t stale_skipped = 0;
-        std::vector<std::pair<int, size_t>> deferred;
-        deferred.reserve(16);
-        std::string const current_focus = get_focus();
-        bool const main_focus = (current_focus == "MAIN");
-
-        while (!agenda_queue_.empty() && out.size() < max_items) {
-            auto [salience, activation_hash] = agenda_queue_.top();
-            agenda_queue_.pop();
-
-            auto map_it = agenda_map_.find(activation_hash);
-            if (map_it == agenda_map_.end()) {
-                stale_skipped++;
-                continue;
-            }
-
-            Activation& candidate = map_it->second;
-            bool in_focus = false;
-            if (candidate.rule->agenda_group.has_value()) {
-                in_focus = (*candidate.rule->agenda_group == current_focus);
-            } else {
-                in_focus = main_focus;
-            }
-
-            if (in_focus) {
-                out.push_back({salience, activation_hash});
-            } else {
-                deferred.push_back({salience, activation_hash});
-            }
-        }
-
-        for (auto const& entry : deferred) {
-            agenda_queue_.push(entry);
-        }
-        compact_if_needed(stale_skipped);
-        return out;
-    }
-
     std::vector<PoppedActivationItem> pop_next_batch_activations(size_t max_items,
                                                                  uint64_t* select_us = nullptr,
                                                                  uint64_t* detach_us = nullptr) {
@@ -242,35 +200,6 @@ public:
         if (select_us) *select_us += select_acc;
         if (detach_us) *detach_us += detach_acc;
         return out;
-    }
-
-    std::optional<Activation> take_by_hash(size_t activation_hash) {
-        auto it = agenda_map_.find(activation_hash);
-        if (it == agenda_map_.end()) {
-            return std::nullopt;
-        }
-
-        Activation out = std::move(it->second);
-
-        if (out.rule->activation_group) {
-            auto group_it = activation_group_map_.find(*out.rule->activation_group);
-            if (group_it != activation_group_map_.end()) {
-                group_it->second.erase(activation_hash);
-                if (group_it->second.empty()) {
-                    activation_group_map_.erase(group_it);
-                }
-            }
-        }
-
-        agenda_map_.erase(it);
-        return out;
-    }
-
-    void requeue_batch(std::vector<PoppedActivation> const& batch, size_t start_index = 0) {
-        if (start_index >= batch.size()) return;
-        for (size_t i = start_index; i < batch.size(); ++i) {
-            agenda_queue_.push({batch[i].salience, batch[i].hash});
-        }
     }
 
     void requeue_batch_activations(std::vector<PoppedActivationItem> const& batch, size_t start_index = 0) {

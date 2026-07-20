@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+struct DataBind;
+
 // This struct has been simplified to hold only the final results of parsing.
 // The temporary state used by a previous action-based parser design has been removed.
 // This makes the struct a simple, copyable data container for the AST.
@@ -18,11 +20,17 @@ struct SchemaImport {
     std::size_t column = 0;
 };
 
+struct ImportedDataBindSchema {
+    std::string path;
+    std::shared_ptr<DataBind> codec;
+};
+
 struct parser_state {
     // Top-level metadata
     std::string package_name;
     std::vector<std::string> parsed_imports;
     std::vector<SchemaImport> schema_imports;
+    std::vector<ImportedDataBindSchema> imported_data_bind_schemas;
 
     // All successfully parsed top-level items
     std::vector<ParsedRule> parsed_rules;

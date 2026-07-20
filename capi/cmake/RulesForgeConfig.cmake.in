@@ -6,5 +6,5 @@ check_required_components(RulesForge)
 
 # Provide convenient alias
 if(NOT TARGET RulesForge::RulesForge)
-    add_library(RulesForge::RulesForge ALIAS RulesForge::rule_forge)
+    add_library(RulesForge::RulesForge ALIAS RulesForge::rules_forge)
 endif()

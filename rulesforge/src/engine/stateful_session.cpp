@@ -69,8 +69,7 @@ namespace {
 StatefulSession::StatefulSession(private_key, std::shared_ptr<KnowledgeBase const> kb) :
     kb_(std::move(kb)),
     token_pool_(1024), // Initial capacity: 1024 tokens
-    fact_arena_(64 * 1024 * 1024),   // 64MB
-    agenda_(kb_->agenda_implementation())
+    fact_arena_(64 * 1024 * 1024)   // 64MB
 {
     // Initialize native RHS executor
     rhs_executor_ = std::make_unique<RhsExecutor>(*this);
@@ -153,10 +152,21 @@ void StatefulSession::validate_fact_for_insert(Fact const& fact) const {
     }
 }
 
+void StatefulSession::annotate_fact_enum_names(Fact& fact) const {
+    for (auto const& [field_name, field_value] : fact.fields) {
+        if (fact.enum_names.find(field_name) == fact.enum_names.end()) {
+            if (auto enum_name = kb_->enum_name_for_field(fact.type, field_name, field_value)) {
+                fact.enum_names[field_name] = std::move(*enum_name);
+            }
+        }
+    }
+}
+
 void StatefulSession::add_fact(Fact* fact) {
     if (!fact) return;
     ensure_consistent_for_mutation("adding facts");
     fact->type = canonicalize_fact_type_name(fact->type);
+    annotate_fact_enum_names(*fact);
     validate_fact_for_insert(*fact);
 
     if (fact->id == 0) { fact->id = working_memory_.reserve_next_id(); }
@@ -196,6 +206,7 @@ void StatefulSession::add_facts(std::vector<Fact*> const& facts) {
     for (auto* fact : facts) {
         if (!fact) continue;
         fact->type = canonicalize_fact_type_name(fact->type);
+        annotate_fact_enum_names(*fact);
         validate_fact_for_insert(*fact);
         validated_facts.push_back(fact);
     }
@@ -1229,7 +1240,7 @@ void StatefulSession::reset() {
     facts_retracted_total_ = 0;
     reset_runtime_counters();
 
-    agenda_.reset(kb_->agenda_implementation());
+    agenda_ = Agenda{};
     wme_cache_.clear();
     working_memory_.clear();
     retained_shared_facts_.clear();

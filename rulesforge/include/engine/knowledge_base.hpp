@@ -2,10 +2,10 @@
 #define KNOWLEDGE_BASE_HPP
 
 #include "core/rfl_parser_state.hpp"
+#include "core/value_types.hpp"
 #include "data/fact_type_registry.hpp"
 #include "engine/rhs_backend_plan.hpp"
 #include "engine/runtime_predicate.hpp"
-#include "engine/agenda_selector.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -28,6 +29,7 @@ struct ParsedQuery;
 struct ParsedPattern;
 struct ConstraintNode;
 struct CompiledNetwork;
+struct Fact;
 
 // Native function callback type (shared with JSScriptingManager)
 using NativeFunctionCallback = int (*)(void* ctx, int argc, const char** argv, char** out_result);
@@ -58,18 +60,6 @@ public:
     ParsedRule const* find_rule_by_name(std::string const& name) const;
     void set_phreak_experimental(bool enabled) { phreak_experimental_ = enabled; }
     bool is_phreak_experimental() const { return phreak_experimental_; }
-    void set_agenda_implementation(rulesforge::AgendaImplementation implementation) {
-        agenda_implementation_ = implementation;
-    }
-    rulesforge::AgendaImplementation agenda_implementation() const {
-        return agenda_implementation_;
-    }
-    void set_execution_mode(rulesforge::ExecutionMode mode) {
-        agenda_implementation_ = rulesforge::execution_mode_to_agenda_implementation(mode);
-    }
-    rulesforge::ExecutionMode execution_mode() const {
-        return rulesforge::agenda_implementation_to_execution_mode(agenda_implementation_);
-    }
 
     // --- API ---
 
@@ -118,6 +108,12 @@ public:
     std::vector<ParsedRule> const& get_rules() const { return processed_rules_; }
 
     parser_state const& get_parser_state() const { return parser_state_; }
+    DataBind* find_data_bind_codec(std::string const& type_name) const;
+    std::optional<std::string> enum_name_for_field(std::string const& fact_type,
+                                                   std::string_view field_name,
+                                                   ConstraintValue const& value) const;
+    std::string const* find_data_bind_schema_path(std::string const& type_name) const;
+    bool has_data_bind_type(std::string const& type_name) const;
     rulesforge::RhsBackendPlanSummary rhs_backend_summary() const;
     std::string rhs_backend_summary_text() const;
     std::string rhs_backend_debug_dump() const;
@@ -142,6 +138,7 @@ private:
                                              std::vector<ConstraintValue> const& args) const;
 
     parser_state parser_state_;
+    std::unordered_map<std::string, std::size_t> data_bind_type_schema_index_;
     std::vector<ParsedRule> processed_rules_;
     std::unordered_map<std::string, size_t> rule_name_index_;  // name -> index in processed_rules_
     std::shared_ptr<AccumulatorRegistry> accumulator_registry_;
@@ -152,8 +149,6 @@ private:
     std::unique_ptr<CompiledNetwork> compiled_network_;
     std::unique_ptr<rulesforge::RhsBackendPlan> rhs_backend_plan_;
     bool phreak_experimental_ = false;
-    rulesforge::AgendaImplementation agenda_implementation_ =
-        rulesforge::default_agenda_implementation();
 };
 
 #endif   // KNOWLEDGE_BASE_HPP

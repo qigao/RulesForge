@@ -1,17 +1,16 @@
 include(GenerateExportHeader)
 
-# Version information (keep in sync with rule_forge.h). 0.5 removes deprecated
-# schema-less input APIs and all rule-side external-call registration APIs.
+# Version information (keep in sync with rules_forge.h).
 set(RULEFORGE_VERSION_MAJOR 0)
-set(RULEFORGE_VERSION_MINOR 5)
+set(RULEFORGE_VERSION_MINOR 7)
 set(RULEFORGE_VERSION_PATCH 0)
 
 # Define the target name for the shared library
-set(CAPI_TARGET_NAME rule_forge)
+set(CAPI_TARGET_NAME rules_forge)
 
 # Add the shared library target
 add_library(
-    ${CAPI_TARGET_NAME} SHARED src/rule_forge.cpp rfl_value_bridge.cpp
+    ${CAPI_TARGET_NAME} SHARED src/rules_forge.cpp rfl_value_bridge.cpp
                                binary_splitters.c
 )
 

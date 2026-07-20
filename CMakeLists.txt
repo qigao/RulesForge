@@ -4,7 +4,7 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 20)
 # Set additional project information
 set(CMAKE_PROJECT_VERSION_MAJOR 0)
-set(CMAKE_PROJECT_VERSION_MINOR 3)
+set(CMAKE_PROJECT_VERSION_MINOR 7)
 set(CMAKE_PROJECT_VERSION_PATCH 0)
 
 set(PROJECT_VERSION
@@ -32,38 +32,27 @@ endif()
 # Set the features of the project
 include(ProjectOptions.cmake)
 
-# Option to use high-performance Agenda (AgendaV2, fixed-priority BucketQueue)
-option(RULESFORGE_USE_AGENDA_V2
-       "Use high-performance AgendaV2 (10x faster, MQTT optimized)" OFF
-)
-if(RULESFORGE_USE_AGENDA_V2)
-    message(STATUS "Using AgendaV2 (fixed-priority bucket queue, MQTT optimized)")
-    add_compile_definitions(RULESFORGE_USE_AGENDA_V2)
-else()
-    message(STATUS "Using original Agenda (precise salience)")
-endif()
-
 find_package(OpenSSL REQUIRED)
 
 find_package(TurboUtils CONFIG REQUIRED PATHS "${TURBO_UTILS_ROOT}")
 
 include(CheckCSourceCompiles)
 set(CMAKE_REQUIRED_LIBRARIES TurboUtils::DataBind)
-unset(RULESFORGE_HAS_DATABIND_1_10 CACHE)
+unset(RULESFORGE_HAS_DATABIND_1_11 CACHE)
 check_c_source_compiles([[
   #include <data_bind.h>
-  #if DATA_BIND_VERSION < 11000
-  #error "RulesForge requires DataBind 1.10.0 or newer"
+  #if DATA_BIND_VERSION < 11100
+  #error "RulesForge requires DataBind 1.11.0 or newer"
   #endif
   int main() {
     DataBindValue *copy = NULL;
     return data_bind_value_clone(NULL, &copy) == DATA_BIND_ERR_INVALID_ARG ? 0 : 1;
   }
-]] RULESFORGE_HAS_DATABIND_1_10)
+]] RULESFORGE_HAS_DATABIND_1_11)
 unset(CMAKE_REQUIRED_LIBRARIES)
-if(NOT RULESFORGE_HAS_DATABIND_1_10)
+if(NOT RULESFORGE_HAS_DATABIND_1_11)
     message(FATAL_ERROR
-            "RulesForge requires DataBind 1.10.0 or newer with data_bind_value_clone()")
+            "RulesForge requires DataBind 1.11.0 or newer")
 endif()
 
 # Output files directory

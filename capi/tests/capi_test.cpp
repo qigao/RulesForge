@@ -1,5 +1,5 @@
 #include "tinytest.h"
-#include "rule_forge.h"
+#include "rules_forge.h"
 #include "data_bind.h"
 #include "core/fact.hpp"
 
@@ -293,6 +293,20 @@ suite("CAPI") {
                 std::string expected = "\"id\":" + std::to_string(i + 1);
                 check_str_contains(json, expected.c_str());
                 ruleforge_data_bind_serialized_free(json);
+
+                char* csv_output = nullptr;
+                check_int_eq(ruleforge_data_bind_object_serialize_csv(
+                                 objects[i], &csv_output, nullptr), RULES_FORGE_OK);
+                check_str_contains(csv_output, "id");
+                ruleforge_data_bind_serialized_free(csv_output);
+
+                uint8_t* binary_output = nullptr;
+                size_t binary_len = 0;
+                check_int_eq(ruleforge_data_bind_object_serialize_binary(
+                                 objects[i], &binary_output, &binary_len), RULES_FORGE_OK);
+                check_size_eq(binary_len, 4);
+                check_not_null(binary_output);
+                ruleforge_data_bind_binary_free(binary_output);
                 check_int_eq(ruleforge_data_bind_object_destroy(objects[i]), RULES_FORGE_OK);
             }
             std::filesystem::remove(schema_path);
@@ -307,14 +321,61 @@ suite("CAPI") {
 
             check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
             check_not_null(kb);
-            check_int_eq(ruleforge_kb_set_execution_mode(kb, RULES_FORGE_EXECUTION_MODE_V2_HIGH_PERFORMANCE),
-                         RULES_FORGE_OK);
-            check_str_eq(ruleforge_kb_get_execution_mode(kb), "v2_high_performance");
-            check_int_eq(ruleforge_kb_set_execution_mode(kb, RULES_FORGE_EXECUTION_MODE_V1_STANDARD),
-                         RULES_FORGE_OK);
-            check_str_eq(ruleforge_kb_get_execution_mode(kb), "v1_standard");
             check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
 
+            ruleforge_cleanup();
+        }
+
+        it("reuses imported schemas and exposes enum names") {
+            ruleforge_init();
+            auto schema_path = write_temp_schema(
+                "rulesforge_capi_kb_schema_registry.schema",
+                "schema Registry [id(53), version(1), byte_order(little)]; "
+                "enum Side <uint8> { Buy = 1; Sell = 2; } "
+                "message Order { uint32 id; Side side; }");
+            std::string rfl = std::string("import schema \"")
+                + schema_path.generic_string()
+                + "\"\nquery \"Orders\"\n$o : Order()\nend\n";
+
+            ruleforge_knowledge_base_t kb = nullptr;
+            check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_load_drl(kb, rfl.c_str()), RULES_FORGE_OK);
+
+            int exists = 0;
+            check_int_eq(ruleforge_kb_has_schema_type(kb, "Order", &exists), RULES_FORGE_OK);
+            check_int_eq(exists, 1);
+            check_int_eq(ruleforge_kb_has_schema_type(kb, "Side", &exists), RULES_FORGE_OK);
+            check_int_eq(exists, 1);
+            check_int_eq(ruleforge_kb_has_schema_type(kb, "Missing", &exists), RULES_FORGE_OK);
+            check_int_eq(exists, 0);
+
+            ruleforge_stateful_session_t session = nullptr;
+            check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
+            ruleforge_fact_t fact = nullptr;
+            check_int_eq(ruleforge_session_add_fact_json(
+                             session, "Order", R"({"id":7,"side":"Sell"})", &fact),
+                         RULES_FORGE_OK);
+            check_not_null(fact);
+
+            char enum_name[16] = {};
+            size_t enum_name_len = 0;
+            int64_t enum_value = 0;
+            check_int_eq(ruleforge_fact_get_field_as_enum(
+                             fact, "side", enum_name, sizeof(enum_name),
+                             &enum_name_len, &enum_value), RULES_FORGE_OK);
+            check_str_eq(enum_name, "Sell");
+            check_size_eq(enum_name_len, 4);
+            check_long_eq(enum_value, 2);
+
+            enum_name[0] = '\0';
+            check_int_eq(ruleforge_fact_get_enum_name(
+                             fact, "side", enum_name, sizeof(enum_name), &enum_name_len),
+                         RULES_FORGE_OK);
+            check_str_eq(enum_name, "Sell");
+
+            check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_OK);
+            check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
+            std::filesystem::remove(schema_path);
             ruleforge_cleanup();
         }
 
@@ -322,8 +383,6 @@ suite("CAPI") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;
             check_int_eq(ruleforge_kb_create(&kb), RULES_FORGE_OK);
-            check_int_eq(ruleforge_kb_set_execution_mode(kb, RULES_FORGE_EXECUTION_MODE_V2_HIGH_PERFORMANCE),
-                         RULES_FORGE_OK);
 
             const char* simple_drl = R"(
 declare Fact
@@ -336,9 +395,8 @@ rule "HelloWorld"
     then
         // No action, just for parsing test
 end
-)";
+            )";
             check_int_eq(ruleforge_kb_load_drl(kb, simple_drl), RULES_FORGE_OK);
-            check_str_eq(ruleforge_kb_get_execution_mode(kb), "v2_high_performance");
             check_int_eq(ruleforge_kb_destroy(kb), RULES_FORGE_OK);
             ruleforge_cleanup();
         }
@@ -477,9 +535,8 @@ end
 
             ruleforge_fact_t fact = nullptr;
             check_int_eq(
-                ruleforge_session_add_fact_json_schema(
+                ruleforge_session_add_fact_json(
                     session,
-                    schema_path.string().c_str(),
                     "Customer",
                     R"({"name":"Alice","age":30,"score":98.5})",
                     &fact),
@@ -525,7 +582,7 @@ end
             check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
             ruleforge_data_bind_stream_t stream = nullptr;
             check_int_eq(ruleforge_data_bind_stream_json_create(
-                             session, schema_path.string().c_str(), "Customer", &stream),
+                             session, "Customer", &stream),
                          RULES_FORGE_OK);
             check_not_null(stream);
             check_int_eq(ruleforge_session_destroy(session), RULES_FORGE_ERROR_INVALID_ARGUMENT);
@@ -592,8 +649,8 @@ end
             check_int_eq(ruleforge_session_create(kb, &complete_session), RULES_FORGE_OK);
             ruleforge_fact_t* complete_facts = nullptr;
             int complete_count = 0;
-            check_int_eq(ruleforge_session_add_facts_json_path_schema(
-                             complete_session, schema_path.string().c_str(), "Customer",
+            check_int_eq(ruleforge_session_add_facts_json_path(
+                             complete_session, "Customer",
                              json, json_path, &complete_facts, &complete_count),
                          RULES_FORGE_OK);
             check_int_eq(complete_count, 2);
@@ -611,7 +668,7 @@ end
             check_int_eq(ruleforge_session_create(kb, &stream_session), RULES_FORGE_OK);
             ruleforge_data_bind_stream_t stream = nullptr;
             check_int_eq(ruleforge_data_bind_stream_json_path_all_create(
-                             stream_session, schema_path.string().c_str(), "Customer",
+                             stream_session, "Customer",
                              json_path, &stream), RULES_FORGE_OK);
             size_t split = std::strlen(json) / 2;
             check_int_eq(ruleforge_data_bind_stream_feed(stream, json, split), RULES_FORGE_OK);
@@ -635,8 +692,8 @@ end
             ruleforge_stateful_session_t first_session = nullptr;
             check_int_eq(ruleforge_session_create(kb, &first_session), RULES_FORGE_OK);
             ruleforge_fact_t first = nullptr;
-            check_int_eq(ruleforge_session_add_fact_json_path_schema(
-                             first_session, schema_path.string().c_str(), "Customer",
+            check_int_eq(ruleforge_session_add_fact_json_path(
+                             first_session, "Customer",
                              json, json_path, &first), RULES_FORGE_OK);
             check_not_null(first);
             char name[16] = {0};
@@ -677,8 +734,8 @@ end
             ruleforge_stateful_session_t root_session = nullptr;
             check_int_eq(ruleforge_session_create(kb, &root_session), RULES_FORGE_OK);
             ruleforge_fact_t root_fact = nullptr;
-            check_int_eq(ruleforge_session_add_fact_yaml_schema(
-                             root_session, schema_path.string().c_str(), "Customer",
+            check_int_eq(ruleforge_session_add_fact_yaml(
+                             root_session, "Customer",
                              root_yaml, &root_fact), RULES_FORGE_OK);
             check_not_null(root_fact);
 
@@ -697,8 +754,8 @@ end
             check_int_eq(ruleforge_session_create(kb, &complete_session), RULES_FORGE_OK);
             ruleforge_fact_t* complete_facts = nullptr;
             int complete_count = 0;
-            check_int_eq(ruleforge_session_add_facts_yaml_path_schema(
-                             complete_session, schema_path.string().c_str(), "Customer",
+            check_int_eq(ruleforge_session_add_facts_yaml_path(
+                             complete_session, "Customer",
                              yaml, yaml_path, &complete_facts, &complete_count),
                          RULES_FORGE_OK);
             check_int_eq(complete_count, 2);
@@ -706,8 +763,8 @@ end
             ruleforge_stateful_session_t first_session = nullptr;
             check_int_eq(ruleforge_session_create(kb, &first_session), RULES_FORGE_OK);
             ruleforge_fact_t first_fact = nullptr;
-            check_int_eq(ruleforge_session_add_fact_yaml_path_schema(
-                             first_session, schema_path.string().c_str(), "Customer",
+            check_int_eq(ruleforge_session_add_fact_yaml_path(
+                             first_session, "Customer",
                              yaml, yaml_path, &first_fact), RULES_FORGE_OK);
             char name[16] = {0};
             size_t name_length = 0;
@@ -720,7 +777,7 @@ end
             check_int_eq(ruleforge_session_create(kb, &stream_session), RULES_FORGE_OK);
             ruleforge_data_bind_stream_t stream = nullptr;
             check_int_eq(ruleforge_data_bind_stream_yaml_path_all_create(
-                             stream_session, schema_path.string().c_str(), "Customer",
+                             stream_session, "Customer",
                              yaml_path, &stream), RULES_FORGE_OK);
             size_t split = std::strlen(yaml) / 2;
             check_int_eq(ruleforge_data_bind_stream_feed(stream, yaml, split), RULES_FORGE_OK);
@@ -790,9 +847,8 @@ end
 
             ruleforge_fact_t fact = nullptr;
             check_int_eq(
-                ruleforge_session_add_fact_json_schema(
+                ruleforge_session_add_fact_json(
                     session,
-                    schema_path.string().c_str(),
                     "ScalarFact",
                     R"({
                         "id":"01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001",
@@ -889,9 +945,8 @@ end
             check_not_null(session);
 
             check_int_eq(
-                ruleforge_session_add_fact_json_schema(
+                ruleforge_session_add_fact_json(
                     session,
-                    schema_path.generic_string().c_str(),
                     "MqttSubscribeTask",
                     R"({"client_id":"rules-client","username":"alice"})",
                     nullptr),
@@ -954,9 +1009,8 @@ end
 
             ruleforge_fact_t fact = nullptr;
             check_int_eq(
-                ruleforge_session_add_fact_binary_schema(
+                ruleforge_session_add_fact_binary(
                     session,
-                    schema_path.string().c_str(),
                     "BinaryFact",
                     payload,
                     sizeof(payload),
@@ -1012,9 +1066,8 @@ end
             ruleforge_fact_t* facts = nullptr;
             int loaded = 0;
             check_int_eq(
-                ruleforge_session_add_facts_csv_schema(
+                ruleforge_session_add_facts_csv(
                     session,
-                    schema_path.string().c_str(),
                     "Customer",
                     csv,
                     &facts,
@@ -1060,7 +1113,7 @@ end
             check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
             ruleforge_data_bind_stream_t stream = nullptr;
             check_int_eq(ruleforge_data_bind_stream_csv_all_create(
-                             session, schema_path.string().c_str(), "Customer", &stream),
+                             session, "Customer", &stream),
                          RULES_FORGE_OK);
             char const* head = "name,age,score\nAli";
             char const* tail = "ce,30,98.5\nBob,17,70.0\n";
@@ -1110,8 +1163,8 @@ end
             check_int_eq(ruleforge_session_create(kb, &complete_session), RULES_FORGE_OK);
             ruleforge_fact_t* complete_facts = nullptr;
             int complete_count = 0;
-            check_int_eq(ruleforge_session_add_facts_csv_path_schema(
-                             complete_session, schema_path.string().c_str(), "Customer",
+            check_int_eq(ruleforge_session_add_facts_csv_path(
+                             complete_session, "Customer",
                              csv, csv_path, &complete_facts, &complete_count),
                          RULES_FORGE_OK);
             check_int_eq(complete_count, 2);
@@ -1125,7 +1178,7 @@ end
             check_int_eq(ruleforge_session_create(kb, &stream_session), RULES_FORGE_OK);
             ruleforge_data_bind_stream_t stream = nullptr;
             check_int_eq(ruleforge_data_bind_stream_csv_path_create(
-                             stream_session, schema_path.string().c_str(), "Customer",
+                             stream_session, "Customer",
                              csv_path, &stream), RULES_FORGE_OK);
             size_t split = std::strlen(csv) / 2;
             check_int_eq(ruleforge_data_bind_stream_feed(stream, csv, split), RULES_FORGE_OK);
@@ -1173,7 +1226,7 @@ end
             check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
             ruleforge_data_bind_stream_t stream = nullptr;
             check_int_eq(ruleforge_data_bind_stream_json_create(
-                             session, schema_path.string().c_str(), "Customer", &stream),
+                             session, "Customer", &stream),
                          RULES_FORGE_OK);
             char const* invalid = R"({"name":"Alice","age":})";
             ruleforge_status_t feed_status =
@@ -1230,9 +1283,8 @@ end
             ruleforge_fact_t* facts = nullptr;
             int loaded = 0;
             check_int_eq(
-                ruleforge_session_add_facts_xml_schema(
+                ruleforge_session_add_facts_xml(
                     session,
-                    schema_path.string().c_str(),
                     "Order",
                     xml,
                     "//order",
@@ -1255,7 +1307,7 @@ end
             check_int_eq(ruleforge_session_create(kb, &stream_session), RULES_FORGE_OK);
             ruleforge_data_bind_stream_t stream = nullptr;
             check_int_eq(ruleforge_data_bind_stream_xml_path_all_create(
-                             stream_session, schema_path.string().c_str(), "Order",
+                             stream_session, "Order",
                              "//order", &stream), RULES_FORGE_OK);
             size_t split = std::strlen(xml) / 2;
             check_int_eq(ruleforge_data_bind_stream_feed(stream, xml, split), RULES_FORGE_OK);
@@ -1310,8 +1362,8 @@ end
 
             const char* fact_type = "Fact";
             const char* fact_json = R"({"id": 1})";
-            check_int_eq(ruleforge_session_add_fact_json_schema(
-                             session, schema_path.generic_string().c_str(), fact_type, fact_json,
+            check_int_eq(ruleforge_session_add_fact_json(
+                             session, fact_type, fact_json,
                              nullptr),
                          RULES_FORGE_OK);
 
@@ -1354,16 +1406,16 @@ end
             check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
             check_not_null(session);
 
-            check_int_eq(ruleforge_session_add_fact_json_schema(
-                             session, schema_path.generic_string().c_str(), "Person",
+            check_int_eq(ruleforge_session_add_fact_json(
+                             session, "Person",
                              R"({"name": "Bob", "age": 25})", nullptr),
                          RULES_FORGE_OK);
-            check_int_eq(ruleforge_session_add_fact_json_schema(
-                             session, schema_path.generic_string().c_str(), "Person",
+            check_int_eq(ruleforge_session_add_fact_json(
+                             session, "Person",
                              R"({"name": "Charlie", "age": 17})", nullptr),
                          RULES_FORGE_OK);
-            check_int_eq(ruleforge_session_add_fact_json_schema(
-                             session, schema_path.generic_string().c_str(), "Person",
+            check_int_eq(ruleforge_session_add_fact_json(
+                             session, "Person",
                              R"({"name": "Diana", "age": 30})", nullptr),
                          RULES_FORGE_OK);
 
@@ -1488,8 +1540,8 @@ end
                 ruleforge_session_set_validation_mode(session, RULES_FORGE_VALIDATION_STRICT),
                 RULES_FORGE_OK);
             check_int_eq(
-                ruleforge_session_add_fact_json_schema(
-                    session, person_schema_path.generic_string().c_str(), "Person",
+                ruleforge_session_add_fact_json(
+                    session, "Person",
                     R"({"name":"Alice","age":30})", nullptr),
                 RULES_FORGE_OK);
 
@@ -1498,8 +1550,8 @@ end
             check_int_eq(ruleforge_session_get_fact_count(session), 0);
 
             check_int_eq(
-                ruleforge_session_add_fact_json_schema(
-                    session, person_schema_path.generic_string().c_str(), "Person",
+                ruleforge_session_add_fact_json(
+                    session, "Person",
                     R"({"name":"Bob","age":40})", nullptr),
                 RULES_FORGE_ERROR_SESSION_INCONSISTENT);
             check_str_contains(ruleforge_get_last_error_message(), "inconsistent");
@@ -1559,8 +1611,8 @@ end
             check_not_null(session);
 
             ruleforge_continuous_result_t result = nullptr;
-            check_int_eq(ruleforge_continuous_push_json_schema(
-                             session, schema_path.string().c_str(), "Event", "event-1",
+            check_int_eq(ruleforge_continuous_push_json(
+                             session, "Event", "event-1",
                              "events", 100, R"({"value":7})", &result),
                          RULES_FORGE_OK);
             check_not_null(result);
@@ -1580,8 +1632,8 @@ end
             check_int_eq(ruleforge_continuous_result_destroy(result), RULES_FORGE_OK);
 
             result = nullptr;
-            check_int_eq(ruleforge_continuous_push_yaml_schema(
-                             session, schema_path.string().c_str(), "Event", "event-2",
+            check_int_eq(ruleforge_continuous_push_yaml(
+                             session, "Event", "event-2",
                              "events", 101, "value: 8\n", &result),
                          RULES_FORGE_OK);
             check_int_eq(ruleforge_continuous_result_get_rules_fired(result), 1);
@@ -1655,7 +1707,7 @@ end
 
             ruleforge_continuous_data_bind_stream_t stream = nullptr;
             check_int_eq(ruleforge_continuous_data_bind_stream_json_create(
-                             session, schema_path.string().c_str(), "Event", "stream-1",
+                             session, "Event", "stream-1",
                              "events", 300, &stream), RULES_FORGE_OK);
             check_not_null(stream);
             check_int_eq(ruleforge_continuous_session_destroy(session),
@@ -1735,8 +1787,8 @@ end
             char const* json_path = "$.events[*]";
             auto json_complete = create_session();
             ruleforge_continuous_result_t result = nullptr;
-            check_int_eq(ruleforge_continuous_push_json_path_schema(
-                             json_complete, schema_path.string().c_str(), "Event", json,
+            check_int_eq(ruleforge_continuous_push_json_path(
+                             json_complete, "Event", json,
                              json_path, "event_id", "event_time", "events", &result),
                          RULES_FORGE_OK);
             verify_batch(json_complete, result);
@@ -1745,7 +1797,7 @@ end
             auto json_stream_session = create_session();
             ruleforge_continuous_data_bind_stream_t stream = nullptr;
             check_int_eq(ruleforge_continuous_data_bind_stream_json_path_create(
-                             json_stream_session, schema_path.string().c_str(), "Event",
+                             json_stream_session, "Event",
                              json_path, "event_id", "event_time", "events", &stream),
                          RULES_FORGE_OK);
             size_t json_split = std::strlen(json) / 2;
@@ -1784,8 +1836,8 @@ end
             char const* yaml_path = "/events/*";
             auto yaml_complete = create_session();
             result = nullptr;
-            check_int_eq(ruleforge_continuous_push_yaml_path_schema(
-                             yaml_complete, schema_path.string().c_str(), "Event", yaml,
+            check_int_eq(ruleforge_continuous_push_yaml_path(
+                             yaml_complete, "Event", yaml,
                              yaml_path, "event_id", "event_time", "events", &result),
                          RULES_FORGE_OK);
             verify_batch(yaml_complete, result);
@@ -1794,7 +1846,7 @@ end
             auto yaml_stream_session = create_session();
             stream = nullptr;
             check_int_eq(ruleforge_continuous_data_bind_stream_yaml_path_create(
-                             yaml_stream_session, schema_path.string().c_str(), "Event",
+                             yaml_stream_session, "Event",
                              yaml_path, "event_id", "event_time", "events", &stream),
                          RULES_FORGE_OK);
             size_t yaml_split = std::strlen(yaml) / 2;
@@ -1818,8 +1870,8 @@ end
             char const* csv_path = "region == \"west\"";
             auto csv_complete = create_session();
             result = nullptr;
-            check_int_eq(ruleforge_continuous_push_csv_path_schema(
-                             csv_complete, schema_path.string().c_str(), "Event", csv,
+            check_int_eq(ruleforge_continuous_push_csv_path(
+                             csv_complete, "Event", csv,
                              csv_path, "event_id", "event_time", "events", &result),
                          RULES_FORGE_OK);
             verify_batch(csv_complete, result);
@@ -1828,7 +1880,7 @@ end
             auto csv_stream_session = create_session();
             stream = nullptr;
             check_int_eq(ruleforge_continuous_data_bind_stream_csv_path_create(
-                             csv_stream_session, schema_path.string().c_str(), "Event",
+                             csv_stream_session, "Event",
                              csv_path, "event_id", "event_time", "events", &stream),
                          RULES_FORGE_OK);
             size_t csv_split = std::strlen(csv) / 2;
@@ -1856,8 +1908,8 @@ end
             char const* xml_path = "/root/events/event";
             auto xml_complete = create_session();
             result = nullptr;
-            check_int_eq(ruleforge_continuous_push_xml_path_schema(
-                             xml_complete, schema_path.string().c_str(), "Event", xml,
+            check_int_eq(ruleforge_continuous_push_xml_path(
+                             xml_complete, "Event", xml,
                              xml_path, "event_id", "event_time", "events", &result),
                          RULES_FORGE_OK);
             verify_batch(xml_complete, result);
@@ -1866,7 +1918,7 @@ end
             auto xml_stream_session = create_session();
             stream = nullptr;
             check_int_eq(ruleforge_continuous_data_bind_stream_xml_path_create(
-                             xml_stream_session, schema_path.string().c_str(), "Event",
+                             xml_stream_session, "Event",
                              xml_path, "event_id", "event_time", "events", &stream),
                          RULES_FORGE_OK);
             size_t xml_split = std::strlen(xml) / 2;
@@ -1889,7 +1941,7 @@ end
             auto invalid_metadata_session = create_session();
             stream = nullptr;
             check_int_eq(ruleforge_continuous_data_bind_stream_json_path_create(
-                             invalid_metadata_session, schema_path.string().c_str(), "Event",
+                             invalid_metadata_session, "Event",
                              "$[*]", "event_id", "event_time", "events", &stream),
                          RULES_FORGE_OK);
             char const* invalid_metadata_json =

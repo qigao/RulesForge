@@ -10,7 +10,7 @@
 #include "engine/i_network_callback.hpp"
 #include "engine/knowledge_base.hpp"
 #include "engine/metrics_exporter.hpp"
-#include "engine/agenda_selector.hpp"
+#include "engine/agenda.hpp"
 #include "engine/data_source.hpp"
 
 #include "engine/query_result.hpp"
@@ -186,14 +186,6 @@ public:
   std::string get_rule_performance_summary() const {
       return tracer_.format_rule_summary();
   }
-  std::string get_agenda_implementation() const {
-      return agenda_.implementation_name();
-  }
-  std::string get_execution_mode() const {
-      return rulesforge::execution_mode_name(
-          rulesforge::agenda_implementation_to_execution_mode(agenda_.implementation()));
-  }
-
   // Memory statistics
   SessionArena& get_arena() { return arena_; }
   std::string get_memory_stats() const { return arena_.format_stats(); }
@@ -306,6 +298,7 @@ private:
   void release_retained_fact(int64_t fact_id);
   void ensure_consistent_for_mutation(char const* operation) const;
   void validate_fact_for_insert(Fact const& fact) const;
+  void annotate_fact_enum_names(Fact& fact) const;
   void prime_network_state();
   void refresh_query_call_nodes();
   int fire_all_rules_impl(int max_rules, bool fail_fast);
@@ -338,7 +331,7 @@ private:
   WorkingMemory working_memory_;
   std::unordered_map<int64_t, std::shared_ptr<Fact>> retained_shared_facts_;
   Activation const* current_activation_ = nullptr;
-  rulesforge::RuntimeAgenda agenda_;
+  Agenda agenda_;
   std::vector<std::shared_ptr<IEngineListener>> listeners_;
   bool halt_requested_ = false;
 

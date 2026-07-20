@@ -7,8 +7,8 @@ owns isolation, scheduling, durable state, and delivery to external systems.
 
 The supported installed surface is:
 
-- `include/rule_forge.h` for the C ABI;
-- the `rule_forge` shared library;
+- `include/rules_forge.h` for the C ABI;
+- the `rules_forge` shared library;
 - exported CMake package files under `lib/cmake/RulesForge`.
 
 Build and test with the repository CMake presets. Package the header and binary

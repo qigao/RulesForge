@@ -1,5 +1,5 @@
 // Include the header file to get type definitions
-#include "rule_forge.h"
+#include "rules_forge.h"
 
 // Include C string handling
 #include <cstdlib>
@@ -53,19 +53,6 @@ static ruleforge_status_t map_session_inconsistent(SessionInconsistentException 
   return RULES_FORGE_ERROR_SESSION_INCONSISTENT;
 }
 
-static std::optional<rulesforge::AgendaImplementation>
-map_execution_mode(ruleforge_execution_mode_t mode) {
-  switch (mode) {
-  case RULES_FORGE_EXECUTION_MODE_DEFAULT:
-    return rulesforge::default_agenda_implementation();
-  case RULES_FORGE_EXECUTION_MODE_V1_STANDARD:
-    return rulesforge::AgendaImplementation::Agenda;
-  case RULES_FORGE_EXECUTION_MODE_V2_HIGH_PERFORMANCE:
-    return rulesforge::AgendaImplementation::AgendaV2;
-  }
-  return std::nullopt;
-}
-
 static std::string unqualified_type_name(std::string const &type_name) {
   auto const dot = type_name.find_last_of('.');
   return dot == std::string::npos ? type_name : type_name.substr(dot + 1);
@@ -92,19 +79,7 @@ static bool is_schema_imported_fact_type(StatefulSession const &session, char co
 }
 
 static bool is_schema_imported_fact_type(KnowledgeBase const &kb, char const *fact_type) {
-  if (!fact_type) {
-    return false;
-  }
-  std::string const requested(fact_type);
-  for (auto const &decl : kb.get_parser_state().parsed_declarations) {
-    if (decl.annotations.find("schema_source") == decl.annotations.end()) {
-      continue;
-    }
-    if (decl.type_name == requested || unqualified_type_name(decl.type_name) == requested) {
-      return true;
-    }
-  }
-  return false;
+  return fact_type != nullptr && kb.has_data_bind_type(fact_type);
 }
 
 static ruleforge_status_t require_schema_imported_fact_type(StatefulSession const &session,
@@ -150,7 +125,29 @@ using DataBindValueHandle = std::unique_ptr<DataBindValue, DataBindValueDeleter>
 using DataBindObjectHandle = std::unique_ptr<DataBindObject, DataBindObjectDeleter>;
 using DataBindStreamHandle = std::unique_ptr<data_bind_stream_t, DataBindStreamDeleter>;
 
-constexpr int kMinimumDataBindVersion = 11000;
+constexpr int kMinimumDataBindVersion = 11100;
+
+struct DataBindView {
+  DataBind *value = nullptr;
+  DataBind *get() const { return value; }
+  explicit operator bool() const { return value != nullptr; }
+};
+
+static DataBindView get_kb_data_bind_or_set_error(KnowledgeBase const &kb,
+                                                   char const *fact_type) {
+  if (!fact_type) {
+    set_error("Fact type is NULL");
+    return {};
+  }
+  DataBind *codec = kb.find_data_bind_codec(fact_type);
+  auto const *imported_path = kb.find_data_bind_schema_path(fact_type);
+  if (!codec || !imported_path) {
+    fmt(last_error, sizeof(last_error),
+        "Fact type '{}' is not provided by an imported DataBind schema.", fact_type);
+    return {};
+  }
+  return {codec};
+}
 
 static ConstraintValue data_bind_value_to_constraint(DataBindValue const *value) {
   if (!value) {
@@ -164,6 +161,13 @@ static ConstraintValue data_bind_value_to_constraint(DataBindValue const *value)
     return static_cast<int64_t>(data_bind_value_as_int(value));
   case DATA_BIND_VALUE_INT64:
     return data_bind_value_as_int64(value);
+  case DATA_BIND_VALUE_UINT64: {
+    uint64_t const unsigned_value = data_bind_value_as_uint64(value);
+    if (unsigned_value <= static_cast<uint64_t>(INT64_MAX)) {
+      return static_cast<int64_t>(unsigned_value);
+    }
+    return std::to_string(unsigned_value);
+  }
   case DATA_BIND_VALUE_DOUBLE:
     return data_bind_value_as_double(value);
   case DATA_BIND_VALUE_BOOL:
@@ -261,7 +265,61 @@ static ConstraintValue data_bind_value_to_constraint(DataBindValue const *value)
   return NilValue{};
 }
 
-static bool populate_fact_from_data_bind_value(Fact &fact, DataBindValue const *value) {
+static std::optional<std::string> data_bind_enum_name(DataBind *codec,
+                                                      char const *fact_type,
+                                                      char const *field_name,
+                                                      DataBindValue const *value) {
+  if (!codec || !fact_type || !field_name || !value) {
+    return std::nullopt;
+  }
+  int64_t numeric_value = 0;
+  switch (data_bind_value_kind(value)) {
+  case DATA_BIND_VALUE_INT:
+    numeric_value = data_bind_value_as_int(value);
+    break;
+  case DATA_BIND_VALUE_INT64:
+    numeric_value = data_bind_value_as_int64(value);
+    break;
+  case DATA_BIND_VALUE_UINT64: {
+    auto const unsigned_value = data_bind_value_as_uint64(value);
+    if (unsigned_value > static_cast<uint64_t>(INT64_MAX)) {
+      return std::nullopt;
+    }
+    numeric_value = static_cast<int64_t>(unsigned_value);
+    break;
+  }
+  default:
+    return std::nullopt;
+  }
+
+  size_t const field_count = data_bind_schema_field_count(codec, fact_type);
+  for (size_t field_index = 0; field_index < field_count; ++field_index) {
+    DataBindSchemaField field = DATA_BIND_SCHEMA_FIELD_INIT;
+    if (!data_bind_schema_field_at(codec, fact_type, field_index, &field)
+        || !field.name || std::strcmp(field.name, field_name) != 0 || !field.is_enum
+        || !field.type) {
+      continue;
+    }
+    size_t const item_count = data_bind_schema_enum_item_count(codec, field.type);
+    for (size_t item_index = 0; item_index < item_count; ++item_index) {
+      DataBindSchemaEnumItem item = DATA_BIND_SCHEMA_ENUM_ITEM_INIT;
+      if (!data_bind_schema_enum_item_at(codec, field.type, item_index, &item)
+          || !item.name || !item.value) {
+        continue;
+      }
+      char *end = nullptr;
+      long long const item_value = std::strtoll(item.value, &end, 0);
+      if (end != item.value && *end == '\0' && item_value == numeric_value) {
+        return std::string(item.name);
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+static bool populate_fact_from_data_bind_value(Fact &fact, DataBindValue const *value,
+                                                DataBind *codec = nullptr,
+                                                char const *fact_type = nullptr) {
   if (!value || data_bind_value_kind(value) != DATA_BIND_VALUE_OBJECT) {
     return false;
   }
@@ -272,6 +330,9 @@ static bool populate_fact_from_data_bind_value(Fact &fact, DataBindValue const *
     DataBindValue const *child = data_bind_value_field_at(value, i);
     if (name) {
       fact.fields[name] = data_bind_value_to_constraint(child);
+      if (auto enum_name = data_bind_enum_name(codec, fact_type, name, child)) {
+        fact.enum_names[name] = std::move(*enum_name);
+      }
     }
   }
   return true;
@@ -291,7 +352,9 @@ static ruleforge_status_t insert_data_bind_fact(StatefulSession &session,
   }
 
   Fact *fact = session.create_fact(fact_type);
-  if (!populate_fact_from_data_bind_value(*fact, value)) {
+  auto const kb = session.get_knowledge_base();
+  DataBind *codec = kb ? kb->find_data_bind_codec(fact_type) : nullptr;
+  if (!populate_fact_from_data_bind_value(*fact, value, codec, fact_type)) {
     set_error("Failed to convert DataBind result to fact");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
@@ -353,7 +416,9 @@ static ruleforge_status_t insert_data_bind_fact_list(StatefulSession &session,
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
     Fact *fact = session.create_fact(fact_type);
-    if (!populate_fact_from_data_bind_value(*fact, item)) {
+    auto const kb = session.get_knowledge_base();
+    DataBind *codec = kb ? kb->find_data_bind_codec(fact_type) : nullptr;
+    if (!populate_fact_from_data_bind_value(*fact, item, codec, fact_type)) {
       set_error("Failed to convert DataBind list item to fact");
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -419,7 +484,7 @@ ruleforge_status_t ruleforge_init() {
   int const library_abi = data_bind_abi_version();
   if (library_version < kMinimumDataBindVersion || library_abi != DATA_BIND_ABI_VERSION) {
     fmt(last_error, sizeof(last_error),
-        "Incompatible DataBind library: need version >= 1.10.0 with ABI {}, got {} with ABI {}",
+        "Incompatible DataBind library: need version >= 1.11.0 with ABI {}, got {} with ABI {}",
         DATA_BIND_ABI_VERSION,
         data_bind_version_string() ? data_bind_version_string() : "<unknown>", library_abi);
     return RULES_FORGE_ERROR_GENERIC;
@@ -457,41 +522,6 @@ ruleforge_status_t ruleforge_kb_create(ruleforge_knowledge_base_t *out_kb) {
   }
 }
 
-ruleforge_status_t ruleforge_kb_set_execution_mode(ruleforge_knowledge_base_t kb,
-                                                   ruleforge_execution_mode_t mode) {
-  if (!kb) {
-    set_error("Knowledge Base handle is NULL");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  auto mapped = map_execution_mode(mode);
-  if (!mapped) {
-    set_error("Invalid execution mode");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
-  if (!kb_wrapper->kb) {
-    set_error("Knowledge Base is not initialized");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  kb_wrapper->kb->set_agenda_implementation(*mapped);
-  last_error[0] = '\0';
-  return RULES_FORGE_OK;
-}
-
-const char *ruleforge_kb_get_execution_mode(ruleforge_knowledge_base_t kb) {
-  if (!kb) {
-    set_error("Knowledge Base handle is NULL");
-    return nullptr;
-  }
-  auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
-  if (!kb_wrapper->kb) {
-    set_error("Knowledge Base is not initialized");
-    return nullptr;
-  }
-  last_error[0] = '\0';
-  return rulesforge::execution_mode_name(kb_wrapper->kb->execution_mode());
-}
-
 ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const char *drl_source) {
   if (!kb) {
     set_error("Knowledge Base handle is NULL");
@@ -505,7 +535,6 @@ ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const ch
     ParsingResult result;
     auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
 
-    auto saved_agenda = kb_wrapper->kb->agenda_implementation();
     auto compiled_kb = build_knowledge_base(drl_source, result, "C_API_Source");
 
     if (!result.success || !compiled_kb) {
@@ -520,7 +549,6 @@ ruleforge_status_t ruleforge_kb_load_drl(ruleforge_knowledge_base_t kb, const ch
       return RULES_FORGE_ERROR_COMPILATION_FAILED;
     }
 
-    compiled_kb->set_agenda_implementation(saved_agenda);
     kb_wrapper->kb = std::move(compiled_kb);
 
     last_error[0] = '\0';
@@ -539,8 +567,6 @@ ruleforge_status_t ruleforge_kb_load_drl_file(ruleforge_knowledge_base_t kb, con
   }
   try {
     auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
-    auto saved_agenda = kb_wrapper->kb->agenda_implementation();
-
     std::vector<std::string> dirs;
     for (int i = 0; i < base_dir_count; i++) {
       if (base_dirs[i]) {
@@ -568,7 +594,6 @@ ruleforge_status_t ruleforge_kb_load_drl_file(ruleforge_knowledge_base_t kb, con
       return RULES_FORGE_ERROR_COMPILATION_FAILED;
     }
 
-    compiled_kb->set_agenda_implementation(saved_agenda);
     kb_wrapper->kb = std::move(compiled_kb);
 
     last_error[0] = '\0';
@@ -588,8 +613,6 @@ ruleforge_status_t ruleforge_kb_load_drl_files(ruleforge_knowledge_base_t kb,
   }
   try {
     auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
-    auto saved_agenda = kb_wrapper->kb->agenda_implementation();
-
     std::vector<std::string> files;
     for (int i = 0; i < file_count; i++) {
       if (file_paths[i]) {
@@ -619,7 +642,6 @@ ruleforge_status_t ruleforge_kb_load_drl_files(ruleforge_knowledge_base_t kb,
       return RULES_FORGE_ERROR_COMPILATION_FAILED;
     }
 
-    compiled_kb->set_agenda_implementation(saved_agenda);
     kb_wrapper->kb = std::move(compiled_kb);
 
     last_error[0] = '\0';
@@ -644,7 +666,6 @@ ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base
     ParsingResult result;
     auto kb_wrapper = reinterpret_cast<KnowledgeBaseWrapper *>(kb);
 
-    auto saved_agenda = kb_wrapper->kb->agenda_implementation();
     auto compiled_kb = build_knowledge_base_from_csv_string(csv_source, result, "C_API_CSV_Source");
 
     if (!result.success || !compiled_kb) {
@@ -659,7 +680,6 @@ ruleforge_status_t ruleforge_kb_load_decision_table_csv(ruleforge_knowledge_base
       return RULES_FORGE_ERROR_COMPILATION_FAILED;
     }
 
-    compiled_kb->set_agenda_implementation(saved_agenda);
     kb_wrapper->kb = std::move(compiled_kb);
 
     last_error[0] = '\0';
@@ -687,6 +707,26 @@ ruleforge_status_t ruleforge_kb_destroy(ruleforge_knowledge_base_t kb) {
   }
 }
 
+ruleforge_status_t ruleforge_kb_has_schema_type(ruleforge_knowledge_base_t kb,
+                                                char const *type_name,
+                                                int *out_exists) {
+  if (out_exists) {
+    *out_exists = 0;
+  }
+  if (!kb || !type_name || !out_exists) {
+    set_error("Knowledge Base, type name, or output pointer is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto const *wrapper = reinterpret_cast<KnowledgeBaseWrapper const *>(kb);
+  if (!wrapper->kb) {
+    set_error("Knowledge Base is not initialized");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  *out_exists = wrapper->kb->has_data_bind_type(type_name) ? 1 : 0;
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
 // Session wrapper for safe C++/C interop
 struct StatefulSessionWrapper {
   std::unique_ptr<StatefulSession> session;
@@ -707,7 +747,7 @@ struct ruleforge_continuous_result_handle_s {
 
 struct ruleforge_continuous_data_bind_stream_handle_s {
   ContinuousSessionWrapper *session_wrapper = nullptr;
-  DataBindHandle codec;
+  DataBindView codec;
   DataBindValueHandle value;
   DataBindValue *output_value = nullptr;
   DataBindStreamHandle stream;
@@ -727,7 +767,7 @@ struct ruleforge_continuous_data_bind_stream_handle_s {
 
 struct ruleforge_data_bind_stream_handle_s {
   StatefulSessionWrapper *session_wrapper = nullptr;
-  DataBindHandle codec;
+  DataBindView codec;
   DataBindValueHandle value;
   DataBindValue *output_value = nullptr;
   DataBindStreamHandle stream;
@@ -740,6 +780,7 @@ struct ruleforge_data_bind_stream_handle_s {
 
 struct ruleforge_data_bind_object_handle_s {
   DataBindObjectHandle object;
+  std::string schema_path;
 };
 
 namespace {
@@ -765,10 +806,12 @@ static ruleforge_status_t map_data_bind_object_error(
 }
 
 static ruleforge_status_t publish_data_bind_object(
-    DataBindObjectHandle object, ruleforge_data_bind_object_t *out_object) {
+    DataBindObjectHandle object, char const *schema_path,
+    ruleforge_data_bind_object_t *out_object) {
   try {
     auto handle = std::make_unique<ruleforge_data_bind_object_handle_s>();
     handle->object = std::move(object);
+    handle->schema_path = schema_path ? schema_path : "";
     *out_object = handle.release();
     last_error[0] = '\0';
     return RULES_FORGE_OK;
@@ -801,7 +844,7 @@ static ruleforge_status_t create_text_data_bind_object(
   if (status != DATA_BIND_OK) {
     return map_data_bind_object_error(operation, status, error);
   }
-  return publish_data_bind_object(std::move(object), out_object);
+  return publish_data_bind_object(std::move(object), schema_path, out_object);
 }
 
 static ruleforge_status_t serialize_data_bind_object(
@@ -845,15 +888,14 @@ static ruleforge_status_t write_data_bind_object(
 }
 
 static ruleforge_status_t prepare_data_bind_stream(
-    ruleforge_stateful_session_t session, char const *schema_path,
-    char const *fact_type, bool multiple,
+    ruleforge_stateful_session_t session, char const *fact_type, bool multiple,
     ruleforge_data_bind_stream_t *out_stream,
     std::unique_ptr<ruleforge_data_bind_stream_handle_s> &handle) {
   if (out_stream) {
     *out_stream = nullptr;
   }
-  if (!session || !schema_path || !fact_type || !out_stream) {
-    set_error("Session, schema path, fact type, or output stream is invalid");
+  if (!session || !fact_type || !out_stream) {
+    set_error("Session, fact type, or output stream is invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
 
@@ -865,7 +907,9 @@ static ruleforge_status_t prepare_data_bind_stream(
     }
     handle = std::make_unique<ruleforge_data_bind_stream_handle_s>();
     handle->session_wrapper = session_wrapper;
-    handle->codec = create_data_bind_or_set_error(schema_path);
+    auto const kb = session_wrapper->session->get_knowledge_base();
+    handle->codec = kb ? get_kb_data_bind_or_set_error(*kb, fact_type)
+                       : DataBindView{};
     handle->fact_type = fact_type;
     handle->multiple = multiple;
     if (!handle->codec) {
@@ -952,13 +996,14 @@ static ruleforge_status_t publish_continuous_result(
 }
 
 static std::shared_ptr<Fact> fact_from_data_bind_value(char const *fact_type,
-                                                      DataBindValue const *value) {
+                                                      DataBindValue const *value,
+                                                      DataBind *codec) {
   if (!fact_type || !value || data_bind_value_kind(value) != DATA_BIND_VALUE_OBJECT) {
     throw std::invalid_argument("DataBind result is not an object fact");
   }
   auto fact = std::make_shared<Fact>();
   fact->type = fact_type;
-  if (!populate_fact_from_data_bind_value(*fact, value)) {
+  if (!populate_fact_from_data_bind_value(*fact, value, codec, fact_type)) {
     throw std::invalid_argument("Failed to convert DataBind result to fact");
   }
   return fact;
@@ -976,7 +1021,8 @@ static ruleforge_status_t push_continuous_bound_value(
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
-    auto fact = fact_from_data_bind_value(fact_type, value);
+    auto fact = fact_from_data_bind_value(
+        fact_type, value, wrapper->kb->find_data_bind_codec(fact_type));
     auto result_handle = prepare_continuous_result(*wrapper);
     EventEnvelope event{event_id, entry_point, event_time_ms, std::move(fact)};
     return publish_continuous_result(
@@ -1046,8 +1092,10 @@ static ruleforge_status_t push_continuous_bound_list(
       } else {
         throw std::invalid_argument("Continuous event time field must be int or int64");
       }
-      events.push_back(EventEnvelope{event_id, entry_point, event_time_ms,
-                                     fact_from_data_bind_value(fact_type, item)});
+      events.push_back(EventEnvelope{
+          event_id, entry_point, event_time_ms,
+          fact_from_data_bind_value(
+              fact_type, item, wrapper->kb->find_data_bind_codec(fact_type))});
     }
 
     auto result_handle = prepare_continuous_result(*wrapper);
@@ -1061,7 +1109,7 @@ static ruleforge_status_t push_continuous_bound_list(
 static EventEnvelope continuous_event_from_bound_value(
     char const *fact_type, char const *event_id_field,
     char const *event_time_field, char const *entry_point,
-    DataBindValue const *value) {
+    DataBindValue const *value, DataBind *codec) {
   if (!value || data_bind_value_kind(value) != DATA_BIND_VALUE_OBJECT) {
     throw std::invalid_argument("DataBind continuous event is not an object");
   }
@@ -1083,7 +1131,7 @@ static EventEnvelope continuous_event_from_bound_value(
     throw std::invalid_argument("Continuous event time field must be int or int64");
   }
   return EventEnvelope{event_id, entry_point, event_time_ms,
-                       fact_from_data_bind_value(fact_type, value)};
+                       fact_from_data_bind_value(fact_type, value, codec)};
 }
 
 static DataBindRecordAction collect_continuous_stream_record(
@@ -1095,7 +1143,8 @@ static DataBindRecordAction collect_continuous_stream_record(
   try {
     handle->pending_events.push_back(continuous_event_from_bound_value(
         handle->fact_type.c_str(), handle->event_id_field.c_str(),
-        handle->event_time_field.c_str(), handle->entry_point.c_str(), record));
+        handle->event_time_field.c_str(), handle->entry_point.c_str(), record,
+        handle->codec.get()));
     return DATA_BIND_RECORD_CONTINUE;
   } catch (std::exception const &e) {
     handle->callback_error = e.what();
@@ -1107,14 +1156,14 @@ static DataBindRecordAction collect_continuous_stream_record(
 }
 
 static ruleforge_status_t validate_continuous_path_arguments(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *source, char const *path,
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *source, char const *path,
     char const *event_id_field, char const *event_time_field,
     char const *entry_point, ruleforge_continuous_result_t *out_result) {
   if (out_result) {
     *out_result = nullptr;
   }
-  if (!session || !schema_path || !fact_type || !source || !path || path[0] == '\0'
+  if (!session || !fact_type || !source || !path || path[0] == '\0'
       || !event_id_field || event_id_field[0] == '\0'
       || !event_time_field || event_time_field[0] == '\0'
       || !entry_point || entry_point[0] == '\0' || !out_result) {
@@ -1126,15 +1175,15 @@ static ruleforge_status_t validate_continuous_path_arguments(
 }
 
 static ruleforge_status_t prepare_continuous_path_stream(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *path, char const *event_id_field,
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *path, char const *event_id_field,
     char const *event_time_field, char const *entry_point,
     ruleforge_continuous_data_bind_stream_t *out_stream,
     std::unique_ptr<ruleforge_continuous_data_bind_stream_handle_s> &handle) {
   if (out_stream) {
     *out_stream = nullptr;
   }
-  if (!session || !schema_path || !fact_type || !path || path[0] == '\0'
+  if (!session || !fact_type || !path || path[0] == '\0'
       || !event_id_field || event_id_field[0] == '\0'
       || !event_time_field || event_time_field[0] == '\0'
       || !entry_point || entry_point[0] == '\0' || !out_stream) {
@@ -1149,7 +1198,7 @@ static ruleforge_status_t prepare_continuous_path_stream(
     }
     handle = std::make_unique<ruleforge_continuous_data_bind_stream_handle_s>();
     handle->session_wrapper = wrapper;
-    handle->codec = create_data_bind_or_set_error(schema_path);
+    handle->codec = get_kb_data_bind_or_set_error(*wrapper->kb, fact_type);
     handle->fact_type = fact_type;
     handle->event_id_field = event_id_field;
     handle->event_time_field = event_time_field;
@@ -1209,7 +1258,7 @@ ruleforge_status_t ruleforge_data_bind_object_from_binary(
     return map_data_bind_object_error(
         "DataBind binary object parse failed: ", status, error);
   }
-  return publish_data_bind_object(std::move(object), out_object);
+  return publish_data_bind_object(std::move(object), schema_path, out_object);
 }
 
 ruleforge_status_t ruleforge_data_bind_object_from_json(
@@ -1259,7 +1308,7 @@ ruleforge_status_t ruleforge_data_bind_object_from_csv(
     return map_data_bind_object_error(
         "DataBind CSV object parse failed: ", status, error);
   }
-  return publish_data_bind_object(std::move(object), out_object);
+  return publish_data_bind_object(std::move(object), schema_path, out_object);
 }
 
 ruleforge_status_t ruleforge_data_bind_object_clone(
@@ -1284,7 +1333,7 @@ ruleforge_status_t ruleforge_data_bind_object_clone(
     set_error("Failed to clone DataBindObject");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
-  return publish_data_bind_object(std::move(copy), out_object);
+  return publish_data_bind_object(std::move(copy), handle->schema_path.c_str(), out_object);
 }
 
 char const *ruleforge_data_bind_object_get_type_name(
@@ -1324,6 +1373,38 @@ ruleforge_status_t ruleforge_data_bind_object_serialize_xml(
       "DataBind XML object serialization failed: ");
 }
 
+ruleforge_status_t ruleforge_data_bind_object_serialize_csv(
+    ruleforge_data_bind_object_t object, char **out_csv, size_t *out_len) {
+  return serialize_data_bind_object(
+      object, out_csv, out_len, data_bind_object_serialize_csv,
+      "DataBind CSV object serialization failed: ");
+}
+
+ruleforge_status_t ruleforge_data_bind_object_serialize_binary(
+    ruleforge_data_bind_object_t object, uint8_t **out_binary, size_t *out_len) {
+  if (out_binary) {
+    *out_binary = nullptr;
+  }
+  auto *handle = reinterpret_cast<ruleforge_data_bind_object_handle_s *>(object);
+  if (!handle || !handle->object || handle->schema_path.empty() || !out_binary || !out_len) {
+    set_error("DataBindObject handle, schema, or binary output is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto codec = create_data_bind_or_set_error(handle->schema_path.c_str());
+  if (!codec) {
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindStatus status = data_bind_object_serialize_bin(
+      codec.get(), handle->object.get(), out_binary, out_len, &error);
+  if (status != DATA_BIND_OK) {
+    return map_data_bind_object_error(
+        "DataBind binary object serialization failed: ", status, error);
+  }
+  last_error[0] = '\0';
+  return RULES_FORGE_OK;
+}
+
 ruleforge_status_t ruleforge_data_bind_object_write_json(
     ruleforge_data_bind_object_t object, ruleforge_write_fn write, void *user) {
   return write_data_bind_object(
@@ -1345,8 +1426,19 @@ ruleforge_status_t ruleforge_data_bind_object_write_xml(
       "DataBind XML object write failed: ");
 }
 
+ruleforge_status_t ruleforge_data_bind_object_write_csv(
+    ruleforge_data_bind_object_t object, ruleforge_write_fn write, void *user) {
+  return write_data_bind_object(
+      object, write, user, data_bind_object_write_csv,
+      "DataBind CSV object write failed: ");
+}
+
 void ruleforge_data_bind_serialized_free(char *data) {
   data_bind_serialized_free(data);
+}
+
+void ruleforge_data_bind_binary_free(void *data) {
+  data_bind_binary_free(data);
 }
 
 ruleforge_status_t ruleforge_data_bind_object_destroy(
@@ -1523,15 +1615,15 @@ ruleforge_status_t ruleforge_continuous_push_data_bind_object(
       event_time_ms, out_result);
 }
 
-ruleforge_status_t ruleforge_continuous_push_json_schema(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *event_id, char const *entry_point,
+ruleforge_status_t ruleforge_continuous_push_json(
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *event_id, char const *entry_point,
     int64_t event_time_ms, char const *fact_json,
     ruleforge_continuous_result_t *out_result) {
   if (out_result) {
     *out_result = nullptr;
   }
-  if (!session || !schema_path || !fact_type || !event_id || !entry_point
+  if (!session || !fact_type || !event_id || !entry_point
       || !fact_json || !out_result) {
     set_error("Continuous JSON event arguments are invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
@@ -1541,7 +1633,7 @@ ruleforge_status_t ruleforge_continuous_push_json_schema(
   if (type_status != RULES_FORGE_OK) {
     return type_status;
   }
-  auto codec = create_data_bind_or_set_error(schema_path);
+  auto codec = get_kb_data_bind_or_set_error(*wrapper->kb, fact_type);
   if (!codec) {
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
@@ -1559,15 +1651,15 @@ ruleforge_status_t ruleforge_continuous_push_json_schema(
       wrapper, object.get(), event_id, entry_point, event_time_ms, out_result);
 }
 
-ruleforge_status_t ruleforge_continuous_push_yaml_schema(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *event_id, char const *entry_point,
+ruleforge_status_t ruleforge_continuous_push_yaml(
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *event_id, char const *entry_point,
     int64_t event_time_ms, char const *fact_yaml,
     ruleforge_continuous_result_t *out_result) {
   if (out_result) {
     *out_result = nullptr;
   }
-  if (!session || !schema_path || !fact_type || !event_id || !entry_point
+  if (!session || !fact_type || !event_id || !entry_point
       || !fact_yaml || !out_result) {
     set_error("Continuous YAML event arguments are invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
@@ -1577,7 +1669,7 @@ ruleforge_status_t ruleforge_continuous_push_yaml_schema(
   if (type_status != RULES_FORGE_OK) {
     return type_status;
   }
-  auto codec = create_data_bind_or_set_error(schema_path);
+  auto codec = get_kb_data_bind_or_set_error(*wrapper->kb, fact_type);
   if (!codec) {
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
@@ -1595,19 +1687,19 @@ ruleforge_status_t ruleforge_continuous_push_yaml_schema(
       wrapper, object.get(), event_id, entry_point, event_time_ms, out_result);
 }
 
-ruleforge_status_t ruleforge_continuous_push_json_path_schema(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *json_source, char const *json_path,
+ruleforge_status_t ruleforge_continuous_push_json_path(
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *json_source, char const *json_path,
     char const *event_id_field, char const *event_time_field,
     char const *entry_point, ruleforge_continuous_result_t *out_result) {
   auto validation = validate_continuous_path_arguments(
-      session, schema_path, fact_type, json_source, json_path, event_id_field,
+      session, fact_type, json_source, json_path, event_id_field,
       event_time_field, entry_point, out_result);
   if (validation != RULES_FORGE_OK) {
     return validation;
   }
   auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
-  auto codec = create_data_bind_or_set_error(schema_path);
+  auto codec = get_kb_data_bind_or_set_error(*wrapper->kb, fact_type);
   if (!codec) {
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
@@ -1626,19 +1718,19 @@ ruleforge_status_t ruleforge_continuous_push_json_path_schema(
                                     event_time_field, entry_point, value.get(), out_result);
 }
 
-ruleforge_status_t ruleforge_continuous_push_yaml_path_schema(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *yaml_source, char const *yaml_path,
+ruleforge_status_t ruleforge_continuous_push_yaml_path(
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *yaml_source, char const *yaml_path,
     char const *event_id_field, char const *event_time_field,
     char const *entry_point, ruleforge_continuous_result_t *out_result) {
   auto validation = validate_continuous_path_arguments(
-      session, schema_path, fact_type, yaml_source, yaml_path, event_id_field,
+      session, fact_type, yaml_source, yaml_path, event_id_field,
       event_time_field, entry_point, out_result);
   if (validation != RULES_FORGE_OK) {
     return validation;
   }
   auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
-  auto codec = create_data_bind_or_set_error(schema_path);
+  auto codec = get_kb_data_bind_or_set_error(*wrapper->kb, fact_type);
   if (!codec) {
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
@@ -1657,19 +1749,19 @@ ruleforge_status_t ruleforge_continuous_push_yaml_path_schema(
                                     event_time_field, entry_point, value.get(), out_result);
 }
 
-ruleforge_status_t ruleforge_continuous_push_csv_path_schema(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *csv_source, char const *csv_path,
+ruleforge_status_t ruleforge_continuous_push_csv_path(
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *csv_source, char const *csv_path,
     char const *event_id_field, char const *event_time_field,
     char const *entry_point, ruleforge_continuous_result_t *out_result) {
   auto validation = validate_continuous_path_arguments(
-      session, schema_path, fact_type, csv_source, csv_path, event_id_field,
+      session, fact_type, csv_source, csv_path, event_id_field,
       event_time_field, entry_point, out_result);
   if (validation != RULES_FORGE_OK) {
     return validation;
   }
   auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
-  auto codec = create_data_bind_or_set_error(schema_path);
+  auto codec = get_kb_data_bind_or_set_error(*wrapper->kb, fact_type);
   if (!codec) {
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
@@ -1688,19 +1780,19 @@ ruleforge_status_t ruleforge_continuous_push_csv_path_schema(
                                     event_time_field, entry_point, value.get(), out_result);
 }
 
-ruleforge_status_t ruleforge_continuous_push_xml_path_schema(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *xml_source, char const *xml_path,
+ruleforge_status_t ruleforge_continuous_push_xml_path(
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *xml_source, char const *xml_path,
     char const *event_id_field, char const *event_time_field,
     char const *entry_point, ruleforge_continuous_result_t *out_result) {
   auto validation = validate_continuous_path_arguments(
-      session, schema_path, fact_type, xml_source, xml_path, event_id_field,
+      session, fact_type, xml_source, xml_path, event_id_field,
       event_time_field, entry_point, out_result);
   if (validation != RULES_FORGE_OK) {
     return validation;
   }
   auto *wrapper = reinterpret_cast<ContinuousSessionWrapper *>(session);
-  auto codec = create_data_bind_or_set_error(schema_path);
+  auto codec = get_kb_data_bind_or_set_error(*wrapper->kb, fact_type);
   if (!codec) {
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
@@ -1793,13 +1885,13 @@ ruleforge_status_t ruleforge_continuous_get_metrics(
 }
 
 ruleforge_status_t ruleforge_continuous_data_bind_stream_json_create(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *event_id, char const *entry_point,
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *event_id, char const *entry_point,
     int64_t event_time_ms, ruleforge_continuous_data_bind_stream_t *out_stream) {
   if (out_stream) {
     *out_stream = nullptr;
   }
-  if (!session || !schema_path || !fact_type || !event_id || !entry_point || !out_stream) {
+  if (!session || !fact_type || !event_id || !entry_point || !out_stream) {
     set_error("Continuous DataBind stream arguments are invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
@@ -1811,7 +1903,7 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_json_create(
     }
     auto handle = std::make_unique<ruleforge_continuous_data_bind_stream_handle_s>();
     handle->session_wrapper = wrapper;
-    handle->codec = create_data_bind_or_set_error(schema_path);
+    handle->codec = get_kb_data_bind_or_set_error(*wrapper->kb, fact_type);
     handle->fact_type = fact_type;
     handle->event_id = event_id;
     handle->entry_point = entry_point;
@@ -1836,13 +1928,13 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_json_create(
 }
 
 ruleforge_status_t ruleforge_continuous_data_bind_stream_yaml_create(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *event_id, char const *entry_point,
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *event_id, char const *entry_point,
     int64_t event_time_ms, ruleforge_continuous_data_bind_stream_t *out_stream) {
   if (out_stream) {
     *out_stream = nullptr;
   }
-  if (!session || !schema_path || !fact_type || !event_id || !entry_point || !out_stream) {
+  if (!session || !fact_type || !event_id || !entry_point || !out_stream) {
     set_error("Continuous DataBind stream arguments are invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
@@ -1854,7 +1946,7 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_yaml_create(
     }
     auto handle = std::make_unique<ruleforge_continuous_data_bind_stream_handle_s>();
     handle->session_wrapper = wrapper;
-    handle->codec = create_data_bind_or_set_error(schema_path);
+    handle->codec = get_kb_data_bind_or_set_error(*wrapper->kb, fact_type);
     handle->fact_type = fact_type;
     handle->event_id = event_id;
     handle->entry_point = entry_point;
@@ -1879,13 +1971,13 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_yaml_create(
 }
 
 ruleforge_status_t ruleforge_continuous_data_bind_stream_json_path_create(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *json_path, char const *event_id_field,
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *json_path, char const *event_id_field,
     char const *event_time_field, char const *entry_point,
     ruleforge_continuous_data_bind_stream_t *out_stream) {
   std::unique_ptr<ruleforge_continuous_data_bind_stream_handle_s> handle;
   auto status = prepare_continuous_path_stream(
-      session, schema_path, fact_type, json_path, event_id_field,
+      session, fact_type, json_path, event_id_field,
       event_time_field, entry_point, out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -1896,13 +1988,13 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_json_path_create(
 }
 
 ruleforge_status_t ruleforge_continuous_data_bind_stream_yaml_path_create(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *yaml_path, char const *event_id_field,
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *yaml_path, char const *event_id_field,
     char const *event_time_field, char const *entry_point,
     ruleforge_continuous_data_bind_stream_t *out_stream) {
   std::unique_ptr<ruleforge_continuous_data_bind_stream_handle_s> handle;
   auto status = prepare_continuous_path_stream(
-      session, schema_path, fact_type, yaml_path, event_id_field,
+      session, fact_type, yaml_path, event_id_field,
       event_time_field, entry_point, out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -1913,13 +2005,13 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_yaml_path_create(
 }
 
 ruleforge_status_t ruleforge_continuous_data_bind_stream_csv_path_create(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *csv_path, char const *event_id_field,
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *csv_path, char const *event_id_field,
     char const *event_time_field, char const *entry_point,
     ruleforge_continuous_data_bind_stream_t *out_stream) {
   std::unique_ptr<ruleforge_continuous_data_bind_stream_handle_s> handle;
   auto status = prepare_continuous_path_stream(
-      session, schema_path, fact_type, csv_path, event_id_field,
+      session, fact_type, csv_path, event_id_field,
       event_time_field, entry_point, out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -1930,13 +2022,13 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_csv_path_create(
 }
 
 ruleforge_status_t ruleforge_continuous_data_bind_stream_xml_path_create(
-    ruleforge_continuous_session_t session, char const *schema_path,
-    char const *fact_type, char const *xml_path, char const *event_id_field,
+    ruleforge_continuous_session_t session, char const *fact_type,
+    char const *xml_path, char const *event_id_field,
     char const *event_time_field, char const *entry_point,
     ruleforge_continuous_data_bind_stream_t *out_stream) {
   std::unique_ptr<ruleforge_continuous_data_bind_stream_handle_s> handle;
   auto status = prepare_continuous_path_stream(
-      session, schema_path, fact_type, xml_path, event_id_field,
+      session, fact_type, xml_path, event_id_field,
       event_time_field, entry_point, out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -2180,10 +2272,10 @@ struct QueryResultWrapper {
 };
 
 ruleforge_status_t ruleforge_data_bind_stream_json_create(
-    ruleforge_stateful_session_t session, const char *schema_path,
-    const char *fact_type, ruleforge_data_bind_stream_t *out_stream) {
+    ruleforge_stateful_session_t session, const char *fact_type,
+    ruleforge_data_bind_stream_t *out_stream) {
   std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
-  auto status = prepare_data_bind_stream(session, schema_path, fact_type, false,
+  auto status = prepare_data_bind_stream(session, fact_type, false,
                                          out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -2194,10 +2286,10 @@ ruleforge_status_t ruleforge_data_bind_stream_json_create(
 }
 
 ruleforge_status_t ruleforge_data_bind_stream_json_all_create(
-    ruleforge_stateful_session_t session, const char *schema_path,
-    const char *fact_type, ruleforge_data_bind_stream_t *out_stream) {
+    ruleforge_stateful_session_t session, const char *fact_type,
+    ruleforge_data_bind_stream_t *out_stream) {
   std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
-  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+  auto status = prepare_data_bind_stream(session, fact_type, true,
                                          out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -2208,8 +2300,8 @@ ruleforge_status_t ruleforge_data_bind_stream_json_all_create(
 }
 
 ruleforge_status_t ruleforge_data_bind_stream_json_path_create(
-    ruleforge_stateful_session_t session, const char *schema_path,
-    const char *fact_type, const char *json_path,
+    ruleforge_stateful_session_t session, const char *fact_type,
+    const char *json_path,
     ruleforge_data_bind_stream_t *out_stream) {
   if (!json_path || json_path[0] == '\0') {
     if (out_stream) {
@@ -2219,7 +2311,7 @@ ruleforge_status_t ruleforge_data_bind_stream_json_path_create(
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
-  auto status = prepare_data_bind_stream(session, schema_path, fact_type, false,
+  auto status = prepare_data_bind_stream(session, fact_type, false,
                                          out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -2230,8 +2322,8 @@ ruleforge_status_t ruleforge_data_bind_stream_json_path_create(
 }
 
 ruleforge_status_t ruleforge_data_bind_stream_json_path_all_create(
-    ruleforge_stateful_session_t session, const char *schema_path,
-    const char *fact_type, const char *json_path,
+    ruleforge_stateful_session_t session, const char *fact_type,
+    const char *json_path,
     ruleforge_data_bind_stream_t *out_stream) {
   if (!json_path || json_path[0] == '\0') {
     if (out_stream) {
@@ -2241,7 +2333,7 @@ ruleforge_status_t ruleforge_data_bind_stream_json_path_all_create(
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
-  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+  auto status = prepare_data_bind_stream(session, fact_type, true,
                                          out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -2252,10 +2344,10 @@ ruleforge_status_t ruleforge_data_bind_stream_json_path_all_create(
 }
 
 ruleforge_status_t ruleforge_data_bind_stream_yaml_create(
-    ruleforge_stateful_session_t session, const char *schema_path,
-    const char *fact_type, ruleforge_data_bind_stream_t *out_stream) {
+    ruleforge_stateful_session_t session, const char *fact_type,
+    ruleforge_data_bind_stream_t *out_stream) {
   std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
-  auto status = prepare_data_bind_stream(session, schema_path, fact_type, false,
+  auto status = prepare_data_bind_stream(session, fact_type, false,
                                          out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -2266,10 +2358,10 @@ ruleforge_status_t ruleforge_data_bind_stream_yaml_create(
 }
 
 ruleforge_status_t ruleforge_data_bind_stream_yaml_all_create(
-    ruleforge_stateful_session_t session, const char *schema_path,
-    const char *fact_type, ruleforge_data_bind_stream_t *out_stream) {
+    ruleforge_stateful_session_t session, const char *fact_type,
+    ruleforge_data_bind_stream_t *out_stream) {
   std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
-  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+  auto status = prepare_data_bind_stream(session, fact_type, true,
                                          out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -2280,8 +2372,8 @@ ruleforge_status_t ruleforge_data_bind_stream_yaml_all_create(
 }
 
 ruleforge_status_t ruleforge_data_bind_stream_yaml_path_create(
-    ruleforge_stateful_session_t session, const char *schema_path,
-    const char *fact_type, const char *yaml_path,
+    ruleforge_stateful_session_t session, const char *fact_type,
+    const char *yaml_path,
     ruleforge_data_bind_stream_t *out_stream) {
   if (!yaml_path || yaml_path[0] == '\0') {
     if (out_stream) {
@@ -2291,7 +2383,7 @@ ruleforge_status_t ruleforge_data_bind_stream_yaml_path_create(
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
-  auto status = prepare_data_bind_stream(session, schema_path, fact_type, false,
+  auto status = prepare_data_bind_stream(session, fact_type, false,
                                          out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -2302,8 +2394,8 @@ ruleforge_status_t ruleforge_data_bind_stream_yaml_path_create(
 }
 
 ruleforge_status_t ruleforge_data_bind_stream_yaml_path_all_create(
-    ruleforge_stateful_session_t session, const char *schema_path,
-    const char *fact_type, const char *yaml_path,
+    ruleforge_stateful_session_t session, const char *fact_type,
+    const char *yaml_path,
     ruleforge_data_bind_stream_t *out_stream) {
   if (!yaml_path || yaml_path[0] == '\0') {
     if (out_stream) {
@@ -2313,7 +2405,7 @@ ruleforge_status_t ruleforge_data_bind_stream_yaml_path_all_create(
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
-  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+  auto status = prepare_data_bind_stream(session, fact_type, true,
                                          out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -2324,10 +2416,10 @@ ruleforge_status_t ruleforge_data_bind_stream_yaml_path_all_create(
 }
 
 ruleforge_status_t ruleforge_data_bind_stream_csv_all_create(
-    ruleforge_stateful_session_t session, const char *schema_path,
-    const char *fact_type, ruleforge_data_bind_stream_t *out_stream) {
+    ruleforge_stateful_session_t session, const char *fact_type,
+    ruleforge_data_bind_stream_t *out_stream) {
   std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
-  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+  auto status = prepare_data_bind_stream(session, fact_type, true,
                                          out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -2338,8 +2430,8 @@ ruleforge_status_t ruleforge_data_bind_stream_csv_all_create(
 }
 
 ruleforge_status_t ruleforge_data_bind_stream_csv_path_create(
-    ruleforge_stateful_session_t session, const char *schema_path,
-    const char *fact_type, const char *csv_path,
+    ruleforge_stateful_session_t session, const char *fact_type,
+    const char *csv_path,
     ruleforge_data_bind_stream_t *out_stream) {
   if (!csv_path || csv_path[0] == '\0') {
     if (out_stream) {
@@ -2349,7 +2441,7 @@ ruleforge_status_t ruleforge_data_bind_stream_csv_path_create(
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
-  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+  auto status = prepare_data_bind_stream(session, fact_type, true,
                                          out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -2360,10 +2452,10 @@ ruleforge_status_t ruleforge_data_bind_stream_csv_path_create(
 }
 
 ruleforge_status_t ruleforge_data_bind_stream_xml_create(
-    ruleforge_stateful_session_t session, const char *schema_path,
-    const char *fact_type, ruleforge_data_bind_stream_t *out_stream) {
+    ruleforge_stateful_session_t session, const char *fact_type,
+    ruleforge_data_bind_stream_t *out_stream) {
   std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
-  auto status = prepare_data_bind_stream(session, schema_path, fact_type, false,
+  auto status = prepare_data_bind_stream(session, fact_type, false,
                                          out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -2374,8 +2466,8 @@ ruleforge_status_t ruleforge_data_bind_stream_xml_create(
 }
 
 ruleforge_status_t ruleforge_data_bind_stream_xml_path_all_create(
-    ruleforge_stateful_session_t session, const char *schema_path,
-    const char *fact_type, const char *xml_path,
+    ruleforge_stateful_session_t session, const char *fact_type,
+    const char *xml_path,
     ruleforge_data_bind_stream_t *out_stream) {
   if (!xml_path || xml_path[0] == '\0') {
     if (out_stream) {
@@ -2385,7 +2477,7 @@ ruleforge_status_t ruleforge_data_bind_stream_xml_path_all_create(
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   std::unique_ptr<ruleforge_data_bind_stream_handle_s> handle;
-  auto status = prepare_data_bind_stream(session, schema_path, fact_type, true,
+  auto status = prepare_data_bind_stream(session, fact_type, true,
                                          out_stream, handle);
   if (status != RULES_FORGE_OK) {
     return status;
@@ -2565,13 +2657,12 @@ ruleforge_status_t ruleforge_session_add_data_bind_object(
 }
 
 ruleforge_status_t
-ruleforge_session_add_fact_json_schema(ruleforge_stateful_session_t session,
-                                       const char *schema_path,
-                                       const char *fact_type,
-                                       const char *fact_json,
-                                       ruleforge_fact_t *out_fact) {
-  if (!session || !schema_path || !fact_type || !fact_json) {
-    set_error("Session handle, schema path, fact type, or fact JSON is NULL");
+ruleforge_session_add_fact_json(ruleforge_stateful_session_t session,
+                                const char *fact_type,
+                                const char *fact_json,
+                                ruleforge_fact_t *out_fact) {
+  if (!session || !fact_type || !fact_json) {
+    set_error("Session handle, fact type, or fact JSON is NULL");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   if (out_fact) {
@@ -2583,7 +2674,9 @@ ruleforge_session_add_fact_json_schema(ruleforge_stateful_session_t session,
     if (type_status != RULES_FORGE_OK) {
       return type_status;
     }
-    auto codec = create_data_bind_or_set_error(schema_path);
+    auto const kb = session_wrapper->session->get_knowledge_base();
+    auto codec = kb ? get_kb_data_bind_or_set_error(*kb, fact_type)
+                    : DataBindView{};
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -2615,18 +2708,17 @@ ruleforge_session_add_fact_json_schema(ruleforge_stateful_session_t session,
 }
 
 ruleforge_status_t
-ruleforge_session_add_fact_json_path_schema(ruleforge_stateful_session_t session,
-                                            const char *schema_path,
-                                            const char *fact_type,
-                                            const char *fact_json,
-                                            const char *json_path,
-                                            ruleforge_fact_t *out_fact) {
+ruleforge_session_add_fact_json_path(ruleforge_stateful_session_t session,
+                                     const char *fact_type,
+                                     const char *fact_json,
+                                     const char *json_path,
+                                     ruleforge_fact_t *out_fact) {
   if (out_fact) {
     *out_fact = nullptr;
   }
-  if (!session || !schema_path || !fact_type || !fact_json
+  if (!session || !fact_type || !fact_json
       || !json_path || json_path[0] == '\0') {
-    set_error("Session, schema, fact type, JSON source, or JSON path is invalid");
+    set_error("Session, fact type, JSON source, or JSON path is invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
@@ -2635,7 +2727,9 @@ ruleforge_session_add_fact_json_path_schema(ruleforge_stateful_session_t session
     if (type_status != RULES_FORGE_OK) {
       return type_status;
     }
-    auto codec = create_data_bind_or_set_error(schema_path);
+    auto const kb = session_wrapper->session->get_knowledge_base();
+    auto codec = kb ? get_kb_data_bind_or_set_error(*kb, fact_type)
+                    : DataBindView{};
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -2667,9 +2761,8 @@ ruleforge_session_add_fact_json_path_schema(ruleforge_stateful_session_t session
 }
 
 ruleforge_status_t
-ruleforge_session_add_facts_json_path_schema(ruleforge_stateful_session_t session,
-                                             const char *schema_path,
-                                             const char *fact_type,
+ruleforge_session_add_facts_json_path(ruleforge_stateful_session_t session,
+                                      const char *fact_type,
                                              const char *fact_json,
                                              const char *json_path,
                                              ruleforge_fact_t **out_facts,
@@ -2680,9 +2773,9 @@ ruleforge_session_add_facts_json_path_schema(ruleforge_stateful_session_t sessio
   if (out_loaded_count) {
     *out_loaded_count = 0;
   }
-  if (!session || !schema_path || !fact_type || !fact_json
+  if (!session || !fact_type || !fact_json
       || !json_path || json_path[0] == '\0') {
-    set_error("Session, schema, fact type, JSON source, or JSON path is invalid");
+    set_error("Session, fact type, JSON source, or JSON path is invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
@@ -2691,7 +2784,9 @@ ruleforge_session_add_facts_json_path_schema(ruleforge_stateful_session_t sessio
     if (type_status != RULES_FORGE_OK) {
       return type_status;
     }
-    auto codec = create_data_bind_or_set_error(schema_path);
+    auto const kb = session_wrapper->session->get_knowledge_base();
+    auto codec = kb ? get_kb_data_bind_or_set_error(*kb, fact_type)
+                    : DataBindView{};
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -2723,13 +2818,12 @@ ruleforge_session_add_facts_json_path_schema(ruleforge_stateful_session_t sessio
 }
 
 ruleforge_status_t
-ruleforge_session_add_fact_yaml_schema(ruleforge_stateful_session_t session,
-                                       const char *schema_path,
+ruleforge_session_add_fact_yaml(ruleforge_stateful_session_t session,
                                        const char *fact_type,
                                        const char *fact_yaml,
                                        ruleforge_fact_t *out_fact) {
-  if (!session || !schema_path || !fact_type || !fact_yaml) {
-    set_error("Session handle, schema path, fact type, or fact YAML is NULL");
+  if (!session || !fact_type || !fact_yaml) {
+    set_error("Session handle, fact type, or fact YAML is NULL");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   if (out_fact) {
@@ -2741,7 +2835,9 @@ ruleforge_session_add_fact_yaml_schema(ruleforge_stateful_session_t session,
     if (type_status != RULES_FORGE_OK) {
       return type_status;
     }
-    auto codec = create_data_bind_or_set_error(schema_path);
+    auto const kb = session_wrapper->session->get_knowledge_base();
+    auto codec = kb ? get_kb_data_bind_or_set_error(*kb, fact_type)
+                    : DataBindView{};
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -2773,8 +2869,7 @@ ruleforge_session_add_fact_yaml_schema(ruleforge_stateful_session_t session,
 }
 
 ruleforge_status_t
-ruleforge_session_add_fact_yaml_path_schema(ruleforge_stateful_session_t session,
-                                            const char *schema_path,
+ruleforge_session_add_fact_yaml_path(ruleforge_stateful_session_t session,
                                             const char *fact_type,
                                             const char *fact_yaml,
                                             const char *yaml_path,
@@ -2782,9 +2877,9 @@ ruleforge_session_add_fact_yaml_path_schema(ruleforge_stateful_session_t session
   if (out_fact) {
     *out_fact = nullptr;
   }
-  if (!session || !schema_path || !fact_type || !fact_yaml
+  if (!session || !fact_type || !fact_yaml
       || !yaml_path || yaml_path[0] == '\0') {
-    set_error("Session, schema, fact type, YAML source, or YAML path is invalid");
+    set_error("Session, fact type, YAML source, or YAML path is invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
@@ -2793,7 +2888,9 @@ ruleforge_session_add_fact_yaml_path_schema(ruleforge_stateful_session_t session
     if (type_status != RULES_FORGE_OK) {
       return type_status;
     }
-    auto codec = create_data_bind_or_set_error(schema_path);
+    auto const kb = session_wrapper->session->get_knowledge_base();
+    auto codec = kb ? get_kb_data_bind_or_set_error(*kb, fact_type)
+                    : DataBindView{};
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -2825,8 +2922,7 @@ ruleforge_session_add_fact_yaml_path_schema(ruleforge_stateful_session_t session
 }
 
 ruleforge_status_t
-ruleforge_session_add_facts_yaml_path_schema(ruleforge_stateful_session_t session,
-                                             const char *schema_path,
+ruleforge_session_add_facts_yaml_path(ruleforge_stateful_session_t session,
                                              const char *fact_type,
                                              const char *fact_yaml,
                                              const char *yaml_path,
@@ -2838,9 +2934,9 @@ ruleforge_session_add_facts_yaml_path_schema(ruleforge_stateful_session_t sessio
   if (out_loaded_count) {
     *out_loaded_count = 0;
   }
-  if (!session || !schema_path || !fact_type || !fact_yaml
+  if (!session || !fact_type || !fact_yaml
       || !yaml_path || yaml_path[0] == '\0') {
-    set_error("Session, schema, fact type, YAML source, or YAML path is invalid");
+    set_error("Session, fact type, YAML source, or YAML path is invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
@@ -2849,7 +2945,9 @@ ruleforge_session_add_facts_yaml_path_schema(ruleforge_stateful_session_t sessio
     if (type_status != RULES_FORGE_OK) {
       return type_status;
     }
-    auto codec = create_data_bind_or_set_error(schema_path);
+    auto const kb = session_wrapper->session->get_knowledge_base();
+    auto codec = kb ? get_kb_data_bind_or_set_error(*kb, fact_type)
+                    : DataBindView{};
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -2881,14 +2979,13 @@ ruleforge_session_add_facts_yaml_path_schema(ruleforge_stateful_session_t sessio
 }
 
 ruleforge_status_t
-ruleforge_session_add_fact_binary_schema(ruleforge_stateful_session_t session,
-                                         const char *schema_path,
+ruleforge_session_add_fact_binary(ruleforge_stateful_session_t session,
                                          const char *fact_type,
                                          const uint8_t *fact_data,
                                          size_t fact_len,
                                          ruleforge_fact_t *out_fact) {
-  if (!session || !schema_path || !fact_type || !fact_data || fact_len == 0) {
-    set_error("Session handle, schema path, fact type, or binary payload is invalid");
+  if (!session || !fact_type || !fact_data || fact_len == 0) {
+    set_error("Session handle, fact type, or binary payload is invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   if (out_fact) {
@@ -2900,7 +2997,9 @@ ruleforge_session_add_fact_binary_schema(ruleforge_stateful_session_t session,
     if (type_status != RULES_FORGE_OK) {
       return type_status;
     }
-    auto codec = create_data_bind_or_set_error(schema_path);
+    auto const kb = session_wrapper->session->get_knowledge_base();
+    auto codec = kb ? get_kb_data_bind_or_set_error(*kb, fact_type)
+                    : DataBindView{};
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -2931,8 +3030,7 @@ ruleforge_session_add_fact_binary_schema(ruleforge_stateful_session_t session,
 }
 
 ruleforge_status_t
-ruleforge_session_add_facts_csv_schema(ruleforge_stateful_session_t session,
-                                       const char *schema_path,
+ruleforge_session_add_facts_csv(ruleforge_stateful_session_t session,
                                        const char *fact_type,
                                        const char *csv_source,
                                        ruleforge_fact_t **out_facts,
@@ -2943,8 +3041,8 @@ ruleforge_session_add_facts_csv_schema(ruleforge_stateful_session_t session,
   if (out_loaded_count) {
     *out_loaded_count = 0;
   }
-  if (!session || !schema_path || !fact_type || !csv_source) {
-    set_error("Session handle, schema path, fact type, or CSV source is NULL");
+  if (!session || !fact_type || !csv_source) {
+    set_error("Session handle, fact type, or CSV source is NULL");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
@@ -2953,7 +3051,9 @@ ruleforge_session_add_facts_csv_schema(ruleforge_stateful_session_t session,
     if (type_status != RULES_FORGE_OK) {
       return type_status;
     }
-    auto codec = create_data_bind_or_set_error(schema_path);
+    auto const kb = session_wrapper->session->get_knowledge_base();
+    auto codec = kb ? get_kb_data_bind_or_set_error(*kb, fact_type)
+                    : DataBindView{};
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -2985,8 +3085,7 @@ ruleforge_session_add_facts_csv_schema(ruleforge_stateful_session_t session,
 }
 
 ruleforge_status_t
-ruleforge_session_add_facts_csv_path_schema(ruleforge_stateful_session_t session,
-                                            const char *schema_path,
+ruleforge_session_add_facts_csv_path(ruleforge_stateful_session_t session,
                                             const char *fact_type,
                                             const char *csv_source,
                                             const char *csv_path,
@@ -2998,9 +3097,9 @@ ruleforge_session_add_facts_csv_path_schema(ruleforge_stateful_session_t session
   if (out_loaded_count) {
     *out_loaded_count = 0;
   }
-  if (!session || !schema_path || !fact_type || !csv_source
+  if (!session || !fact_type || !csv_source
       || !csv_path || csv_path[0] == '\0') {
-    set_error("Session, schema, fact type, CSV source, or CSV path is invalid");
+    set_error("Session, fact type, CSV source, or CSV path is invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
@@ -3009,7 +3108,9 @@ ruleforge_session_add_facts_csv_path_schema(ruleforge_stateful_session_t session
     if (type_status != RULES_FORGE_OK) {
       return type_status;
     }
-    auto codec = create_data_bind_or_set_error(schema_path);
+    auto const kb = session_wrapper->session->get_knowledge_base();
+    auto codec = kb ? get_kb_data_bind_or_set_error(*kb, fact_type)
+                    : DataBindView{};
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -3041,8 +3142,7 @@ ruleforge_session_add_facts_csv_path_schema(ruleforge_stateful_session_t session
 }
 
 ruleforge_status_t
-ruleforge_session_add_facts_xml_schema(ruleforge_stateful_session_t session,
-                                       const char *schema_path,
+ruleforge_session_add_facts_xml(ruleforge_stateful_session_t session,
                                        const char *fact_type,
                                        const char *xml_source,
                                        const char *xpath,
@@ -3054,8 +3154,8 @@ ruleforge_session_add_facts_xml_schema(ruleforge_stateful_session_t session,
   if (out_loaded_count) {
     *out_loaded_count = 0;
   }
-  if (!session || !schema_path || !fact_type || !xml_source) {
-    set_error("Session handle, schema path, fact type, or XML source is NULL");
+  if (!session || !fact_type || !xml_source) {
+    set_error("Session handle, fact type, or XML source is NULL");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   try {
@@ -3064,7 +3164,9 @@ ruleforge_session_add_facts_xml_schema(ruleforge_stateful_session_t session,
     if (type_status != RULES_FORGE_OK) {
       return type_status;
     }
-    auto codec = create_data_bind_or_set_error(schema_path);
+    auto const kb = session_wrapper->session->get_knowledge_base();
+    auto codec = kb ? get_kb_data_bind_or_set_error(*kb, fact_type)
+                    : DataBindView{};
     if (!codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
@@ -3448,6 +3550,55 @@ ruleforge_status_t ruleforge_fact_get_field_as_bool(ruleforge_fact_t fact, const
     set_error_fmt("Failed to get bool field: ", e.what());
     return RULES_FORGE_ERROR_GENERIC;
   }
+}
+
+ruleforge_status_t ruleforge_fact_get_enum_name(
+    ruleforge_fact_t fact, char const *field_name, char *name_buffer,
+    size_t buffer_size, size_t *out_actual_length) {
+  if (!fact || !field_name || !name_buffer || !out_actual_length) {
+    set_error("Fact handle, field name, name buffer, or actual length pointer is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto const *typed_fact = reinterpret_cast<Fact const *>(fact);
+    auto const enum_name = typed_fact->enum_names.find(field_name);
+    if (enum_name == typed_fact->enum_names.end()) {
+      set_error("Field is not an enum or has no schema enum name");
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+    *out_actual_length = enum_name->second.size();
+    if (buffer_size <= enum_name->second.size()) {
+      set_error("Buffer too small");
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+    std::memcpy(name_buffer, enum_name->second.c_str(), enum_name->second.size() + 1);
+    last_error[0] = '\0';
+    return RULES_FORGE_OK;
+  } catch (std::exception const &e) {
+    set_error_fmt("Failed to get enum name: ", e.what());
+    return RULES_FORGE_ERROR_GENERIC;
+  }
+}
+
+ruleforge_status_t ruleforge_fact_get_field_as_enum(
+    ruleforge_fact_t fact, char const *field_name, char *name_buffer,
+    size_t buffer_size, size_t *out_actual_length, int64_t *out_value) {
+  if (!out_value) {
+    set_error("Enum value output pointer is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  int64_t value = 0;
+  auto value_status = ruleforge_fact_get_field_as_int(fact, field_name, &value);
+  if (value_status != RULES_FORGE_OK) {
+    return value_status;
+  }
+  auto name_status = ruleforge_fact_get_enum_name(
+      fact, field_name, name_buffer, buffer_size, out_actual_length);
+  if (name_status != RULES_FORGE_OK) {
+    return name_status;
+  }
+  *out_value = value;
+  return RULES_FORGE_OK;
 }
 
 // --- Session Observability Functions ---

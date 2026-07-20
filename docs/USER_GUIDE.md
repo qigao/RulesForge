@@ -82,6 +82,11 @@ input styles:
 - complete-document functions parse an already available payload;
 - incremental stream functions accept chunks and commit only on `finish`.
 
+The Knowledge Base owns and reuses imported DataBind codecs. Use
+`ruleforge_session_add_fact_json` when inserting JSON by imported type; callers
+do not need to pass the schema path again. Path-taking compatibility APIs verify
+that the path matches the KB import rather than loading an independent schema.
+
 JSONPath, CSVPath, and XMLPath select records before insertion in both input
 styles. RFL rules and queries then apply business constraints to the selected
 facts. Path filtering and rule filtering are consecutive stages, not competing
@@ -106,18 +111,7 @@ if (ruleforge_session_fire_all_rules(session, 10000, &fired)
 
 Named RFL queries return a result handle. Facts borrowed from that result remain
 valid only while their owner remains alive; follow the ownership comments in
-[`rule_forge.h`](../include/rule_forge.h).
-
-## Execution Modes
-
-Select the mode on the knowledge base before creating sessions:
-
-- `RULES_FORGE_EXECUTION_MODE_V1_STANDARD` preserves exact salience ordering;
-- `RULES_FORGE_EXECUTION_MODE_V2_HIGH_PERFORMANCE` uses coarser priority buckets.
-
-Do not depend on ordering between close salience values in V2. Measure both
-modes with the actual rule pack before choosing one; throughput claims are not
-a substitute for a local benchmark.
+[`rules_forge.h`](../include/rules_forge.h).
 
 ## Error Handling
 

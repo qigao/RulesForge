@@ -111,31 +111,6 @@ void check_build_fails_with(std::string const& drl, std::string const& expected_
 } // namespace
 
 suite("RFL Engine") {
-    group("Execution mode selection") {
-        it("creates sessions with the selected execution implementation") {
-            ParsingResult result;
-            auto kb = build_knowledge_base(R"(
-                declare Trigger end
-                rule "noop"
-                when
-                    Trigger()
-                then
-                end
-            )", result);
-            if (!result.success) {
-                throw_parse_failure(result);
-            }
-
-            kb->set_execution_mode(rulesforge::ExecutionMode::V2HighPerformance);
-            auto high_performance_session = kb->create_session();
-            check(high_performance_session->get_execution_mode() == "v2_high_performance");
-
-            kb->set_execution_mode(rulesforge::ExecutionMode::V1Standard);
-            auto standard_session = kb->create_session();
-            check(standard_session->get_execution_mode() == "v1_standard");
-        }
-    }
-
     group("DataBind schema import") {
         it("builds rule-visible declarations from DataBind schema") {
             auto schema_path = std::filesystem::temp_directory_path()

@@ -12,12 +12,6 @@
 namespace rulesforge {
 namespace {
 
-struct DataBindDeleter {
-  void operator()(DataBind* codec) const { data_bind_free(codec); }
-};
-
-using DataBindPtr = std::unique_ptr<DataBind, DataBindDeleter>;
-
 std::string copy_string(char const* text) {
   return text != nullptr ? std::string(text) : std::string();
 }
@@ -285,7 +279,7 @@ bool import_schema_file(std::filesystem::path const& schema_path,
   DataBind* raw_codec = nullptr;
   DataBindError error = DATA_BIND_ERROR_INIT;
   DataBindStatus status = data_bind_create(schema_path.string().c_str(), &raw_codec, &error);
-  DataBindPtr codec(raw_codec);
+  std::shared_ptr<DataBind> codec(raw_codec, data_bind_free);
   if (status != DATA_BIND_OK) {
     errors.push_back({.file_name = schema_path.string(),
                       .line = import.line,
@@ -306,6 +300,8 @@ bool import_schema_file(std::filesystem::path const& schema_path,
                          state.parsed_declarations);
     }
   }
+  state.imported_data_bind_schemas.push_back(
+      ImportedDataBindSchema{schema_path.string(), std::move(codec)});
   return true;
 }
 

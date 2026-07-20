@@ -9,6 +9,8 @@
 #include "rete/rete_node.hpp"
 #include "engine/stateful_session.hpp"
 
+#include <data_bind.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -104,6 +106,65 @@ AccumulatorRegistry const& KnowledgeBase::get_accumulator_registry() const { ret
 FactTypeRegistry& KnowledgeBase::get_fact_type_registry() { return fact_type_registry_; }
 
 FactTypeRegistry const& KnowledgeBase::get_fact_type_registry() const { return fact_type_registry_; }
+
+DataBind* KnowledgeBase::find_data_bind_codec(std::string const& type_name) const {
+    auto it = data_bind_type_schema_index_.find(type_name);
+    if (it == data_bind_type_schema_index_.end()
+        || it->second >= parser_state_.imported_data_bind_schemas.size()) {
+        return nullptr;
+    }
+    return parser_state_.imported_data_bind_schemas[it->second].codec.get();
+}
+
+std::optional<std::string> KnowledgeBase::enum_name_for_field(
+    std::string const& fact_type, std::string_view field_name,
+    ConstraintValue const& value) const {
+    auto const* numeric = std::get_if<int64_t>(&value);
+    if (!numeric) {
+        return std::nullopt;
+    }
+    auto* codec = find_data_bind_codec(fact_type);
+    if (!codec) {
+        return std::nullopt;
+    }
+
+    size_t const field_count = data_bind_schema_field_count(codec, fact_type.c_str());
+    for (size_t field_index = 0; field_index < field_count; ++field_index) {
+        DataBindSchemaField field = DATA_BIND_SCHEMA_FIELD_INIT;
+        if (!data_bind_schema_field_at(codec, fact_type.c_str(), field_index, &field)
+            || !field.name || field_name != field.name || !field.is_enum || !field.type) {
+            continue;
+        }
+        size_t const item_count = data_bind_schema_enum_item_count(codec, field.type);
+        for (size_t item_index = 0; item_index < item_count; ++item_index) {
+            DataBindSchemaEnumItem item = DATA_BIND_SCHEMA_ENUM_ITEM_INIT;
+            if (!data_bind_schema_enum_item_at(codec, field.type, item_index, &item)
+                || !item.name || !item.value) {
+                continue;
+            }
+            char* end = nullptr;
+            long long const item_value = std::strtoll(item.value, &end, 0);
+            if (end != item.value && *end == '\0'
+                && item_value == *numeric) {
+                return std::string(item.name);
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+std::string const* KnowledgeBase::find_data_bind_schema_path(std::string const& type_name) const {
+    auto it = data_bind_type_schema_index_.find(type_name);
+    if (it == data_bind_type_schema_index_.end()
+        || it->second >= parser_state_.imported_data_bind_schemas.size()) {
+        return nullptr;
+    }
+    return &parser_state_.imported_data_bind_schemas[it->second].path;
+}
+
+bool KnowledgeBase::has_data_bind_type(std::string const& type_name) const {
+    return find_data_bind_codec(type_name) != nullptr;
+}
 
 rulesforge::RhsBackendPlanSummary KnowledgeBase::rhs_backend_summary() const {
     return rhs_backend_plan_ ? rhs_backend_plan_->summary() : rulesforge::RhsBackendPlanSummary{};
@@ -223,6 +284,32 @@ std::optional<bool> KnowledgeBase::run_native_predicate(
 void KnowledgeBase::build(parser_state&& state) {
     logd("KnowledgeBase::build -> Building from parser state with {} rules.", state.parsed_rules.size());
     this->parser_state_ = std::move(state);
+
+    auto index_data_bind_type = [this](std::string const& type_name,
+                                       std::string const& schema_source) {
+        for (std::size_t i = 0; i < parser_state_.imported_data_bind_schemas.size(); ++i) {
+            if (parser_state_.imported_data_bind_schemas[i].path == schema_source) {
+                data_bind_type_schema_index_.emplace(type_name, i);
+                auto const dot = type_name.find_last_of('.');
+                if (dot != std::string::npos) {
+                    data_bind_type_schema_index_.emplace(type_name.substr(dot + 1), i);
+                }
+                return;
+            }
+        }
+    };
+    for (auto const& decl : parser_state_.parsed_declarations) {
+        auto source = decl.annotations.find("schema_source");
+        if (source != decl.annotations.end()) {
+            index_data_bind_type(decl.type_name, source->second);
+        }
+    }
+    for (auto const& enum_decl : parser_state_.parsed_enums) {
+        auto source = enum_decl.annotations.find("schema_source");
+        if (source != enum_decl.annotations.end()) {
+            index_data_bind_type(enum_decl.enum_name, source->second);
+        }
+    }
 
     // Build rule map once for O(1) parent lookup
     std::unordered_map<std::string, ParsedRule const*> rule_map;

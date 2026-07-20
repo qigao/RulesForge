@@ -70,8 +70,8 @@ Important fields:
 ## Event Commit
 
 Each event has a non-empty ID, an imported fact type, an entry point, and an
-event timestamp. `ruleforge_continuous_push_json_schema` binds one complete JSON
-object and commits one event step.
+event timestamp. `ruleforge_continuous_push_json` binds one complete JSON object
+using the KB's imported schema and commits one event step.
 
 JSONPath, CSVPath, and XMLPath adapters bind multiple records. Event ID and
 event time are read from caller-selected fields in each bound record; the entry
@@ -116,8 +116,8 @@ releases the session's pending-output accounting. Acknowledge batches in order.
 
 ```c
 ruleforge_continuous_result_t result = NULL;
-ruleforge_status_t status = ruleforge_continuous_push_json_schema(
-    session, "events.schema", "Event", "event-42", "events", 1710000000000,
+ruleforge_status_t status = ruleforge_continuous_push_json(
+    session, "Event", "event-42", "events", 1710000000000,
     json, &result);
 
 while (status == RULES_FORGE_OK

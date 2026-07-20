@@ -30,6 +30,7 @@ struct Fact {
     int64_t id = 0;
     std::string type;
     rulesforge::InternedKeyMap<ConstraintValue> fields;
+    rulesforge::InternedKeyMap<std::string> enum_names;
     std::optional<ConstraintValue> get_field(std::string const& name) const;
     std::optional<ConstraintValue> get_field(std::vector<PathSegment> const& path) const;
 };

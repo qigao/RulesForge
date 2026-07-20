@@ -3,6 +3,8 @@
 RulesForge uses TurboUtils DataBind at the C API boundary. DataBind validates
 external values against `.schema` declarations and RulesForge converts the
 bound values into session-owned facts. The rule engine itself remains fact-only.
+Imported DataBind codecs are retained by the immutable Knowledge Base and reused
+by every session created from it; inserting a fact does not reload its schema.
 
 Input processing has two distinct filtering stages:
 
@@ -41,16 +43,32 @@ Use these functions when the complete payload is already in memory:
 
 | Format | C API | Result |
 |---|---|---|
-| JSON object | `ruleforge_session_add_fact_json_schema` | one fact |
-| first JSONPath match | `ruleforge_session_add_fact_json_path_schema` | one fact |
-| all JSONPath matches | `ruleforge_session_add_facts_json_path_schema` | zero or more facts |
-| DataBind binary | `ruleforge_session_add_fact_binary_schema` | one fact |
-| CSV document | `ruleforge_session_add_facts_csv_schema` | zero or more facts |
-| CSVPath matches | `ruleforge_session_add_facts_csv_path_schema` | zero or more facts |
-| XML document/path | `ruleforge_session_add_facts_xml_schema` | zero or more facts |
+| JSON object | `ruleforge_session_add_fact_json` | one fact |
+| first JSONPath match | `ruleforge_session_add_fact_json_path` | one fact |
+| all JSONPath matches | `ruleforge_session_add_facts_json_path` | zero or more facts |
+| YAML object | `ruleforge_session_add_fact_yaml` | one fact |
+| first YPath match | `ruleforge_session_add_fact_yaml_path` | one fact |
+| all YPath matches | `ruleforge_session_add_facts_yaml_path` | zero or more facts |
+| DataBind binary | `ruleforge_session_add_fact_binary` | one fact |
+| CSV document | `ruleforge_session_add_facts_csv` | zero or more facts |
+| CSVPath matches | `ruleforge_session_add_facts_csv_path` | zero or more facts |
+| XML document/path | `ruleforge_session_add_facts_xml` | zero or more facts |
 
 Multi-fact functions return an array only when requested. Release that array
 with `ruleforge_fact_array_free`; the inserted facts remain session-owned.
+
+For example, use `ruleforge_session_add_fact_json(session, "Order", json,
+&fact)`. The type must have been imported by the RFL rule pack. The KB is the
+unique schema source for session ingestion; callers do not pass a schema path.
+
+At startup, `ruleforge_kb_has_schema_type` can validate that an external type is
+available. For enum fields, `ruleforge_fact_get_field_as_enum` returns the
+numeric value and DataBind schema name together; `ruleforge_fact_get_enum_name`
+returns only the name.
+
+Owned DataBind objects support JSON, YAML, XML, CSV, and schema binary
+serialization. Release text with `ruleforge_data_bind_serialized_free` and
+binary output with `ruleforge_data_bind_binary_free`.
 
 For example, a JSONPath such as `$.customers[*]` can select customer records
 from an envelope. RFL may then match only `Customer(age >= 18)`. Both selected
@@ -125,7 +143,7 @@ path-selected JSON, CSV, or XML batch whose records contain metadata fields.
 The single-event JSON lifecycle is:
 
 ```text
-create(session, schema, type, event_id, entry_point, event_time)
+create(session, type, event_id, entry_point, event_time)
   -> feed
   -> finish and commit exactly one event step
   -> inspect/acknowledge result
@@ -137,9 +155,9 @@ succeeds.
 
 Path-selected batches use these complete-document APIs:
 
-- `ruleforge_continuous_push_json_path_schema`
-- `ruleforge_continuous_push_csv_path_schema`
-- `ruleforge_continuous_push_xml_path_schema`
+- `ruleforge_continuous_push_json_path`
+- `ruleforge_continuous_push_csv_path`
+- `ruleforge_continuous_push_xml_path`
 
 Their incremental equivalents are the three
 `ruleforge_continuous_data_bind_stream_*_path_create` constructors. The caller
