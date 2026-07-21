@@ -36,7 +36,7 @@
                 "ISLinux",
                 "release-mode",
                 "Gcc",
-                "flags-gcc"
+                "flags-gnu"
             ],
             "binaryDir": "${sourceDir}/build/linux-gcc-release"
         },
@@ -47,7 +47,7 @@
                 "ISLinux",
                 "developer-mode",
                 "Gcc",
-                "flags-gcc"
+                "flags-gnu"
             ],
             "binaryDir": "${sourceDir}/build/linux-gcc-debug"
         },
