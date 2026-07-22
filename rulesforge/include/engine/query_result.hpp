@@ -40,7 +40,7 @@ public:
     }
 
     /// @brief 获取绑定中指定字段并以 T 类型返回。
-    /// T 必须为 ConstraintValue 的合法成员类型或 bool（参见 ConstraintValueExtractable）。
+    /// T 必须为 ConstraintValue 的合法成员类型（参见 ConstraintValueExtractable）。
     /// 非法 T 在编译期报错，而非运行期静默返回 nullopt。
     template <ConstraintValueExtractable T>
     std::optional<T> getFieldAs(std::string const& binding, std::string const& field_name) const;
@@ -196,11 +196,6 @@ std::optional<T> QueryResultRow::getFieldAs(std::string const& binding, std::str
                 return static_cast<int64_t>(*p_dbl);
             }
         }
-    }
-
-    // Allow conversion from int64_t (0 or 1) -> bool
-    if constexpr (std::is_same_v<T, bool>) {
-        if (int64_t* p_int = std::get_if<int64_t>(&*field_val_opt)) { return (*p_int != 0); }
     }
 
     // Add any other desired safe conversions here...

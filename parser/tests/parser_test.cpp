@@ -105,6 +105,23 @@ suite("Parser") {
             check(std::holds_alternative<double>(*final_price_node->constraint.right_literal));
             check(std::get<double>(*final_price_node->constraint.right_literal) == 0.01);
         }
+
+        it("preserves boolean constraint literals as booleans") {
+            auto state = parse_success(R"(
+                declare Feature active : bool end
+                rule "Enabled Feature"
+                when
+                    Feature(active == true)
+                then
+                end
+            )");
+
+            auto const& constraint =
+                state.parsed_rules[0].condition_groups[0][0].constraint_root->constraint;
+            check(constraint.right_literal.has_value());
+            check(std::holds_alternative<bool>(*constraint.right_literal));
+            check(std::get<bool>(*constraint.right_literal));
+        }
     }
 
     // ------------------------------------------------------------------
@@ -399,6 +416,36 @@ suite("Parser") {
             check(fields[3].type_params.size() == 1);
             check(fields[3].type_params[0].base_type == FT_Object);
             check(fields[3].type_params[0].custom_type == "Customer");
+        }
+
+        it("preserves extended scalar field types in declarations") {
+            std::string drl = R"(
+                declare ScalarFact
+                    counter: UInt64
+                    raw: Bytes
+                    observed: DateTime
+                    day: Date
+                    clock: Time
+                    latency: Duration
+                    price: Decimal
+                    sequence: BigInt
+                    total: Money
+                end
+            )";
+
+            auto state = parse_success(drl);
+            check_size_eq(state.parsed_declarations.size(), 1);
+            auto const& fields = state.parsed_declarations[0].fields;
+            check_size_eq(fields.size(), 9);
+            check(fields[0].type == FT_UInt64);
+            check(fields[1].type == FT_Bytes);
+            check(fields[2].type == FT_DateTime);
+            check(fields[3].type == FT_Date);
+            check(fields[4].type == FT_Time);
+            check(fields[5].type == FT_Duration);
+            check(fields[6].type == FT_Decimal);
+            check(fields[7].type == FT_BigInt);
+            check(fields[8].type == FT_Money);
         }
 
         it("parses List of custom object type") {

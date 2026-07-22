@@ -84,6 +84,18 @@ ConstraintValue coerce_numeric_assignment_to_existing_type(ConstraintValue const
         }
     }
 
+    if (std::holds_alternative<uint64_t>(current_value)) {
+        if (auto const* new_int = std::get_if<int64_t>(&new_value); new_int && *new_int >= 0) {
+            return static_cast<uint64_t>(*new_int);
+        }
+    }
+
+    if (std::holds_alternative<DurationValue>(current_value)) {
+        if (auto const* new_int = std::get_if<int64_t>(&new_value)) {
+            return DurationValue{*new_int};
+        }
+    }
+
     return new_value;
 }
 
@@ -96,7 +108,6 @@ ConstraintValue coerce_assignment_to_declared_type(std::optional<FieldType> decl
     switch (*declared_type) {
         case FT_Int:
         case FT_Long:
-        case FT_Boolean:
             if (auto const* new_double = std::get_if<double>(&new_value)) {
                 constexpr double min_i64 = static_cast<double>(std::numeric_limits<int64_t>::min());
                 constexpr double max_i64 = static_cast<double>(std::numeric_limits<int64_t>::max());
@@ -106,6 +117,21 @@ ConstraintValue coerce_assignment_to_declared_type(std::optional<FieldType> decl
                     *new_double <= max_i64) {
                     return static_cast<int64_t>(*new_double);
                 }
+            }
+            return new_value;
+
+        case FT_Boolean:
+            return new_value;
+
+        case FT_UInt64:
+            if (auto const* new_int = std::get_if<int64_t>(&new_value); new_int && *new_int >= 0) {
+                return static_cast<uint64_t>(*new_int);
+            }
+            return new_value;
+
+        case FT_Duration:
+            if (auto const* new_int = std::get_if<int64_t>(&new_value)) {
+                return DurationValue{*new_int};
             }
             return new_value;
 
@@ -154,8 +180,13 @@ std::string trim_ascii(std::string const& s) {
 }
 
 bool is_truthy(ConstraintValue const& value) {
+    if (auto const* boolean = std::get_if<bool>(&value)) return *boolean;
     if (auto const* d = std::get_if<double>(&value)) return *d != 0.0;
     if (auto const* i = std::get_if<int64_t>(&value)) return *i != 0;
+    if (auto const* u = std::get_if<uint64_t>(&value)) return *u != 0;
+    if (auto const* duration = std::get_if<DurationValue>(&value)) {
+        return duration->milliseconds != 0;
+    }
     if (auto const* s = std::get_if<std::string>(&value)) {
         return !s->empty() && *s != "false" && *s != "0";
     }
@@ -169,12 +200,25 @@ bool values_equal_for_switch(ConstraintValue const& lhs, ConstraintValue const& 
     if (std::holds_alternative<int64_t>(lhs) && std::holds_alternative<double>(rhs)) {
         return static_cast<double>(std::get<int64_t>(lhs)) == std::get<double>(rhs);
     }
+    auto const lhs_text = scalar_text(lhs);
+    auto const rhs_text = scalar_text(rhs);
+    if (lhs_text && rhs_text) return *lhs_text == *rhs_text;
     return lhs == rhs;
 }
 
 std::optional<double> scalar_number(ConstraintValue const& value) {
     if (auto const* integer = std::get_if<int64_t>(&value)) return static_cast<double>(*integer);
     if (auto const* number = std::get_if<double>(&value)) return *number;
+    if (auto const* unsigned_integer = std::get_if<uint64_t>(&value)) {
+        return static_cast<double>(*unsigned_integer);
+    }
+    if (auto const* duration = std::get_if<DurationValue>(&value)) {
+        return static_cast<double>(duration->milliseconds);
+    }
+    if (auto const* enumeration = std::get_if<EnumValue>(&value)) {
+        return std::visit([](auto numeric) { return static_cast<double>(numeric); },
+                          enumeration->value);
+    }
     return std::nullopt;
 }
 
@@ -191,8 +235,8 @@ bool compare_scalar_values(std::string_view op, ConstraintValue const& lhs, Cons
         }
     }
 
-    auto const* lhs_string = std::get_if<std::string>(&lhs);
-    auto const* rhs_string = std::get_if<std::string>(&rhs);
+    auto const lhs_string = scalar_text(lhs);
+    auto const rhs_string = scalar_text(rhs);
     if (lhs_string && rhs_string) {
         if (op == "==") return *lhs_string == *rhs_string;
         if (op == "!=") return *lhs_string != *rhs_string;
@@ -808,13 +852,7 @@ std::vector<::Fact*> RhsExecutor::collect_for_items(CompiledAction const& action
     auto append_values_as_iterator_facts = [this, &items](std::vector<ConstraintValue> const& values) {
         for (auto const& cv : values) {
             Fact* iter_fact = callback_.create_fact("Iterator");
-            std::visit([&](auto&& v) {
-                using T = std::decay_t<decltype(v)>;
-                if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, int64_t>
-                              || std::is_same_v<T, double> || std::is_same_v<T, turbo_uuid_t>) {
-                    iter_fact->fields[std::string_view("value")] = v;
-                }
-            }, cv);
+            iter_fact->fields[std::string_view("value")] = cv;
             items.push_back(iter_fact);
         }
     };
@@ -954,8 +992,8 @@ std::optional<ConstraintValue> RhsExecutor::evaluate_simple_rhs_value(std::strin
     if ((value.front() == '"' && value.back() == '"') || (value.front() == '\'' && value.back() == '\'')) {
         return value.substr(1, value.size() - 2);
     }
-    if (value == "true") return int64_t{1};
-    if (value == "false") return int64_t{0};
+    if (value == "true") return true;
+    if (value == "false") return false;
     if (value == "nil" || value == "null") return NilValue{};
     if (value.front() == '$') {
         return resolve_variable(value);
@@ -1017,7 +1055,7 @@ ConstraintValue RhsExecutor::evaluate_assignment(FieldAssignment const& assign) 
             return assign.string_literal;
 
         case RhsValueType::BOOLEAN:
-            return int64_t{assign.string_literal == "true" ? 1 : 0};
+            return assign.string_literal == "true";
 
         case RhsValueType::VAR_REF: {
             // Handle $var or $var.field

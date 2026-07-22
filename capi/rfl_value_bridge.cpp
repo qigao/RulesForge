@@ -138,6 +138,14 @@ void value_set_field_int64(Value* obj, const char* name, int64_t val) {
     set_object_field(obj, name, val);
 }
 
+void value_set_field_uint64(Value* obj, const char* name, uint64_t val) {
+    set_object_field(obj, name, val);
+}
+
+void value_set_field_bool(Value* obj, const char* name, int val) {
+    set_object_field(obj, name, val != 0);
+}
+
 void value_set_field_double(Value* obj, const char* name, double val) {
     set_object_field(obj, name, val);
 }
@@ -148,13 +156,10 @@ void value_set_field_string(Value* obj, const char* name, const char* val) {
 }
 
 void value_set_field_bytes(Value* obj, const char* name, const uint8_t* data, size_t len) {
-    if (!obj || !name || !data) return;
-    auto bytes = std::make_shared<TypedList>();
-    bytes->values.reserve(len);
-    for (size_t i = 0; i < len; ++i) {
-        bytes->values.emplace_back(static_cast<int64_t>(data[i]));
-    }
-    set_object_field(obj, name, bytes);
+    if (!obj || !name || (!data && len != 0)) return;
+    BytesValue bytes;
+    if (len != 0) bytes.bytes.assign(data, data + len);
+    set_object_field(obj, name, std::move(bytes));
 }
 
 void value_set_field_object(Value* obj, const char* name, Value* nested) {
@@ -173,6 +178,14 @@ void value_add_list_item_int(Value* list, int32_t val) {
 
 void value_add_list_item_int64(Value* list, int64_t val) {
     add_list_item(list, val);
+}
+
+void value_add_list_item_uint64(Value* list, uint64_t val) {
+    add_list_item(list, val);
+}
+
+void value_add_list_item_bool(Value* list, int val) {
+    add_list_item(list, val != 0);
 }
 
 void value_add_list_item_double(Value* list, double val) {
@@ -204,6 +217,14 @@ void value_add_set_item_int(Value* set, int32_t val) {
     add_set_item(set, static_cast<int64_t>(val));
 }
 
+void value_add_set_item_uint64(Value* set, uint64_t val) {
+    add_set_item(set, val);
+}
+
+void value_add_set_item_bool(Value* set, int val) {
+    add_set_item(set, val != 0);
+}
+
 void value_add_set_item_double(Value* set, double val) {
     add_set_item(set, val);
 }
@@ -232,6 +253,14 @@ void value_add_map_entry_string_int(Value* map, const char* key, int32_t val) {
     add_map_entry(map, key, static_cast<int64_t>(val));
 }
 
+void value_add_map_entry_string_uint64(Value* map, const char* key, uint64_t val) {
+    add_map_entry(map, key, val);
+}
+
+void value_add_map_entry_string_bool(Value* map, const char* key, int val) {
+    add_map_entry(map, key, val != 0);
+}
+
 void value_add_map_entry_string_double(Value* map, const char* key, double val) {
     add_map_entry(map, key, val);
 }
@@ -250,6 +279,39 @@ int64_t value_get_field_int(const Value* obj, const char* name) {
 
     if (auto* val = std::get_if<int64_t>(&it->second)) {
         return *val;
+    }
+    return 0;
+}
+
+uint64_t value_get_field_uint64(const Value* obj, const char* name) {
+    if (!obj || !name) return 0;
+    auto it = obj->fields.find(name);
+    if (it == obj->fields.end()) return 0;
+    if (auto const* value = std::get_if<uint64_t>(&it->second)) return *value;
+    return 0;
+}
+
+int value_get_field_bytes(const Value* obj, const char* name, uint8_t* buffer,
+                          size_t buffer_size, size_t* out_length) {
+    if (!obj || !name || !out_length || (!buffer && buffer_size != 0)) return 0;
+    auto it = obj->fields.find(name);
+    if (it == obj->fields.end()) return 0;
+    auto const* value = std::get_if<BytesValue>(&it->second);
+    if (!value) return 0;
+    *out_length = value->bytes.size();
+    if (buffer_size < value->bytes.size()) return 0;
+    if (!value->bytes.empty()) std::memcpy(buffer, value->bytes.data(), value->bytes.size());
+    return 1;
+}
+
+int value_get_field_bool(const Value* obj, const char* name) {
+    if (!obj || !name) return 0;
+
+    auto it = obj->fields.find(name);
+    if (it == obj->fields.end()) return 0;
+
+    if (auto* val = std::get_if<bool>(&it->second)) {
+        return *val ? 1 : 0;
     }
     return 0;
 }

@@ -194,29 +194,39 @@ struct ConstraintNode {
     ~ConstraintNode() = default;
 };
 
-enum FieldType : uint16_t {
-    FT_String  = 1 << 0,
-    FT_Int     = 1 << 1,
-    FT_Long    = 1 << 2,
-    FT_Double  = 1 << 3,
-    FT_Float   = 1 << 4,
-    FT_Number  = 1 << 5,
-    FT_Boolean = 1 << 6,
-    FT_List    = 1 << 7,
-    FT_Object  = 1 << 8,
-    FT_Unknown = 1 << 9,
-    FT_Set     = 1 << 10,
-    FT_Map     = 1 << 11,
-    FT_Uuid    = 1 << 12
+enum FieldType : uint32_t {
+    FT_String   = 1u << 0,
+    FT_Int      = 1u << 1,
+    FT_Long     = 1u << 2,
+    FT_Double   = 1u << 3,
+    FT_Float    = 1u << 4,
+    FT_Number   = 1u << 5,
+    FT_Boolean  = 1u << 6,
+    FT_List     = 1u << 7,
+    FT_Object   = 1u << 8,
+    FT_Unknown  = 1u << 9,
+    FT_Set      = 1u << 10,
+    FT_Map      = 1u << 11,
+    FT_Uuid     = 1u << 12,
+    FT_UInt64   = 1u << 13,
+    FT_Bytes    = 1u << 14,
+    FT_Enum     = 1u << 15,
+    FT_DateTime = 1u << 16,
+    FT_Date     = 1u << 17,
+    FT_Time     = 1u << 18,
+    FT_Duration = 1u << 19,
+    FT_Decimal  = 1u << 20,
+    FT_BigInt   = 1u << 21,
+    FT_Money    = 1u << 22
 };
 
-constexpr uint16_t FT_STRING_COMPAT = FT_String | FT_Object;
-constexpr uint16_t FT_INT_COMPAT = FT_Int | FT_Long | FT_Number;
-constexpr uint16_t FT_DOUBLE_COMPAT = FT_Double | FT_Float | FT_Number;
-constexpr uint16_t FT_LIST_COMPAT = FT_List;
-constexpr uint16_t FT_SET_COMPAT = FT_Set;
-constexpr uint16_t FT_MAP_COMPAT = FT_Map;
-constexpr uint16_t FT_UUID_COMPAT = FT_Uuid;
+constexpr uint32_t FT_STRING_COMPAT = FT_String | FT_Object;
+constexpr uint32_t FT_INT_COMPAT = FT_Int | FT_Long | FT_Number;
+constexpr uint32_t FT_DOUBLE_COMPAT = FT_Double | FT_Float | FT_Number;
+constexpr uint32_t FT_LIST_COMPAT = FT_List;
+constexpr uint32_t FT_SET_COMPAT = FT_Set;
+constexpr uint32_t FT_MAP_COMPAT = FT_Map;
+constexpr uint32_t FT_UUID_COMPAT = FT_Uuid;
 
 inline FieldType parse_field_type(std::string_view s) {
     if (s == "String" || s == "string") return FT_String;
@@ -230,6 +240,16 @@ inline FieldType parse_field_type(std::string_view s) {
     if (s == "Set" || s == "set") return FT_Set;
     if (s == "Map" || s == "map") return FT_Map;
     if (s == "UUID" || s == "uuid") return FT_Uuid;
+    if (s == "uint64" || s == "uint64_t" || s == "UInt64") return FT_UInt64;
+    if (s == "bytes" || s == "Bytes") return FT_Bytes;
+    if (s == "enum" || s == "Enum") return FT_Enum;
+    if (s == "datetime" || s == "DateTime") return FT_DateTime;
+    if (s == "date" || s == "Date") return FT_Date;
+    if (s == "time" || s == "Time") return FT_Time;
+    if (s == "duration" || s == "Duration") return FT_Duration;
+    if (s == "decimal" || s == "Decimal") return FT_Decimal;
+    if (s == "bigint" || s == "BigInt") return FT_BigInt;
+    if (s == "money" || s == "Money") return FT_Money;
     if (s == "Object" || s == "object") return FT_Object;
     return FT_Unknown;
 }

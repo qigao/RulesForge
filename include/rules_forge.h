@@ -632,7 +632,7 @@ ruleforge_query_result_get_fact_at_index(ruleforge_query_result_t query_result, 
 CXX_C_API ruleforge_status_t ruleforge_query_result_destroy(ruleforge_query_result_t query_result);
 
 // --- Fact Field Access ---
-// Gets a fact field as a string.
+// Gets a string field, or the canonical text of datetime/date/time/decimal/bigint/money.
 // fact: The fact handle.
 // field_name: The name of the field.
 // buffer: A pre-allocated buffer to copy the string into.
@@ -656,6 +656,16 @@ CXX_C_API ruleforge_status_t ruleforge_fact_get_field_as_double(ruleforge_fact_t
 CXX_C_API ruleforge_status_t ruleforge_fact_get_field_as_int(ruleforge_fact_t fact,
                                                              const char *field_name,
                                                              int64_t *out_value);
+
+// Gets an exact unsigned 64-bit field. Signed integers are not coerced.
+CXX_C_API ruleforge_status_t ruleforge_fact_get_field_as_uint64(
+    ruleforge_fact_t fact, const char *field_name, uint64_t *out_value);
+
+// Gets an exact bytes field. out_actual_length is always set when the field exists.
+// A NULL buffer is valid only when buffer_size is zero and can be used to query the size.
+CXX_C_API ruleforge_status_t ruleforge_fact_get_field_as_bytes(
+    ruleforge_fact_t fact, const char *field_name, uint8_t *buffer,
+    size_t buffer_size, size_t *out_actual_length);
 
 // Gets a fact field as a boolean.
 // Returns RULES_FORGE_OK on success.

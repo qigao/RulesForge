@@ -549,12 +549,12 @@ bool parse_constraint_text(std::string const& text, ParsedConstraint& out_constr
     } else if (std::regex_match(normalized, m, bare_field_pat)) {
         out_constraint.left_field = m[1].str();
         out_constraint.op = CompareOp::EQ;
-        out_constraint.right_literal = static_cast<int64_t>(1);
+        out_constraint.right_literal = true;
         return true;
     } else if (std::regex_match(normalized, m, negated_bare_field_pat)) {
         out_constraint.left_field = m[1].str();
         out_constraint.op = CompareOp::EQ;
-        out_constraint.right_literal = static_cast<int64_t>(0);
+        out_constraint.right_literal = false;
         return true;
     } else {
         return false;

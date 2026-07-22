@@ -145,6 +145,9 @@ suite("RhsParser") {
             auto const& a = actions[0].assignments[0];
             check(a.type == RhsValueType::BOOLEAN);
             check(a.string_literal == "true");
+            check(a.has_precomputed_literal);
+            check(std::holds_alternative<bool>(a.precomputed_literal));
+            check(std::get<bool>(a.precomputed_literal));
         }
 
         it("parses boolean false") {
@@ -154,6 +157,9 @@ suite("RhsParser") {
             auto const& a = actions[0].assignments[0];
             check(a.type == RhsValueType::BOOLEAN);
             check(a.string_literal == "false");
+            check(a.has_precomputed_literal);
+            check(std::holds_alternative<bool>(a.precomputed_literal));
+            check(!std::get<bool>(a.precomputed_literal));
         }
 
         it("parses variable reference") {

@@ -362,6 +362,8 @@ suite("DecisionTableCompiler") {
         check(c.left_field == "active");
         check(c.op == CompareOp::EQ);
         check(c.right_literal.has_value());
+        check(std::holds_alternative<bool>(*c.right_literal));
+        check(std::get<bool>(*c.right_literal));
     }
 
     it("directly parses parenthesized single constraint") {
@@ -660,6 +662,13 @@ suite("DecisionTableCompiler") {
         }
         check(root->type == NodeType::AND);
         check(root->children.size() == 2);
+        check(root->children[0] != nullptr);
+        if (root->children[0]) {
+            auto const& boolean_constraint = root->children[0]->constraint;
+            check(boolean_constraint.right_literal.has_value());
+            check(std::holds_alternative<bool>(*boolean_constraint.right_literal));
+            check(std::get<bool>(*boolean_constraint.right_literal));
+        }
         check(root->children[1] != nullptr);
         if (!root->children[1]) {
             return;

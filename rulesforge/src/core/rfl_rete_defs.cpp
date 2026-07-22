@@ -5,8 +5,72 @@
 #include <turbo_hash.h>
 
 #include <algorithm>
+#include <iomanip>
 #include <sstream>
 #include <stdexcept>
+
+namespace {
+
+template <typename T>
+void hash_combine(std::size_t& seed, T const& value) {
+    seed ^= std::hash<T>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
+std::string format_decimal(DecimalValue const& value) {
+    bool const negative = value.mantissa < 0;
+    uint64_t magnitude = negative
+        ? static_cast<uint64_t>(-(value.mantissa + 1)) + 1
+        : static_cast<uint64_t>(value.mantissa);
+    std::string digits = std::to_string(magnitude);
+    if (value.scale <= 0) {
+        digits.append(static_cast<std::size_t>(-value.scale), '0');
+    } else {
+        auto const scale = static_cast<std::size_t>(value.scale);
+        if (digits.size() <= scale) {
+            digits.insert(0, scale + 1 - digits.size(), '0');
+        }
+        digits.insert(digits.size() - scale, 1, '.');
+        while (digits.back() == '0') digits.pop_back();
+        if (digits.back() == '.') digits.pop_back();
+    }
+    if (negative && digits != "0") digits.insert(digits.begin(), '-');
+    return digits;
+}
+
+std::string format_date(DateValue const& value) {
+    std::ostringstream out;
+    out << std::setfill('0') << std::setw(4) << value.year << '-'
+        << std::setw(2) << value.month << '-' << std::setw(2) << value.day;
+    return out.str();
+}
+
+std::string format_time(TimeValue const& value) {
+    std::ostringstream out;
+    out << std::setfill('0') << std::setw(2) << value.hour << ':'
+        << std::setw(2) << value.minute << ':' << std::setw(2) << value.second;
+    if (value.millisecond != 0) out << '.' << std::setw(3) << value.millisecond;
+    return out.str();
+}
+
+std::string format_datetime(DateTimeValue const& value) {
+    std::string result = format_date(DateValue{value.year, value.month, value.day});
+    result += 'T';
+    result += format_time(TimeValue{value.hour, value.minute, value.second, value.millisecond});
+    if (value.has_timezone) {
+        if (value.tz_offset_minutes == 0) {
+            result += 'Z';
+        } else {
+            int const offset = std::abs(value.tz_offset_minutes);
+            std::ostringstream zone;
+            zone << (value.tz_offset_minutes < 0 ? '-' : '+') << std::setfill('0')
+                 << std::setw(2) << offset / 60 << ':' << std::setw(2) << offset % 60;
+            result += zone.str();
+        }
+    }
+    return result;
+}
+
+} // namespace
 
 // --- TypeParameter copy operations ---
 TypeParameter::TypeParameter(TypeParameter const& other)
@@ -40,6 +104,19 @@ bool ConstraintValueCompare::operator()(ConstraintValue const& a, ConstraintValu
         } else if constexpr (std::is_same_v<T, int64_t>) {
             return val_a < val_b;
         } else if constexpr (std::is_same_v<T, double>) {
+            return val_a < val_b;
+        } else if constexpr (std::is_same_v<T, bool>) {
+            return val_a < val_b;
+        } else if constexpr (std::is_same_v<T, uint64_t>
+                             || std::is_same_v<T, BytesValue>
+                             || std::is_same_v<T, EnumValue>
+                             || std::is_same_v<T, DateTimeValue>
+                             || std::is_same_v<T, DateValue>
+                             || std::is_same_v<T, TimeValue>
+                             || std::is_same_v<T, DurationValue>
+                             || std::is_same_v<T, DecimalValue>
+                             || std::is_same_v<T, BigIntValue>
+                             || std::is_same_v<T, MoneyValue>) {
             return val_a < val_b;
         } else if constexpr (std::is_same_v<T, turbo_uuid_t>) {
             return std::lexicographical_compare(
@@ -204,6 +281,33 @@ std::string to_string(ConstraintValue const& val) {
                 return std::to_string(arg);
             } else if constexpr (std::is_same_v<T, double>) {
                 return std::to_string(arg);
+            } else if constexpr (std::is_same_v<T, bool>) {
+                return arg ? "true" : "false";
+            } else if constexpr (std::is_same_v<T, uint64_t>) {
+                return std::to_string(arg);
+            } else if constexpr (std::is_same_v<T, BytesValue>) {
+                std::ostringstream out;
+                out << "0x" << std::hex << std::setfill('0');
+                for (uint8_t byte : arg.bytes) out << std::setw(2) << static_cast<unsigned>(byte);
+                return out.str();
+            } else if constexpr (std::is_same_v<T, EnumValue>) {
+                return arg.item_name.empty() ? std::visit([](auto numeric) {
+                    return std::to_string(numeric);
+                }, arg.value) : arg.item_name;
+            } else if constexpr (std::is_same_v<T, DateTimeValue>) {
+                return format_datetime(arg);
+            } else if constexpr (std::is_same_v<T, DateValue>) {
+                return format_date(arg);
+            } else if constexpr (std::is_same_v<T, TimeValue>) {
+                return format_time(arg);
+            } else if constexpr (std::is_same_v<T, DurationValue>) {
+                return std::to_string(arg.milliseconds);
+            } else if constexpr (std::is_same_v<T, DecimalValue>) {
+                return format_decimal(arg);
+            } else if constexpr (std::is_same_v<T, BigIntValue>) {
+                return arg.digits;
+            } else if constexpr (std::is_same_v<T, MoneyValue>) {
+                return arg.currency + " " + format_decimal(arg.amount);
             } else if constexpr (std::is_same_v<T, turbo_uuid_t>) {
                 char text[TURBO_UUID_STRING_SIZE];
                 if (turbo_uuid_format(&arg, text, sizeof(text)) != TURBO_OK) {
@@ -247,6 +351,25 @@ std::string to_string(ConstraintValue const& val) {
             }
         },
         val);
+}
+
+std::optional<std::string> scalar_text(ConstraintValue const& val) {
+    return std::visit([](auto const& arg) -> std::optional<std::string> {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, std::string>) return arg;
+        else if constexpr (std::is_same_v<T, DateTimeValue>) return format_datetime(arg);
+        else if constexpr (std::is_same_v<T, DateValue>) return format_date(arg);
+        else if constexpr (std::is_same_v<T, TimeValue>) return format_time(arg);
+        else if constexpr (std::is_same_v<T, DecimalValue>) return format_decimal(arg);
+        else if constexpr (std::is_same_v<T, BigIntValue>) return arg.digits;
+        else if constexpr (std::is_same_v<T, MoneyValue>) {
+            return arg.currency + " " + format_decimal(arg.amount);
+        } else if constexpr (std::is_same_v<T, EnumValue>) {
+            return arg.item_name.empty() ? std::nullopt : std::optional<std::string>{arg.item_name};
+        } else {
+            return std::nullopt;
+        }
+    }, val);
 }
 
 // --- Implementation for constraint_to_string ---
@@ -293,6 +416,21 @@ std::size_t ConstraintValueHasher::operator()(ConstraintValue const& v) const {
                 return h;
             } else if constexpr (std::is_same_v<T, turbo_uuid_t>) {
                 return turbo_hash_bytes(arg.bytes, TURBO_UUID_SIZE, nullptr);
+            } else if constexpr (std::is_same_v<T, BytesValue>) {
+                return turbo_hash_bytes(arg.bytes.data(), arg.bytes.size(), nullptr);
+            } else if constexpr (std::is_same_v<T, EnumValue>) {
+                std::size_t h = std::hash<std::string>{}(arg.type_name);
+                std::visit([&h](auto numeric) { hash_combine(h, numeric); }, arg.value);
+                return h;
+            } else if constexpr (std::is_same_v<T, DateTimeValue>
+                                 || std::is_same_v<T, DateValue>
+                                 || std::is_same_v<T, TimeValue>
+                                 || std::is_same_v<T, DecimalValue>
+                                 || std::is_same_v<T, BigIntValue>
+                                 || std::is_same_v<T, MoneyValue>) {
+                return std::hash<std::string>{}(*scalar_text(ConstraintValue{arg}));
+            } else if constexpr (std::is_same_v<T, DurationValue>) {
+                return std::hash<int64_t>{}(arg.milliseconds);
             } else if constexpr (std::is_same_v<T, NilValue>) {
                 return (size_t)0;
             } else if constexpr (std::is_same_v<T, std::shared_ptr<TypedList>>) {

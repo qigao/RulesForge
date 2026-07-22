@@ -4,6 +4,7 @@
 #include <turbo_uuid.h>
 
 #include <chrono>
+#include <compare>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -21,6 +22,77 @@ struct FactList {
 
 struct NilValue {};
 
+struct BytesValue {
+  std::vector<uint8_t> bytes;
+  auto operator<=>(BytesValue const &) const = default;
+};
+
+struct DateTimeValue {
+  int year = 0;
+  int month = 0;
+  int day = 0;
+  int hour = 0;
+  int minute = 0;
+  int second = 0;
+  int millisecond = 0;
+  int tz_offset_minutes = 0;
+  bool has_timezone = false;
+  auto operator<=>(DateTimeValue const &) const = default;
+};
+
+struct DateValue {
+  int year = 0;
+  int month = 0;
+  int day = 0;
+  auto operator<=>(DateValue const &) const = default;
+};
+
+struct TimeValue {
+  int hour = 0;
+  int minute = 0;
+  int second = 0;
+  int millisecond = 0;
+  auto operator<=>(TimeValue const &) const = default;
+};
+
+struct DurationValue {
+  int64_t milliseconds = 0;
+  auto operator<=>(DurationValue const &) const = default;
+};
+
+struct DecimalValue {
+  int64_t mantissa = 0;
+  int32_t scale = 0;
+  auto operator<=>(DecimalValue const &) const = default;
+};
+
+struct BigIntValue {
+  std::string digits;
+  auto operator<=>(BigIntValue const &) const = default;
+};
+
+struct MoneyValue {
+  DecimalValue amount;
+  std::string currency;
+  auto operator<=>(MoneyValue const &) const = default;
+};
+
+using EnumNumericValue = std::variant<int64_t, uint64_t>;
+
+struct EnumValue {
+  std::string type_name;
+  EnumNumericValue value;
+  std::string item_name;
+
+  friend bool operator==(EnumValue const &a, EnumValue const &b) {
+    return a.type_name == b.type_name && a.value == b.value;
+  }
+  friend bool operator<(EnumValue const &a, EnumValue const &b) {
+    if (a.type_name != b.type_name) return a.type_name < b.type_name;
+    return a.value < b.value;
+  }
+};
+
 struct TypedList;
 struct ValueSet;
 struct ValueMap;
@@ -35,7 +107,9 @@ inline bool operator!=(turbo_uuid_t const &a, turbo_uuid_t const &b) {
 
 using ConstraintValue =
     std::variant<std::string, int64_t, double, FactList, NilValue, std::shared_ptr<TypedList>,
-                 std::shared_ptr<ValueSet>, std::shared_ptr<ValueMap>, turbo_uuid_t>;
+                 std::shared_ptr<ValueSet>, std::shared_ptr<ValueMap>, turbo_uuid_t, bool,
+                 uint64_t, BytesValue, EnumValue, DateTimeValue, DateValue, TimeValue,
+                 DurationValue, DecimalValue, BigIntValue, MoneyValue>;
 
 struct ConstraintValueCompare {
   bool operator()(ConstraintValue const &a, ConstraintValue const &b) const;
@@ -70,6 +144,7 @@ inline ConstraintValue make_value_set() { return std::make_shared<ValueSet>(); }
 inline ConstraintValue make_value_map() { return std::make_shared<ValueMap>(); }
 
 std::string to_string(ConstraintValue const &val);
+std::optional<std::string> scalar_text(ConstraintValue const &val);
 
 bool operator==(FactList const &a, FactList const &b);
 bool operator!=(FactList const &a, FactList const &b);
@@ -108,16 +183,26 @@ concept ConstraintValueMember =
     std::is_same_v<T, std::shared_ptr<TypedList>>  ||
     std::is_same_v<T, std::shared_ptr<ValueSet>>   ||
     std::is_same_v<T, std::shared_ptr<ValueMap>>   ||
-    std::is_same_v<T, turbo_uuid_t>;
+    std::is_same_v<T, turbo_uuid_t>                ||
+    std::is_same_v<T, bool>                        ||
+    std::is_same_v<T, uint64_t>                    ||
+    std::is_same_v<T, BytesValue>                  ||
+    std::is_same_v<T, EnumValue>                   ||
+    std::is_same_v<T, DateTimeValue>               ||
+    std::is_same_v<T, DateValue>                   ||
+    std::is_same_v<T, TimeValue>                   ||
+    std::is_same_v<T, DurationValue>               ||
+    std::is_same_v<T, DecimalValue>                ||
+    std::is_same_v<T, BigIntValue>                 ||
+    std::is_same_v<T, MoneyValue>;
 
 /**
  * @brief 编译期检测 T 是否为 getFieldAs 支持的安全提取类型。
  *
- * 除 ConstraintValue 的直接成员外，还包含 bool（从 int64_t 0/1 转换）。
+ * 当前支持 ConstraintValue 的直接成员类型。
  */
 template <typename T>
-concept ConstraintValueExtractable =
-    ConstraintValueMember<T> || std::is_same_v<T, bool>;
+concept ConstraintValueExtractable = ConstraintValueMember<T>;
 
 /**
  * @brief 变参继承 Mixin（标准 overloaded 惯用法）。

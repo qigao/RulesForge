@@ -4,7 +4,6 @@
 // Include C string handling
 #include <cstdlib>
 #include <cstdint>
-#include <climits>
 #include <cstring>
 #include <fmt.h>
 #include <fstream>
@@ -42,10 +41,6 @@ static char const *data_bind_error_detail(DataBindStatus status, DataBindError c
   }
   char const *status_name = data_bind_status_name(status);
   return status_name ? status_name : "unknown DataBind error";
-}
-
-static ConstraintValue data_bind_text_or_nil(char const *text) {
-  return text ? ConstraintValue(std::string(text)) : ConstraintValue(NilValue{});
 }
 
 static ruleforge_status_t map_session_inconsistent(SessionInconsistentException const &e) {
@@ -149,42 +144,142 @@ static DataBindView get_kb_data_bind_or_set_error(KnowledgeBase const &kb,
   return {codec};
 }
 
-static ConstraintValue data_bind_value_to_constraint(DataBindValue const *value) {
+static void require_data_bind_value(DataBindStatus status, char const *kind) {
+  if (status == DATA_BIND_OK) return;
+  char const *status_name = data_bind_status_name(status);
+  throw std::runtime_error(std::string("Failed to extract DataBind ") + kind + ": "
+                           + (status_name ? status_name : "unknown DataBind error"));
+}
+
+static std::optional<DataBindSchemaField> find_data_bind_field(
+    DataBind *codec, std::string const &type_name, std::string_view field_name) {
+  if (!codec || type_name.empty()) return std::nullopt;
+  size_t const field_count = data_bind_schema_field_count(codec, type_name.c_str());
+  for (size_t index = 0; index < field_count; ++index) {
+    DataBindSchemaField field = DATA_BIND_SCHEMA_FIELD_INIT;
+    if (data_bind_schema_field_at(codec, type_name.c_str(), index, &field)
+        && field.name && field_name == field.name) {
+      return field;
+    }
+  }
+  return std::nullopt;
+}
+
+static std::string child_declared_type(DataBindSchemaField const &field,
+                                       DataBindValueKind value_kind) {
+  char const *type = field.type;
+  if (value_kind == DATA_BIND_VALUE_LIST || value_kind == DATA_BIND_VALUE_SET) {
+    type = field.inner_type;
+  } else if (value_kind == DATA_BIND_VALUE_MAP) {
+    type = field.value_type;
+  }
+  return type ? std::string(type) : std::string();
+}
+
+static bool enum_item_matches(EnumNumericValue const &value, char const *text) {
+  if (!text) return false;
+  char *end = nullptr;
+  if (auto const *signed_value = std::get_if<int64_t>(&value)) {
+    long long const parsed = std::strtoll(text, &end, 0);
+    return end != text && *end == '\0' && parsed == *signed_value;
+  }
+  unsigned long long const parsed = std::strtoull(text, &end, 0);
+  return end != text && *end == '\0' && parsed == std::get<uint64_t>(value);
+}
+
+static ConstraintValue data_bind_enum_to_constraint(DataBind *codec,
+                                                     std::string const &enum_type,
+                                                     DataBindValue const *value) {
+  EnumNumericValue numeric;
+  switch (data_bind_value_kind(value)) {
+  case DATA_BIND_VALUE_INT: {
+    int32_t extracted = 0;
+    require_data_bind_value(data_bind_value_get_int32(value, &extracted), "enum");
+    numeric = static_cast<int64_t>(extracted);
+    break;
+  }
+  case DATA_BIND_VALUE_INT64: {
+    int64_t extracted = 0;
+    require_data_bind_value(data_bind_value_get_int64(value, &extracted), "enum");
+    numeric = extracted;
+    break;
+  }
+  case DATA_BIND_VALUE_UINT64: {
+    uint64_t extracted = 0;
+    require_data_bind_value(data_bind_value_get_uint64(value, &extracted), "enum");
+    numeric = extracted;
+    break;
+  }
+  default:
+    throw std::runtime_error("DataBind enum value is not an integer kind");
+  }
+
+  std::string item_name;
+  size_t const item_count = data_bind_schema_enum_item_count(codec, enum_type.c_str());
+  for (size_t index = 0; index < item_count; ++index) {
+    DataBindSchemaEnumItem item = DATA_BIND_SCHEMA_ENUM_ITEM_INIT;
+    if (data_bind_schema_enum_item_at(codec, enum_type.c_str(), index, &item)
+        && item.name && enum_item_matches(numeric, item.value)) {
+      item_name = item.name;
+      break;
+    }
+  }
+  return EnumValue{enum_type, std::move(numeric), std::move(item_name)};
+}
+
+static ConstraintValue data_bind_value_to_constraint(
+    DataBindValue const *value, DataBind *codec = nullptr,
+    std::string const &declared_type = {}) {
   if (!value) {
     return NilValue{};
+  }
+
+  if (codec && !declared_type.empty()
+      && data_bind_schema_enum_item_count(codec, declared_type.c_str()) != 0) {
+    return data_bind_enum_to_constraint(codec, declared_type, value);
   }
 
   switch (data_bind_value_kind(value)) {
   case DATA_BIND_VALUE_NULL:
     return NilValue{};
-  case DATA_BIND_VALUE_INT:
-    return static_cast<int64_t>(data_bind_value_as_int(value));
-  case DATA_BIND_VALUE_INT64:
-    return data_bind_value_as_int64(value);
-  case DATA_BIND_VALUE_UINT64: {
-    uint64_t const unsigned_value = data_bind_value_as_uint64(value);
-    if (unsigned_value <= static_cast<uint64_t>(INT64_MAX)) {
-      return static_cast<int64_t>(unsigned_value);
-    }
-    return std::to_string(unsigned_value);
+  case DATA_BIND_VALUE_INT: {
+    int32_t extracted = 0;
+    require_data_bind_value(data_bind_value_get_int32(value, &extracted), "int32");
+    return static_cast<int64_t>(extracted);
   }
-  case DATA_BIND_VALUE_DOUBLE:
-    return data_bind_value_as_double(value);
-  case DATA_BIND_VALUE_BOOL:
-    return static_cast<int64_t>(data_bind_value_as_bool(value) ? 1 : 0);
+  case DATA_BIND_VALUE_INT64: {
+    int64_t extracted = 0;
+    require_data_bind_value(data_bind_value_get_int64(value, &extracted), "int64");
+    return extracted;
+  }
+  case DATA_BIND_VALUE_UINT64: {
+    uint64_t extracted = 0;
+    require_data_bind_value(data_bind_value_get_uint64(value, &extracted), "uint64");
+    return extracted;
+  }
+  case DATA_BIND_VALUE_DOUBLE: {
+    double extracted = 0.0;
+    require_data_bind_value(data_bind_value_get_double(value, &extracted), "double");
+    return extracted;
+  }
+  case DATA_BIND_VALUE_BOOL: {
+    int extracted = 0;
+    require_data_bind_value(data_bind_value_get_bool(value, &extracted), "bool");
+    return extracted != 0;
+  }
   case DATA_BIND_VALUE_STRING: {
-    char const *text = data_bind_value_as_string(value);
-    return text ? std::string(text) : std::string();
+    char const *text = nullptr;
+    size_t length = 0;
+    require_data_bind_value(data_bind_value_get_string(value, &text, &length), "string");
+    return std::string(text ? text : "", length);
   }
   case DATA_BIND_VALUE_BYTES: {
-    size_t len = 0;
-    uint8_t const *bytes = data_bind_value_as_bytes(value, &len);
-    auto list = std::make_shared<TypedList>();
-    list->values.reserve(len);
-    for (size_t i = 0; i < len; ++i) {
-      list->values.emplace_back(static_cast<int64_t>(bytes ? bytes[i] : 0));
-    }
-    return list;
+    size_t length = 0;
+    uint8_t const *bytes = nullptr;
+    require_data_bind_value(data_bind_value_get_bytes(value, &bytes, &length), "bytes");
+    BytesValue result;
+    if (length != 0) result.bytes.assign(bytes, bytes + length);
+    return result;
   }
   case DATA_BIND_VALUE_OBJECT: {
     auto map = std::make_shared<ValueMap>();
@@ -193,7 +288,12 @@ static ConstraintValue data_bind_value_to_constraint(DataBindValue const *value)
       char const *name = data_bind_value_field_name(value, i);
       DataBindValue const *child = data_bind_value_field_at(value, i);
       if (name) {
-        map->entries[std::string(name)] = data_bind_value_to_constraint(child);
+        std::string nested_type;
+        if (auto field = find_data_bind_field(codec, declared_type, name)) {
+          nested_type = child_declared_type(*field, data_bind_value_kind(child));
+        }
+        map->entries[std::string(name)] =
+            data_bind_value_to_constraint(child, codec, nested_type);
       }
     }
     return map;
@@ -203,7 +303,8 @@ static ConstraintValue data_bind_value_to_constraint(DataBindValue const *value)
     size_t count = data_bind_value_count(value);
     list->values.reserve(count);
     for (size_t i = 0; i < count; ++i) {
-      list->values.push_back(data_bind_value_to_constraint(data_bind_value_at(value, i)));
+      list->values.push_back(
+          data_bind_value_to_constraint(data_bind_value_at(value, i), codec, declared_type));
     }
     return list;
   }
@@ -211,7 +312,8 @@ static ConstraintValue data_bind_value_to_constraint(DataBindValue const *value)
     auto set = std::make_shared<ValueSet>();
     size_t count = data_bind_value_count(value);
     for (size_t i = 0; i < count; ++i) {
-      set->values.insert(data_bind_value_to_constraint(data_bind_value_at(value, i)));
+      set->values.insert(
+          data_bind_value_to_constraint(data_bind_value_at(value, i), codec, declared_type));
     }
     return set;
   }
@@ -221,100 +323,63 @@ static ConstraintValue data_bind_value_to_constraint(DataBindValue const *value)
     for (size_t i = 0; i < count; ++i) {
       DataBindMapEntry entry = data_bind_value_map_entry_at(value, i);
       if (entry.key) {
-        map->entries[std::string(entry.key)] = data_bind_value_to_constraint(entry.value);
+        map->entries[std::string(entry.key)] =
+            data_bind_value_to_constraint(entry.value, codec, declared_type);
       }
     }
     return map;
   }
   case DATA_BIND_VALUE_UUID: {
     turbo_uuid_t uuid{};
-    DataBindStatus status = data_bind_value_get_uuid(value, uuid.bytes);
-    if (status != DATA_BIND_OK) {
-      char const *status_name = data_bind_status_name(status);
-      throw std::runtime_error(std::string("Failed to extract DataBind UUID: ")
-                               + (status_name ? status_name : "unknown DataBind error"));
-    }
+    require_data_bind_value(data_bind_value_get_uuid(value, uuid.bytes), "UUID");
     return uuid;
   }
   case DATA_BIND_VALUE_DATETIME: {
-    char text[64] = {0};
-    return data_bind_text_or_nil(data_bind_value_as_datetime_string(value, text, sizeof(text)));
+    turbo_datetime_t extracted{};
+    require_data_bind_value(data_bind_value_get_datetime(value, &extracted), "datetime");
+    return DateTimeValue{extracted.year, extracted.month, extracted.day, extracted.hour,
+                         extracted.minute, extracted.second, extracted.millisecond,
+                         extracted.tz_offset, extracted.has_tz != 0};
   }
   case DATA_BIND_VALUE_DATE: {
-    char text[32] = {0};
-    return data_bind_text_or_nil(data_bind_value_as_date_string(value, text, sizeof(text)));
+    DataBindDate extracted{};
+    require_data_bind_value(data_bind_value_get_date(value, &extracted), "date");
+    return DateValue{extracted.year, extracted.month, extracted.day};
   }
   case DATA_BIND_VALUE_TIME: {
-    char text[32] = {0};
-    return data_bind_text_or_nil(data_bind_value_as_time_string(value, text, sizeof(text)));
+    DataBindTime extracted{};
+    require_data_bind_value(data_bind_value_get_time(value, &extracted), "time");
+    return TimeValue{extracted.hour, extracted.minute, extracted.second, extracted.millisecond};
   }
-  case DATA_BIND_VALUE_DURATION:
-    return data_bind_value_as_duration_milliseconds(value);
+  case DATA_BIND_VALUE_DURATION: {
+    int64_t extracted = 0;
+    require_data_bind_value(
+        data_bind_value_get_duration_milliseconds(value, &extracted), "duration");
+    return DurationValue{extracted};
+  }
   case DATA_BIND_VALUE_DECIMAL: {
-    char text[128] = {0};
-    return data_bind_text_or_nil(data_bind_value_as_decimal_string(value, text, sizeof(text)));
+    DataBindDecimal extracted{};
+    require_data_bind_value(data_bind_value_get_decimal(value, &extracted), "decimal");
+    return DecimalValue{extracted.mantissa, extracted.scale};
   }
-  case DATA_BIND_VALUE_BIGINT:
-    return data_bind_text_or_nil(data_bind_value_as_bigint_string(value));
+  case DATA_BIND_VALUE_BIGINT: {
+    char const *text = nullptr;
+    size_t length = 0;
+    require_data_bind_value(data_bind_value_get_bigint(value, &text, &length), "bigint");
+    return BigIntValue{std::string(text ? text : "", length)};
+  }
   case DATA_BIND_VALUE_MONEY: {
-    char text[128] = {0};
-    return data_bind_text_or_nil(data_bind_value_as_money_string(value, text, sizeof(text)));
+    DataBindMoney extracted{};
+    require_data_bind_value(data_bind_value_get_money(value, &extracted), "money");
+    size_t currency_length = 0;
+    while (currency_length < sizeof(extracted.currency)
+           && extracted.currency[currency_length] != '\0') ++currency_length;
+    return MoneyValue{DecimalValue{extracted.amount.mantissa, extracted.amount.scale},
+                      std::string(extracted.currency, currency_length)};
   }
   }
 
   return NilValue{};
-}
-
-static std::optional<std::string> data_bind_enum_name(DataBind *codec,
-                                                      char const *fact_type,
-                                                      char const *field_name,
-                                                      DataBindValue const *value) {
-  if (!codec || !fact_type || !field_name || !value) {
-    return std::nullopt;
-  }
-  int64_t numeric_value = 0;
-  switch (data_bind_value_kind(value)) {
-  case DATA_BIND_VALUE_INT:
-    numeric_value = data_bind_value_as_int(value);
-    break;
-  case DATA_BIND_VALUE_INT64:
-    numeric_value = data_bind_value_as_int64(value);
-    break;
-  case DATA_BIND_VALUE_UINT64: {
-    auto const unsigned_value = data_bind_value_as_uint64(value);
-    if (unsigned_value > static_cast<uint64_t>(INT64_MAX)) {
-      return std::nullopt;
-    }
-    numeric_value = static_cast<int64_t>(unsigned_value);
-    break;
-  }
-  default:
-    return std::nullopt;
-  }
-
-  size_t const field_count = data_bind_schema_field_count(codec, fact_type);
-  for (size_t field_index = 0; field_index < field_count; ++field_index) {
-    DataBindSchemaField field = DATA_BIND_SCHEMA_FIELD_INIT;
-    if (!data_bind_schema_field_at(codec, fact_type, field_index, &field)
-        || !field.name || std::strcmp(field.name, field_name) != 0 || !field.is_enum
-        || !field.type) {
-      continue;
-    }
-    size_t const item_count = data_bind_schema_enum_item_count(codec, field.type);
-    for (size_t item_index = 0; item_index < item_count; ++item_index) {
-      DataBindSchemaEnumItem item = DATA_BIND_SCHEMA_ENUM_ITEM_INIT;
-      if (!data_bind_schema_enum_item_at(codec, field.type, item_index, &item)
-          || !item.name || !item.value) {
-        continue;
-      }
-      char *end = nullptr;
-      long long const item_value = std::strtoll(item.value, &end, 0);
-      if (end != item.value && *end == '\0' && item_value == numeric_value) {
-        return std::string(item.name);
-      }
-    }
-  }
-  return std::nullopt;
 }
 
 static bool populate_fact_from_data_bind_value(Fact &fact, DataBindValue const *value,
@@ -329,10 +394,11 @@ static bool populate_fact_from_data_bind_value(Fact &fact, DataBindValue const *
     char const *name = data_bind_value_field_name(value, i);
     DataBindValue const *child = data_bind_value_field_at(value, i);
     if (name) {
-      fact.fields[name] = data_bind_value_to_constraint(child);
-      if (auto enum_name = data_bind_enum_name(codec, fact_type, name, child)) {
-        fact.enum_names[name] = std::move(*enum_name);
+      std::string declared_type;
+      if (auto field = find_data_bind_field(codec, fact_type ? fact_type : "", name)) {
+        declared_type = child_declared_type(*field, data_bind_value_kind(child));
       }
+      fact.fields[name] = data_bind_value_to_constraint(child, codec, declared_type);
     }
   }
   return true;
@@ -3440,12 +3506,21 @@ ruleforge_status_t ruleforge_fact_get_field_as_string(ruleforge_fact_t fact, con
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
-    auto *field_ptr = std::get_if<std::string>(&(*field_opt));
-    if (!field_ptr) {
+    std::optional<std::string> converted;
+    if (std::holds_alternative<std::string>(*field_opt)
+        || std::holds_alternative<DateTimeValue>(*field_opt)
+        || std::holds_alternative<DateValue>(*field_opt)
+        || std::holds_alternative<TimeValue>(*field_opt)
+        || std::holds_alternative<DecimalValue>(*field_opt)
+        || std::holds_alternative<BigIntValue>(*field_opt)
+        || std::holds_alternative<MoneyValue>(*field_opt)) {
+      converted = scalar_text(*field_opt);
+    }
+    if (!converted) {
       set_error("Field is not a string");
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
-    const auto &field = *field_ptr;
+    const auto &field = *converted;
 
     *out_actual_length = field.length();
     if (buffer_size < field.length() + 1) {
@@ -3510,7 +3585,14 @@ ruleforge_status_t ruleforge_fact_get_field_as_int(ruleforge_fact_t fact, const 
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
-    auto *field_ptr = std::get_if<int64_t>(&(*field_opt));
+    int64_t const *field_ptr = std::get_if<int64_t>(&(*field_opt));
+    int64_t converted = 0;
+    if (!field_ptr) {
+      if (auto const *duration = std::get_if<DurationValue>(&(*field_opt))) {
+        converted = duration->milliseconds;
+        field_ptr = &converted;
+      }
+    }
     if (!field_ptr) {
       set_error("Field is not an int");
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
@@ -3520,6 +3602,58 @@ ruleforge_status_t ruleforge_fact_get_field_as_int(ruleforge_fact_t fact, const 
     return RULES_FORGE_OK;
   } catch (const std::exception &e) {
     set_error_fmt("Failed to get int field: ", e.what());
+    return RULES_FORGE_ERROR_GENERIC;
+  }
+}
+
+ruleforge_status_t ruleforge_fact_get_field_as_uint64(
+    ruleforge_fact_t fact, const char *field_name, uint64_t *out_value) {
+  if (!fact || !field_name || !out_value) {
+    set_error("Fact handle, field name, or output value pointer is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto const *typed_fact = reinterpret_cast<Fact const *>(fact);
+    auto field = typed_fact->get_field(field_name);
+    auto const *value = field ? std::get_if<uint64_t>(&*field) : nullptr;
+    if (!value) {
+      set_error(field ? "Field is not a uint64" : "Field not found");
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+    *out_value = *value;
+    last_error[0] = '\0';
+    return RULES_FORGE_OK;
+  } catch (std::exception const &e) {
+    set_error_fmt("Failed to get uint64 field: ", e.what());
+    return RULES_FORGE_ERROR_GENERIC;
+  }
+}
+
+ruleforge_status_t ruleforge_fact_get_field_as_bytes(
+    ruleforge_fact_t fact, const char *field_name, uint8_t *buffer,
+    size_t buffer_size, size_t *out_actual_length) {
+  if (!fact || !field_name || !out_actual_length || (!buffer && buffer_size != 0)) {
+    set_error("Fact handle, field name, byte buffer, or actual length pointer is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto const *typed_fact = reinterpret_cast<Fact const *>(fact);
+    auto field = typed_fact->get_field(field_name);
+    auto const *value = field ? std::get_if<BytesValue>(&*field) : nullptr;
+    if (!value) {
+      set_error(field ? "Field is not bytes" : "Field not found");
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+    *out_actual_length = value->bytes.size();
+    if (buffer_size < value->bytes.size()) {
+      set_error("Buffer too small");
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+    if (!value->bytes.empty()) std::memcpy(buffer, value->bytes.data(), value->bytes.size());
+    last_error[0] = '\0';
+    return RULES_FORGE_OK;
+  } catch (std::exception const &e) {
+    set_error_fmt("Failed to get bytes field: ", e.what());
     return RULES_FORGE_ERROR_GENERIC;
   }
 }
@@ -3538,12 +3672,12 @@ ruleforge_status_t ruleforge_fact_get_field_as_bool(ruleforge_fact_t fact, const
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
 
-    auto *field_ptr = std::get_if<int64_t>(&(*field_opt));
+    auto *field_ptr = std::get_if<bool>(&(*field_opt));
     if (!field_ptr) {
       set_error("Field is not a bool");
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
-    *out_value = (*field_ptr != 0) ? 1 : 0;
+    *out_value = *field_ptr ? 1 : 0;
     last_error[0] = '\0';
     return RULES_FORGE_OK;
   } catch (const std::exception &e) {
@@ -3561,17 +3695,18 @@ ruleforge_status_t ruleforge_fact_get_enum_name(
   }
   try {
     auto const *typed_fact = reinterpret_cast<Fact const *>(fact);
-    auto const enum_name = typed_fact->enum_names.find(field_name);
-    if (enum_name == typed_fact->enum_names.end()) {
+    auto field = typed_fact->get_field(field_name);
+    auto const *enum_value = field ? std::get_if<EnumValue>(&*field) : nullptr;
+    if (!enum_value || enum_value->item_name.empty()) {
       set_error("Field is not an enum or has no schema enum name");
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
-    *out_actual_length = enum_name->second.size();
-    if (buffer_size <= enum_name->second.size()) {
+    *out_actual_length = enum_value->item_name.size();
+    if (buffer_size <= enum_value->item_name.size()) {
       set_error("Buffer too small");
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
-    std::memcpy(name_buffer, enum_name->second.c_str(), enum_name->second.size() + 1);
+    std::memcpy(name_buffer, enum_value->item_name.c_str(), enum_value->item_name.size() + 1);
     last_error[0] = '\0';
     return RULES_FORGE_OK;
   } catch (std::exception const &e) {
@@ -3587,10 +3722,27 @@ ruleforge_status_t ruleforge_fact_get_field_as_enum(
     set_error("Enum value output pointer is NULL");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
+  if (!fact || !field_name) {
+    set_error("Fact handle or field name is NULL");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  auto const *typed_fact = reinterpret_cast<Fact const *>(fact);
+  auto field = typed_fact->get_field(field_name);
+  auto const *enum_value = field ? std::get_if<EnumValue>(&*field) : nullptr;
+  if (!enum_value) {
+    set_error("Field is not an enum");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
   int64_t value = 0;
-  auto value_status = ruleforge_fact_get_field_as_int(fact, field_name, &value);
-  if (value_status != RULES_FORGE_OK) {
-    return value_status;
+  if (auto const *signed_value = std::get_if<int64_t>(&enum_value->value)) {
+    value = *signed_value;
+  } else {
+    uint64_t const unsigned_value = std::get<uint64_t>(enum_value->value);
+    if (unsigned_value > static_cast<uint64_t>(INT64_MAX)) {
+      set_error("Enum value does not fit in int64");
+      return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+    }
+    value = static_cast<int64_t>(unsigned_value);
   }
   auto name_status = ruleforge_fact_get_enum_name(
       fact, field_name, name_buffer, buffer_size, out_actual_length);

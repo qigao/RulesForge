@@ -1046,8 +1046,8 @@ field_ref(A) ::= field_ref(B) LBRACKET STRING(S) RBRACKET. {
 primary_expr_val(A) ::= INTEGER(T). { A = new ConstraintValue(parse_int(T.as_sv())); }
 primary_expr_val(A) ::= DOUBLE(T). { A = new ConstraintValue(parse_dbl(T.as_sv())); }
 primary_expr_val(A) ::= STRING(T). { A = new ConstraintValue(strip_quotes(T.as_sv())); }
-primary_expr_val(A) ::= TRUE. { A = new ConstraintValue((int64_t)1); }
-primary_expr_val(A) ::= FALSE. { A = new ConstraintValue((int64_t)0); }
+primary_expr_val(A) ::= TRUE. { A = new ConstraintValue(true); }
+primary_expr_val(A) ::= FALSE. { A = new ConstraintValue(false); }
 primary_expr_val(A) ::= NIL. { A = new ConstraintValue(NilValue{}); }
 primary_expr_val(A) ::= field_ref(F). {
     // Could be a bound field reference ($var.field) or a plain field name

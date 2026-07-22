@@ -46,7 +46,7 @@ suite("Stability Tests") {
             auto item = std::make_shared<Fact>();
             item->type = "Item";
             item->fields["id"] = (int64_t)1;
-            item->fields["processed"] = (int64_t)0;
+            item->fields["processed"] = false;
 
             session->add_fact(item);
 

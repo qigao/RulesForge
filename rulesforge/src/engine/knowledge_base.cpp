@@ -116,43 +116,6 @@ DataBind* KnowledgeBase::find_data_bind_codec(std::string const& type_name) cons
     return parser_state_.imported_data_bind_schemas[it->second].codec.get();
 }
 
-std::optional<std::string> KnowledgeBase::enum_name_for_field(
-    std::string const& fact_type, std::string_view field_name,
-    ConstraintValue const& value) const {
-    auto const* numeric = std::get_if<int64_t>(&value);
-    if (!numeric) {
-        return std::nullopt;
-    }
-    auto* codec = find_data_bind_codec(fact_type);
-    if (!codec) {
-        return std::nullopt;
-    }
-
-    size_t const field_count = data_bind_schema_field_count(codec, fact_type.c_str());
-    for (size_t field_index = 0; field_index < field_count; ++field_index) {
-        DataBindSchemaField field = DATA_BIND_SCHEMA_FIELD_INIT;
-        if (!data_bind_schema_field_at(codec, fact_type.c_str(), field_index, &field)
-            || !field.name || field_name != field.name || !field.is_enum || !field.type) {
-            continue;
-        }
-        size_t const item_count = data_bind_schema_enum_item_count(codec, field.type);
-        for (size_t item_index = 0; item_index < item_count; ++item_index) {
-            DataBindSchemaEnumItem item = DATA_BIND_SCHEMA_ENUM_ITEM_INIT;
-            if (!data_bind_schema_enum_item_at(codec, field.type, item_index, &item)
-                || !item.name || !item.value) {
-                continue;
-            }
-            char* end = nullptr;
-            long long const item_value = std::strtoll(item.value, &end, 0);
-            if (end != item.value && *end == '\0'
-                && item_value == *numeric) {
-                return std::string(item.name);
-            }
-        }
-    }
-    return std::nullopt;
-}
-
 std::string const* KnowledgeBase::find_data_bind_schema_path(std::string const& type_name) const {
     auto it = data_bind_type_schema_index_.find(type_name);
     if (it == data_bind_type_schema_index_.end()

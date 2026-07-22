@@ -298,7 +298,6 @@ private:
   void release_retained_fact(int64_t fact_id);
   void ensure_consistent_for_mutation(char const* operation) const;
   void validate_fact_for_insert(Fact const& fact) const;
-  void annotate_fact_enum_names(Fact& fact) const;
   void prime_network_state();
   void refresh_query_call_nodes();
   int fire_all_rules_impl(int max_rules, bool fail_fast);

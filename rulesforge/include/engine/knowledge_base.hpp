@@ -109,9 +109,6 @@ public:
 
     parser_state const& get_parser_state() const { return parser_state_; }
     DataBind* find_data_bind_codec(std::string const& type_name) const;
-    std::optional<std::string> enum_name_for_field(std::string const& fact_type,
-                                                   std::string_view field_name,
-                                                   ConstraintValue const& value) const;
     std::string const* find_data_bind_schema_path(std::string const& type_name) const;
     bool has_data_bind_type(std::string const& type_name) const;
     rulesforge::RhsBackendPlanSummary rhs_backend_summary() const;

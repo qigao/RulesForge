@@ -177,6 +177,8 @@ bool is_declared_numeric_field(std::optional<FieldType> type) {
         case FT_Double:
         case FT_Float:
         case FT_Number:
+        case FT_UInt64:
+        case FT_Duration:
             return true;
         default:
             return false;
@@ -194,6 +196,16 @@ bool is_declared_runtime_scalar_field(std::optional<FieldType> type) {
         case FT_Number:
         case FT_Boolean:
         case FT_Uuid:
+        case FT_UInt64:
+        case FT_Bytes:
+        case FT_Enum:
+        case FT_DateTime:
+        case FT_Date:
+        case FT_Time:
+        case FT_Duration:
+        case FT_Decimal:
+        case FT_BigInt:
+        case FT_Money:
             return true;
         default:
             return false;
@@ -221,6 +233,16 @@ bool is_scalar_type_parameter(TypeParameter const& type) {
         case FT_Number:
         case FT_Boolean:
         case FT_Uuid:
+        case FT_UInt64:
+        case FT_Bytes:
+        case FT_Enum:
+        case FT_DateTime:
+        case FT_Date:
+        case FT_Time:
+        case FT_Duration:
+        case FT_Decimal:
+        case FT_BigInt:
+        case FT_Money:
             return true;
         default:
             return false;
@@ -284,10 +306,21 @@ RuntimeCompareFieldKind runtime_compare_field_kind(FieldInfo const* field_info, 
 }
 
 bool is_runtime_compare_value_supported(ConstraintValue const& value) {
-    return std::holds_alternative<int64_t>(value)
+    return std::holds_alternative<bool>(value)
+        || std::holds_alternative<int64_t>(value)
         || std::holds_alternative<double>(value)
         || std::holds_alternative<std::string>(value)
         || std::holds_alternative<turbo_uuid_t>(value)
+        || std::holds_alternative<uint64_t>(value)
+        || std::holds_alternative<BytesValue>(value)
+        || std::holds_alternative<EnumValue>(value)
+        || std::holds_alternative<DateTimeValue>(value)
+        || std::holds_alternative<DateValue>(value)
+        || std::holds_alternative<TimeValue>(value)
+        || std::holds_alternative<DurationValue>(value)
+        || std::holds_alternative<DecimalValue>(value)
+        || std::holds_alternative<BigIntValue>(value)
+        || std::holds_alternative<MoneyValue>(value)
         || std::holds_alternative<NilValue>(value);
 }
 
@@ -313,10 +346,21 @@ bool is_runtime_compare_literal_supported(ConstraintValue const& value, RuntimeC
 }
 
 bool is_runtime_map_key_supported(ConstraintValue const& value) {
-    return std::holds_alternative<int64_t>(value)
+    return std::holds_alternative<bool>(value)
+        || std::holds_alternative<int64_t>(value)
         || std::holds_alternative<double>(value)
         || std::holds_alternative<std::string>(value)
         || std::holds_alternative<turbo_uuid_t>(value)
+        || std::holds_alternative<uint64_t>(value)
+        || std::holds_alternative<BytesValue>(value)
+        || std::holds_alternative<EnumValue>(value)
+        || std::holds_alternative<DateTimeValue>(value)
+        || std::holds_alternative<DateValue>(value)
+        || std::holds_alternative<TimeValue>(value)
+        || std::holds_alternative<DurationValue>(value)
+        || std::holds_alternative<DecimalValue>(value)
+        || std::holds_alternative<BigIntValue>(value)
+        || std::holds_alternative<MoneyValue>(value)
         || std::holds_alternative<NilValue>(value)
         || std::holds_alternative<FactList>(value)
         || std::holds_alternative<std::shared_ptr<TypedList>>(value)

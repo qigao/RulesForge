@@ -151,7 +151,10 @@ suite("RFL Engine") {
                 check(it->fields[0].name == "age");
                 check(it->fields[0].type == FT_Int);
                 check(it->fields[1].name == "tier");
-                check(it->fields[1].type == FT_Int);
+                check(it->fields[1].type == FT_Enum);
+                check(it->fields[1].type_params.size() == 1);
+                check(it->fields[1].type_params[0].base_type == FT_Enum);
+                check(it->fields[1].type_params[0].custom_type == "Tier");
                 check(it->fields[2].name == "tags");
                 check(it->fields[2].type == FT_List);
                 check(it->fields[3].name == "scores");
@@ -1554,7 +1557,7 @@ suite("RFL Engine") {
                 end
             )");
 
-            auto fire_fact = std::make_shared<Fact>(Fact{0, "Fire", {{"active", (int64_t)1}}});
+            auto fire_fact = std::make_shared<Fact>(Fact{0, "Fire", {{"active", true}}});
             session->add_fact(fire_fact);
             session->fire_all_rules();
 

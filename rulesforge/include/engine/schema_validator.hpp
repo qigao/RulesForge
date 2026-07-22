@@ -218,6 +218,28 @@ private:
                 return (FT_INT_COMPAT & expected) != 0;
             } else if constexpr (std::is_same_v<T, double>) {
                 return (FT_DOUBLE_COMPAT & expected) != 0;
+            } else if constexpr (std::is_same_v<T, bool>) {
+                return expected == FT_Boolean;
+            } else if constexpr (std::is_same_v<T, uint64_t>) {
+                return expected == FT_UInt64;
+            } else if constexpr (std::is_same_v<T, BytesValue>) {
+                return expected == FT_Bytes;
+            } else if constexpr (std::is_same_v<T, EnumValue>) {
+                return expected == FT_Enum;
+            } else if constexpr (std::is_same_v<T, DateTimeValue>) {
+                return expected == FT_DateTime;
+            } else if constexpr (std::is_same_v<T, DateValue>) {
+                return expected == FT_Date;
+            } else if constexpr (std::is_same_v<T, TimeValue>) {
+                return expected == FT_Time;
+            } else if constexpr (std::is_same_v<T, DurationValue>) {
+                return expected == FT_Duration;
+            } else if constexpr (std::is_same_v<T, DecimalValue>) {
+                return expected == FT_Decimal;
+            } else if constexpr (std::is_same_v<T, BigIntValue>) {
+                return expected == FT_BigInt;
+            } else if constexpr (std::is_same_v<T, MoneyValue>) {
+                return expected == FT_Money;
             } else if constexpr (std::is_same_v<T, turbo_uuid_t>) {
                 return (FT_UUID_COMPAT & expected) != 0;
             } else if constexpr (std::is_same_v<T, NilValue>) {
@@ -242,6 +264,17 @@ private:
             if constexpr (std::is_same_v<T, std::string>) return "String";
             else if constexpr (std::is_same_v<T, int64_t>) return "int";
             else if constexpr (std::is_same_v<T, double>) return "double";
+            else if constexpr (std::is_same_v<T, bool>) return "boolean";
+            else if constexpr (std::is_same_v<T, uint64_t>) return "uint64";
+            else if constexpr (std::is_same_v<T, BytesValue>) return "bytes";
+            else if constexpr (std::is_same_v<T, EnumValue>) return "enum";
+            else if constexpr (std::is_same_v<T, DateTimeValue>) return "datetime";
+            else if constexpr (std::is_same_v<T, DateValue>) return "date";
+            else if constexpr (std::is_same_v<T, TimeValue>) return "time";
+            else if constexpr (std::is_same_v<T, DurationValue>) return "duration";
+            else if constexpr (std::is_same_v<T, DecimalValue>) return "decimal";
+            else if constexpr (std::is_same_v<T, BigIntValue>) return "bigint";
+            else if constexpr (std::is_same_v<T, MoneyValue>) return "money";
             else if constexpr (std::is_same_v<T, turbo_uuid_t>) return "uuid";
             else if constexpr (std::is_same_v<T, NilValue>) return "nil";
             else if constexpr (std::is_same_v<T, FactList>) return "List";
@@ -265,6 +298,16 @@ private:
             case FT_Set: return "Set";
             case FT_Map: return "Map";
             case FT_Uuid: return "uuid";
+            case FT_UInt64: return "uint64";
+            case FT_Bytes: return "bytes";
+            case FT_Enum: return "enum";
+            case FT_DateTime: return "datetime";
+            case FT_Date: return "date";
+            case FT_Time: return "time";
+            case FT_Duration: return "duration";
+            case FT_Decimal: return "decimal";
+            case FT_BigInt: return "bigint";
+            case FT_Money: return "money";
             case FT_Object: return "Object";
             default: return "unknown";
         }

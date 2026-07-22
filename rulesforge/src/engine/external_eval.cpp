@@ -163,10 +163,10 @@ std::optional<ConstraintValue> parse_external_eval_literal(std::string const& to
         return ConstraintValue{std::move(value)};
     }
     if (token == "true") {
-        return ConstraintValue{int64_t{1}};
+        return ConstraintValue{true};
     }
     if (token == "false") {
-        return ConstraintValue{int64_t{0}};
+        return ConstraintValue{false};
     }
     if (token == "nil" || token == "null") {
         return ConstraintValue{NilValue{}};

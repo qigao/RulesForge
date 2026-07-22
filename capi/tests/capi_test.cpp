@@ -357,6 +357,14 @@ suite("CAPI") {
                          RULES_FORGE_OK);
             check_not_null(fact);
 
+            auto const* internal_fact = reinterpret_cast<Fact const*>(fact);
+            auto side_field = internal_fact->fields.find("side");
+            auto const* runtime_enum = side_field != internal_fact->fields.end()
+                ? std::get_if<EnumValue>(&side_field->second) : nullptr;
+            check_not_null(runtime_enum);
+            check(runtime_enum != nullptr && runtime_enum->type_name == "Side");
+            check(runtime_enum != nullptr && runtime_enum->item_name == "Sell");
+
             char enum_name[16] = {};
             size_t enum_name_len = 0;
             int64_t enum_value = 0;
@@ -814,7 +822,8 @@ end
                 std::ofstream schema(schema_path, std::ios::binary);
                 schema << "schema Market [id(12), version(1), byte_order(little)]; "
                           "message ScalarFact { "
-                          "uuid id; date trade_date; time trade_time; duration latency; "
+                          "uuid id; uint64 counter; bytes raw; datetime observed_at; "
+                          "date trade_date; time trade_time; duration latency; "
                           "decimal price; bigint sequence; money total; bool active; "
                           "}";
             }
@@ -826,10 +835,12 @@ end
                         $s : ScalarFact(
                             trade_date == "2026-06-28",
                             trade_time == "09:30:05.123",
+                            observed_at == "2026-06-28T09:30:05.123Z",
                             latency == 5405250,
                             price == "123.45",
                             sequence == "123456789012345678901234567890",
-                            total == "USD 123.45"
+                            total == "USD 123.45",
+                            active == true
                         )
                     end
 
@@ -844,6 +855,9 @@ end
             ruleforge_stateful_session_t session = nullptr;
             check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
             check_not_null(session);
+            check_int_eq(
+                ruleforge_session_set_validation_mode(session, RULES_FORGE_VALIDATION_STRICT),
+                RULES_FORGE_OK);
 
             ruleforge_fact_t fact = nullptr;
             check_int_eq(
@@ -852,6 +866,9 @@ end
                     "ScalarFact",
                     R"({
                         "id":"01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001",
+                        "counter":18446744073709551615,
+                        "raw":"Az",
+                        "observed_at":"2026-06-28T09:30:05.123Z",
                         "trade_date":"2026-06-28",
                         "trade_time":"09:30:05.123",
                         "latency":"1h30m5s250ms",
@@ -877,6 +894,41 @@ end
                 TURBO_OK);
             check(uuid != nullptr && turbo_uuid_equal(uuid, &expected_uuid));
 
+            auto counter_field = internal_fact->fields.find("counter");
+            check(counter_field != internal_fact->fields.end());
+            auto const* counter = counter_field != internal_fact->fields.end()
+                ? std::get_if<uint64_t>(&counter_field->second) : nullptr;
+            check_not_null(counter);
+            check(counter != nullptr && *counter == UINT64_MAX);
+
+            auto raw_field = internal_fact->fields.find("raw");
+            check(raw_field != internal_fact->fields.end());
+            auto const* raw = raw_field != internal_fact->fields.end()
+                ? std::get_if<BytesValue>(&raw_field->second) : nullptr;
+            check_not_null(raw);
+            check(raw != nullptr && raw->bytes == std::vector<uint8_t>({'A', 'z'}));
+
+            auto has_runtime_type = [internal_fact]<typename T>(char const* field_name) {
+                auto field = internal_fact->fields.find(field_name);
+                return field != internal_fact->fields.end()
+                    && std::holds_alternative<T>(field->second);
+            };
+            check(has_runtime_type.operator()<DateTimeValue>("observed_at"));
+            check(has_runtime_type.operator()<DateValue>("trade_date"));
+            check(has_runtime_type.operator()<TimeValue>("trade_time"));
+            check(has_runtime_type.operator()<DurationValue>("latency"));
+            check(has_runtime_type.operator()<DecimalValue>("price"));
+            check(has_runtime_type.operator()<BigIntValue>("sequence"));
+            check(has_runtime_type.operator()<MoneyValue>("total"));
+
+            auto active_field = internal_fact->fields.find("active");
+            check(active_field != internal_fact->fields.end());
+            auto const* active_value = active_field != internal_fact->fields.end()
+                ? std::get_if<bool>(&active_field->second)
+                : nullptr;
+            check_not_null(active_value);
+            check(active_value != nullptr && *active_value);
+
             char uuid_text_buffer[64] = {0};
             size_t uuid_text_length = 0;
             check(
@@ -888,9 +940,27 @@ end
             check_int_eq(ruleforge_fact_get_field_as_int(fact, "latency", &latency), RULES_FORGE_OK);
             check_int_eq((int)latency, 5405250);
 
+            uint64_t counter_value = 0;
+            check_int_eq(
+                ruleforge_fact_get_field_as_uint64(fact, "counter", &counter_value),
+                RULES_FORGE_OK);
+            check(counter_value == UINT64_MAX);
+            uint8_t raw_buffer[2] = {};
+            size_t raw_length = 0;
+            check_int_eq(
+                ruleforge_fact_get_field_as_bytes(
+                    fact, "raw", raw_buffer, sizeof(raw_buffer), &raw_length),
+                RULES_FORGE_OK);
+            check_size_eq(raw_length, 2);
+            check(raw_buffer[0] == 'A' && raw_buffer[1] == 'z');
+
             int active = 0;
             check_int_eq(ruleforge_fact_get_field_as_bool(fact, "active", &active), RULES_FORGE_OK);
             check_int_eq(active, 1);
+            int64_t active_as_int = 0;
+            check(
+                ruleforge_fact_get_field_as_int(fact, "active", &active_as_int)
+                != RULES_FORGE_OK);
 
             char text_buffer[96] = {0};
             size_t actual_length = 0;
@@ -1295,8 +1365,13 @@ end
             check_not_null(facts);
 
             int64_t side = 0;
-            check_int_eq(ruleforge_fact_get_field_as_int(facts[1], "side", &side), RULES_FORGE_OK);
+            char side_name[16] = {};
+            size_t side_name_length = 0;
+            check_int_eq(ruleforge_fact_get_field_as_enum(
+                             facts[1], "side", side_name, sizeof(side_name),
+                             &side_name_length, &side), RULES_FORGE_OK);
             check_int_eq((int)side, 2);
+            check_str_eq(side_name, "Sell");
 
             ruleforge_query_result_t query_result = nullptr;
             check_int_eq(ruleforge_session_query(session, "FindOrder", &query_result), RULES_FORGE_OK);

@@ -749,13 +749,13 @@ FieldAssignment RhsParser::Parser::parse_value() {
     assign.type = RhsValueType::BOOLEAN;
     assign.string_literal = "true";
     assign.has_precomputed_literal = true;
-    assign.precomputed_literal = int64_t(1);
+    assign.precomputed_literal = true;
     advance();
   } else if (check(Token::TOK_FALSE)) {
     assign.type = RhsValueType::BOOLEAN;
     assign.string_literal = "false";
     assign.has_precomputed_literal = true;
-    assign.precomputed_literal = int64_t(0);
+    assign.precomputed_literal = false;
     advance();
   } else if (check(Token::TOK_IDENTIFIER) && lexer_.peek().type != Token::TOK_DOT &&
              std::all_of(current_.text.begin(), current_.text.end(), [](unsigned char ch) {

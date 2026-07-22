@@ -42,14 +42,15 @@ FieldType schema_type_to_field_type(std::string_view type)
   if (type == "uuid") {
     return FT_Uuid;
   }
-  if (type == "datetime" || type == "date" || type == "time" || type == "decimal"
-      || type == "bigint" || type == "money") {
-    return FT_String;
-  }
-  if (type == "duration") {
-    return FT_Long;
-  }
-  if (type == "int64" || type == "int64_t" || type == "uint64" || type == "uint64_t") {
+  if (type == "datetime") return FT_DateTime;
+  if (type == "date") return FT_Date;
+  if (type == "time") return FT_Time;
+  if (type == "duration") return FT_Duration;
+  if (type == "decimal") return FT_Decimal;
+  if (type == "bigint") return FT_BigInt;
+  if (type == "money") return FT_Money;
+  if (type == "uint64" || type == "uint64_t") return FT_UInt64;
+  if (type == "int64" || type == "int64_t") {
     return FT_Long;
   }
   if (type == "byte" || type == "int8" || type == "int8_t" || type == "uint8" || type == "uint8_t"
@@ -57,7 +58,8 @@ FieldType schema_type_to_field_type(std::string_view type)
       || type == "int32" || type == "int32_t" || type == "uint32" || type == "uint32_t") {
     return FT_Int;
   }
-  if (type == "bytes" || type == "array" || type == "list") {
+  if (type == "bytes") return FT_Bytes;
+  if (type == "array" || type == "list") {
     return FT_List;
   }
   if (type == "set") {
@@ -83,7 +85,7 @@ TypeParameter make_type_parameter(std::string const& type_name,
 {
   auto enum_it = enum_underlying_types.find(type_name);
   if (enum_it != enum_underlying_types.end()) {
-    return make_type_parameter(enum_it->second);
+    return TypeParameter(FT_Enum, type_name);
   }
   return make_type_parameter(type_name);
 }
@@ -133,11 +135,9 @@ ParsedField convert_field(DataBindSchemaField const& field,
   }
 
   if (field.is_enum) {
-    auto enum_it = enum_underlying_types.find(type);
-    if (enum_it != enum_underlying_types.end()) {
-      out.type = schema_type_to_field_type(enum_it->second);
-      return out;
-    }
+    out.type = FT_Enum;
+    if (!type.empty()) out.type_params.emplace_back(FT_Enum, type);
+    return out;
   }
 
   out.type = schema_type_to_field_type(type);
@@ -181,6 +181,8 @@ std::string enum_underlying_type(std::string const& schema_underlying_type)
   switch (field_type) {
     case FT_Long:
       return "long";
+    case FT_UInt64:
+      return "uint64";
     case FT_Int:
       return "int";
     default:

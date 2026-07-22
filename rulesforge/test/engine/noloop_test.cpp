@@ -73,11 +73,11 @@ suite("Engine no-loop") {
 
             auto item1 = std::make_shared<Fact>();
             item1->type = "Item";
-            item1->fields["processed"] = (int64_t)0;
+            item1->fields["processed"] = false;
 
             auto item2 = std::make_shared<Fact>();
             item2->type = "Item";
-            item2->fields["processed"] = (int64_t)0;
+            item2->fields["processed"] = false;
 
             session->add_fact(item1);
             session->add_fact(item2);
@@ -86,8 +86,8 @@ suite("Engine no-loop") {
 
             check(fired == 2);
 
-            check(std::get<int64_t>(*item1->get_field("processed")) == 1);
-            check(std::get<int64_t>(*item2->get_field("processed")) == 1);
+            check(std::get<bool>(*item1->get_field("processed")));
+            check(std::get<bool>(*item2->get_field("processed")));
         }
     }
 

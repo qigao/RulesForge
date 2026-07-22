@@ -33,39 +33,90 @@ namespace {
         return changed_fields->contains(field);
     }
 
-    std::optional<double> numeric_value(ConstraintValue const& value) {
+    using RuntimeNumeric = std::variant<int64_t, uint64_t, double>;
+
+    std::optional<RuntimeNumeric> comparison_numeric(ConstraintValue const& value) {
         if (auto const* i = std::get_if<int64_t>(&value)) {
-            return static_cast<double>(*i);
+            return *i;
+        }
+        if (auto const* u = std::get_if<uint64_t>(&value)) {
+            return *u;
         }
         if (auto const* d = std::get_if<double>(&value)) {
             return *d;
         }
+        if (auto const* duration = std::get_if<DurationValue>(&value)) {
+            return duration->milliseconds;
+        }
+        if (auto const* enumeration = std::get_if<EnumValue>(&value)) {
+            return std::visit([](auto numeric) -> RuntimeNumeric { return numeric; }, enumeration->value);
+        }
         return std::nullopt;
     }
 
+    std::optional<double> numeric_value(ConstraintValue const& value) {
+        auto numeric = comparison_numeric(value);
+        if (!numeric) return std::nullopt;
+        return std::visit([](auto number) { return static_cast<double>(number); }, *numeric);
+    }
+
+    int compare_numeric(RuntimeNumeric const& lhs, RuntimeNumeric const& rhs) {
+        if (auto const* lhs_double = std::get_if<double>(&lhs)) {
+            double const rhs_double = std::visit([](auto value) { return static_cast<double>(value); }, rhs);
+            return *lhs_double < rhs_double ? -1 : (*lhs_double > rhs_double ? 1 : 0);
+        }
+        if (auto const* rhs_double = std::get_if<double>(&rhs)) {
+            double const lhs_double = std::visit([](auto value) { return static_cast<double>(value); }, lhs);
+            return lhs_double < *rhs_double ? -1 : (lhs_double > *rhs_double ? 1 : 0);
+        }
+        if (auto const* lhs_signed = std::get_if<int64_t>(&lhs)) {
+            if (auto const* rhs_signed = std::get_if<int64_t>(&rhs)) {
+                return *lhs_signed < *rhs_signed ? -1 : (*lhs_signed > *rhs_signed ? 1 : 0);
+            }
+            if (*lhs_signed < 0) return -1;
+            auto const lhs_unsigned = static_cast<uint64_t>(*lhs_signed);
+            auto const rhs_unsigned = std::get<uint64_t>(rhs);
+            return lhs_unsigned < rhs_unsigned ? -1 : (lhs_unsigned > rhs_unsigned ? 1 : 0);
+        }
+        auto const lhs_unsigned = std::get<uint64_t>(lhs);
+        if (auto const* rhs_signed = std::get_if<int64_t>(&rhs)) {
+            if (*rhs_signed < 0) return 1;
+            auto const rhs_unsigned = static_cast<uint64_t>(*rhs_signed);
+            return lhs_unsigned < rhs_unsigned ? -1 : (lhs_unsigned > rhs_unsigned ? 1 : 0);
+        }
+        auto const rhs_unsigned = std::get<uint64_t>(rhs);
+        return lhs_unsigned < rhs_unsigned ? -1 : (lhs_unsigned > rhs_unsigned ? 1 : 0);
+    }
+
+    bool evaluate_ordered_compare(CompareOp op, int comparison) {
+        switch (op) {
+            case CompareOp::EQ: return comparison == 0;
+            case CompareOp::NE: return comparison != 0;
+            case CompareOp::GT: return comparison > 0;
+            case CompareOp::LT: return comparison < 0;
+            case CompareOp::GE: return comparison >= 0;
+            case CompareOp::LE: return comparison <= 0;
+            default: return false;
+        }
+    }
+
     bool evaluate_compare(CompareOp op, ConstraintValue const& lhs, ConstraintValue const& rhs) {
-        if (auto lhs_num = numeric_value(lhs)) {
-            if (auto rhs_num = numeric_value(rhs)) {
-                switch (op) {
-                    case CompareOp::EQ: return *lhs_num == *rhs_num;
-                    case CompareOp::NE: return *lhs_num != *rhs_num;
-                    case CompareOp::GT: return *lhs_num > *rhs_num;
-                    case CompareOp::LT: return *lhs_num < *rhs_num;
-                    case CompareOp::GE: return *lhs_num >= *rhs_num;
-                    case CompareOp::LE: return *lhs_num <= *rhs_num;
-                    default: return false;
-                }
+        if (auto lhs_num = comparison_numeric(lhs)) {
+            if (auto rhs_num = comparison_numeric(rhs)) {
+                return evaluate_ordered_compare(op, compare_numeric(*lhs_num, *rhs_num));
             }
         }
 
-        auto const* lhs_str = std::get_if<std::string>(&lhs);
-        auto const* rhs_str = std::get_if<std::string>(&rhs);
-        if (lhs_str && op == CompareOp::LengthIs) {
-            if (auto rhs_num = numeric_value(rhs)) {
-                return static_cast<double>(lhs_str->size()) == *rhs_num;
+        auto const* raw_lhs_str = std::get_if<std::string>(&lhs);
+        if (raw_lhs_str && op == CompareOp::LengthIs) {
+            if (auto rhs_num = comparison_numeric(rhs)) {
+                return compare_numeric(RuntimeNumeric{static_cast<uint64_t>(raw_lhs_str->size())},
+                                       *rhs_num) == 0;
             }
             return false;
         }
+        auto const lhs_str = scalar_text(lhs);
+        auto const rhs_str = scalar_text(rhs);
         if (lhs_str && rhs_str) {
             switch (op) {
                 case CompareOp::EQ: return *lhs_str == *rhs_str;
@@ -522,6 +573,8 @@ namespace {
         if ((text.front() == '"' && text.back() == '"') || (text.front() == '\'' && text.back() == '\'')) {
             return ConstraintValue{text.substr(1, text.size() - 2)};
         }
+        if (text == "true") return ConstraintValue{true};
+        if (text == "false") return ConstraintValue{false};
         if (!text.empty() && text.front() == '$') {
             return resolve_expression_variable(text, current_fact, token, bindings, scalar_binding_fields);
         }
@@ -625,6 +678,7 @@ namespace {
             bindings,
             scalar_binding_fields);
         if (!value) return std::nullopt;
+        if (auto const* boolean = std::get_if<bool>(&*value)) return *boolean;
         if (auto number = numeric_value(*value)) return *number != 0.0;
         if (auto const* str = std::get_if<std::string>(&*value)) return !str->empty() && *str != "false" && *str != "0";
         return !std::holds_alternative<NilValue>(*value);

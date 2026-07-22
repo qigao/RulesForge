@@ -49,6 +49,16 @@ void value_set_field_int32(Value* obj, const char* name, int32_t val);
 void value_set_field_int64(Value* obj, const char* name, int64_t val);
 
 /**
+ * @brief Set an exact unsigned 64-bit field.
+ */
+void value_set_field_uint64(Value* obj, const char* name, uint64_t val);
+
+/**
+ * @brief Set boolean field. Zero is false; any non-zero value is true.
+ */
+void value_set_field_bool(Value* obj, const char* name, int val);
+
+/**
  * @brief Set double field
  */
 void value_set_field_double(Value* obj, const char* name, double val);
@@ -76,6 +86,8 @@ Value* value_create_list(void);
 
 void value_add_list_item_int(Value* list, int32_t val);
 void value_add_list_item_int64(Value* list, int64_t val);
+void value_add_list_item_uint64(Value* list, uint64_t val);
+void value_add_list_item_bool(Value* list, int val);
 void value_add_list_item_double(Value* list, double val);
 void value_add_list_item_string(Value* list, const char* val);
 
@@ -97,6 +109,8 @@ void value_set_field_list(Value* obj, const char* name, Value* list);
 Value* value_create_set(void);
 
 void value_add_set_item_int(Value* set, int32_t val);
+void value_add_set_item_uint64(Value* set, uint64_t val);
+void value_add_set_item_bool(Value* set, int val);
 void value_add_set_item_double(Value* set, double val);
 void value_add_set_item_string(Value* set, const char* val);
 
@@ -113,6 +127,8 @@ Value* value_create_map(void);
 
 void value_add_map_entry_string_string(Value* map, const char* key, const char* val);
 void value_add_map_entry_string_int(Value* map, const char* key, int32_t val);
+void value_add_map_entry_string_uint64(Value* map, const char* key, uint64_t val);
+void value_add_map_entry_string_bool(Value* map, const char* key, int val);
 void value_add_map_entry_string_double(Value* map, const char* key, double val);
 
 /**
@@ -126,6 +142,25 @@ void value_set_field_map(Value* obj, const char* name, Value* map);
  * @return Field value, or 0 if not found
  */
 int64_t value_get_field_int(const Value* obj, const char* name);
+
+/**
+ * @brief Get an exact unsigned 64-bit field.
+ * @return Field value, or 0 if missing or not uint64.
+ */
+uint64_t value_get_field_uint64(const Value* obj, const char* name);
+
+/**
+ * @brief Copy an exact bytes field.
+ * @return 1 on success, 0 if missing, wrong type, or the buffer is too small.
+ */
+int value_get_field_bytes(const Value* obj, const char* name, uint8_t* buffer,
+                          size_t buffer_size, size_t* out_length);
+
+/**
+ * @brief Get boolean field.
+ * @return 1 for true, or 0 for false, a missing field, or a non-boolean field
+ */
+int value_get_field_bool(const Value* obj, const char* name);
 
 /**
  * @brief Get double field

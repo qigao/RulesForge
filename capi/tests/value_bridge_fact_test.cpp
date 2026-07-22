@@ -39,8 +39,12 @@ int main() {
         require(root != nullptr, "root allocation failed");
 
         value_set_field_int(root, "id", 42);
+        value_set_field_bool(root, "active", 1);
         value_set_field_double(root, "price", 99.5);
         value_set_field_string(root, "name", "plan");
+        value_set_field_uint64(root, "counter", UINT64_MAX);
+        uint8_t const raw[] = {'A', 'z'};
+        value_set_field_bytes(root, "raw", raw, sizeof(raw));
 
         Value* child = value_create_object();
         value_set_field_string(child, "code", "active");
@@ -48,6 +52,7 @@ int main() {
 
         Value* tiers = value_create_list();
         value_add_list_item_int(tiers, 1);
+        value_add_list_item_bool(tiers, 1);
         value_add_list_item_double(tiers, 2.5);
         Value* tier_obj = value_create_object();
         value_set_field_string(tier_obj, "label", "bulk");
@@ -57,11 +62,13 @@ int main() {
         Value* tags = value_create_set();
         value_add_set_item_string(tags, "usd");
         value_add_set_item_string(tags, "cny");
+        value_add_set_item_bool(tags, 0);
         value_set_field_set(root, "currencies", tags);
 
         Value* attrs = value_create_map();
         value_add_map_entry_string_string(attrs, "region", "global");
         value_add_map_entry_string_int(attrs, "priority", 3);
+        value_add_map_entry_string_bool(attrs, "enabled", 1);
         value_add_map_entry_string_double(attrs, "discount", 0.2);
         value_set_field_map(root, "attrs", attrs);
 
@@ -70,11 +77,18 @@ int main() {
         require(fact->type == "PricePlan", "fact type mismatch");
 
         ConstraintValue id = field(fact, "id");
+        ConstraintValue active = field(fact, "active");
         ConstraintValue price = field(fact, "price");
         ConstraintValue name = field(fact, "name");
+        ConstraintValue counter = field(fact, "counter");
+        ConstraintValue raw_value = field(fact, "raw");
         require(as<int64_t>(id) == 42, "id mismatch");
+        require(as<bool>(active), "active mismatch");
         require(as<double>(price) == 99.5, "price mismatch");
         require(as<std::string>(name) == "plan", "name mismatch");
+        require(as<uint64_t>(counter) == UINT64_MAX, "counter mismatch");
+        require(as<BytesValue>(raw_value).bytes == std::vector<uint8_t>({'A', 'z'}),
+                "raw bytes mismatch");
 
         ConstraintValue status_field = field(fact, "status");
         auto const& status = as<std::shared_ptr<ValueMap>>(status_field);
@@ -85,10 +99,11 @@ int main() {
         ConstraintValue tiers_field = field(fact, "tiers");
         auto const& tiers_value = as<std::shared_ptr<TypedList>>(tiers_field);
         require(tiers_value != nullptr, "tiers list missing");
-        require(tiers_value->values.size() == 3, "tiers size mismatch");
+        require(tiers_value->values.size() == 4, "tiers size mismatch");
         require(as<int64_t>(tiers_value->values[0]) == 1, "tiers[0] mismatch");
-        require(as<double>(tiers_value->values[1]) == 2.5, "tiers[1] mismatch");
-        auto const& tier_object = as<std::shared_ptr<ValueMap>>(tiers_value->values[2]);
+        require(as<bool>(tiers_value->values[1]), "tiers[1] mismatch");
+        require(as<double>(tiers_value->values[2]) == 2.5, "tiers[2] mismatch");
+        auto const& tier_object = as<std::shared_ptr<ValueMap>>(tiers_value->values[3]);
         require(tier_object != nullptr, "tier object missing");
         require(as<std::string>(tier_object->entries.at(std::string("label"))) == "bulk",
                 "tier label mismatch");
@@ -98,6 +113,7 @@ int main() {
         require(currencies != nullptr, "currencies set missing");
         require(currencies->values.count(std::string("usd")) == 1, "usd tag missing");
         require(currencies->values.count(std::string("cny")) == 1, "cny tag missing");
+        require(currencies->values.count(false) == 1, "boolean tag missing");
 
         ConstraintValue attrs_field = field(fact, "attrs");
         auto const& attrs_value = as<std::shared_ptr<ValueMap>>(attrs_field);
@@ -106,6 +122,8 @@ int main() {
                 "region mismatch");
         require(as<int64_t>(attrs_value->entries.at(std::string("priority"))) == 3,
                 "priority mismatch");
+        require(as<bool>(attrs_value->entries.at(std::string("enabled"))),
+                "enabled mismatch");
         require(as<double>(attrs_value->entries.at(std::string("discount"))) == 0.2,
                 "discount mismatch");
 

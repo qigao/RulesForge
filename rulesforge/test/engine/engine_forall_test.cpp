@@ -52,7 +52,7 @@ struct ForallTestFixture {
         auto o = std::make_shared<Fact>();
         o->type = "Order";
         o->fields["customerId"] = (int64_t)custId;
-        o->fields["isShipped"] = (int64_t)(shipped ? 1 : 0);
+        o->fields["isShipped"] = shipped;
         facts_.push_back(o);
         return o;
     }
