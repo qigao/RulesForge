@@ -41,7 +41,8 @@ int reject_serialized_bytes(void const*, size_t, void*) {
 suite("CAPI") {
     group("Initialization and Cleanup") {
         it("initializes and cleans up") {
-            check(DATA_BIND_VERSION >= 11000);
+            check(DATA_BIND_VERSION >= 20000);
+            check_int_eq(DATA_BIND_ABI_VERSION, 8);
             check_int_eq(data_bind_library_version(), DATA_BIND_VERSION);
             check_int_eq(data_bind_abi_version(), DATA_BIND_ABI_VERSION);
             check_not_null(data_bind_version_string());
@@ -198,8 +199,10 @@ suite("CAPI") {
             auto schema_path = write_temp_schema(
                 "rulesforge_capi_databind_object.schema",
                 "schema ObjectApi [id(51), version(1), byte_order(little)]; "
-                "message Item { uint32 id; string name; }");
-            char const* json = R"({"id":7,"name":"alpha"})";
+                "message Item { "
+                "[name(\"item-id\"), alias(\"legacy-id\")] uint32 id; "
+                "string name; }");
+            char const* json = R"({"legacy-id":7,"name":"alpha"})";
             ruleforge_data_bind_object_t object = nullptr;
             check_int_eq(ruleforge_data_bind_object_from_json(
                              schema_path.string().c_str(), "Item", json,
@@ -213,6 +216,7 @@ suite("CAPI") {
             check_not_null(clone);
             check_int_eq(ruleforge_data_bind_object_destroy(object), RULES_FORGE_OK);
             object = nullptr;
+            std::filesystem::remove(schema_path);
 
             char* serialized = nullptr;
             size_t serialized_len = 0;
@@ -220,7 +224,9 @@ suite("CAPI") {
                              clone, &serialized, &serialized_len), RULES_FORGE_OK);
             check_not_null(serialized);
             check_size_eq(serialized_len, std::strlen(serialized));
-            check_str_contains(serialized, "\"id\":7");
+            check_str_contains(serialized, "\"item-id\":7");
+            check(std::strstr(serialized, "\"legacy-id\"") == nullptr);
+            check(std::strstr(serialized, "\"id\":") == nullptr);
             ruleforge_data_bind_serialized_free(serialized);
 
             serialized = nullptr;
@@ -232,8 +238,16 @@ suite("CAPI") {
             serialized = nullptr;
             check_int_eq(ruleforge_data_bind_object_serialize_xml(
                              clone, &serialized, nullptr), RULES_FORGE_OK);
-            check_str_contains(serialized, "<id>7</id>");
+            check_str_contains(serialized, "<item-id>7</item-id>");
             ruleforge_data_bind_serialized_free(serialized);
+
+            uint8_t* binary = nullptr;
+            size_t binary_len = 0;
+            check_int_eq(ruleforge_data_bind_object_serialize_binary(
+                             clone, &binary, &binary_len), RULES_FORGE_OK);
+            check_not_null(binary);
+            check_size_gt(binary_len, 0);
+            ruleforge_data_bind_binary_free(binary);
 
             std::string sink_output;
             check_int_eq(ruleforge_data_bind_object_write_json(
@@ -254,8 +268,7 @@ suite("CAPI") {
 
             check_int_eq(ruleforge_data_bind_object_destroy(clone), RULES_FORGE_OK);
             check_int_eq(ruleforge_data_bind_object_destroy(nullptr),
-                         RULES_FORGE_ERROR_INVALID_ARGUMENT);
-            std::filesystem::remove(schema_path);
+                          RULES_FORGE_ERROR_INVALID_ARGUMENT);
             ruleforge_cleanup();
         }
 
@@ -332,7 +345,9 @@ suite("CAPI") {
                 "rulesforge_capi_kb_schema_registry.schema",
                 "schema Registry [id(53), version(1), byte_order(little)]; "
                 "enum Side <uint8> { Buy = 1; Sell = 2; } "
-                "message Order { uint32 id; Side side; }");
+                "message Order { "
+                "[name(\"order-id\"), alias(\"legacy-id\")] uint32 id; "
+                "Side side; }");
             std::string rfl = std::string("import schema \"")
                 + schema_path.generic_string()
                 + "\"\nquery \"Orders\"\n$o : Order()\nend\n";
@@ -353,11 +368,19 @@ suite("CAPI") {
             check_int_eq(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
             ruleforge_fact_t fact = nullptr;
             check_int_eq(ruleforge_session_add_fact_json(
-                             session, "Order", R"({"id":7,"side":"Sell"})", &fact),
+                             session, "Order", R"({"legacy-id":7,"side":"Sell"})", &fact),
                          RULES_FORGE_OK);
             check_not_null(fact);
 
             auto const* internal_fact = reinterpret_cast<Fact const*>(fact);
+            int64_t order_id = 0;
+            check_int_eq(ruleforge_fact_get_field_as_int(
+                             fact, "id", &order_id), RULES_FORGE_OK);
+            check_long_eq(order_id, 7);
+            check(internal_fact->fields.find("order-id")
+                  == internal_fact->fields.end());
+            check(internal_fact->fields.find("legacy-id")
+                  == internal_fact->fields.end());
             auto side_field = internal_fact->fields.find("side");
             auto const* runtime_enum = side_field != internal_fact->fields.end()
                 ? std::get_if<EnumValue>(&side_field->second) : nullptr;

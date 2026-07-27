@@ -165,7 +165,7 @@ names the bound string field containing each event ID and the bound integer
 field containing each event timestamp. All selected records share one entry
 point and commit atomically through the continuous batch operation.
 
-DataBind 1.9 invokes a synchronous callback whenever a streamable JSON array
+DataBind 2.0 invokes a synchronous callback whenever a streamable JSON array
 item, CSV row, or XML path element has passed path selection and schema binding.
 RulesForge immediately copies that borrowed value into an owned pending event.
 No event enters working memory during `feed`: `finish` atomically submits the

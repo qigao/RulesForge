@@ -38,21 +38,28 @@ find_package(TurboUtils CONFIG REQUIRED PATHS "${TURBO_UTILS_ROOT}")
 
 include(CheckCSourceCompiles)
 set(CMAKE_REQUIRED_LIBRARIES TurboUtils::DataBind)
-unset(RULESFORGE_HAS_DATABIND_1_11 CACHE)
+unset(RULESFORGE_HAS_DATABIND_2_0 CACHE)
 check_c_source_compiles([[
   #include <data_bind.h>
-  #if DATA_BIND_VERSION < 11100
-  #error "RulesForge requires DataBind 1.11.0 or newer"
+  #if DATA_BIND_VERSION < 20000
+  #error "RulesForge requires DataBind 2.0.0 or newer"
+  #endif
+  #if DATA_BIND_ABI_VERSION != 8
+  #error "RulesForge requires DataBind ABI 8"
   #endif
   int main() {
-    DataBindValue *copy = NULL;
-    return data_bind_value_clone(NULL, &copy) == DATA_BIND_ERR_INVALID_ARG ? 0 : 1;
+    DataBindObject *object = NULL;
+    char *json = NULL;
+    return data_bind_object_serialize_json(NULL, object, &json, NULL, NULL)
+               == DATA_BIND_ERR_INVALID_ARG
+           ? 0
+           : 1;
   }
-]] RULESFORGE_HAS_DATABIND_1_11)
+]] RULESFORGE_HAS_DATABIND_2_0)
 unset(CMAKE_REQUIRED_LIBRARIES)
-if(NOT RULESFORGE_HAS_DATABIND_1_11)
+if(NOT RULESFORGE_HAS_DATABIND_2_0)
     message(FATAL_ERROR
-            "RulesForge requires DataBind 1.11.0 or newer")
+            "RulesForge requires DataBind 2.0.0 with ABI 8")
 endif()
 
 # Output files directory

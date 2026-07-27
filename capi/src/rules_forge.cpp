@@ -115,12 +115,13 @@ struct DataBindStreamDeleter {
   void operator()(data_bind_stream_t *stream) const { data_bind_stream_destroy(stream); }
 };
 
-using DataBindHandle = std::unique_ptr<DataBind, DataBindHandleDeleter>;
+using DataBindHandle = std::shared_ptr<DataBind>;
 using DataBindValueHandle = std::unique_ptr<DataBindValue, DataBindValueDeleter>;
 using DataBindObjectHandle = std::unique_ptr<DataBindObject, DataBindObjectDeleter>;
 using DataBindStreamHandle = std::unique_ptr<data_bind_stream_t, DataBindStreamDeleter>;
 
-constexpr int kMinimumDataBindVersion = 11100;
+constexpr int kMinimumDataBindVersion = 20000;
+constexpr int kRequiredDataBindAbi = 8;
 
 struct DataBindView {
   DataBind *value = nullptr;
@@ -526,17 +527,20 @@ static ruleforge_status_t insert_data_bind_fact_list(StatefulSession &session,
 static DataBindHandle create_data_bind_or_set_error(char const *schema_path) {
   if (!schema_path) {
     set_error("Schema path is NULL");
-    return DataBindHandle(nullptr);
+    return {};
   }
   DataBind *raw_codec = nullptr;
   DataBindError error = DATA_BIND_ERROR_INIT;
   DataBindStatus status = data_bind_create(schema_path, &raw_codec, &error);
-  DataBindHandle codec(raw_codec);
-  if (!codec) {
+  if (status != DATA_BIND_OK || !raw_codec) {
+    if (raw_codec) {
+      data_bind_free(raw_codec);
+    }
     set_error_fmt("DataBind schema load failed: ",
                   data_bind_error_detail(status, error));
+    return {};
   }
-  return codec;
+  return DataBindHandle(raw_codec, DataBindHandleDeleter{});
 }
 
 struct KnowledgeBaseWrapper {
@@ -548,10 +552,12 @@ struct KnowledgeBaseWrapper {
 ruleforge_status_t ruleforge_init() {
   int const library_version = data_bind_library_version();
   int const library_abi = data_bind_abi_version();
-  if (library_version < kMinimumDataBindVersion || library_abi != DATA_BIND_ABI_VERSION) {
+  if (library_version < kMinimumDataBindVersion
+      || library_abi != kRequiredDataBindAbi
+      || DATA_BIND_ABI_VERSION != kRequiredDataBindAbi) {
     fmt(last_error, sizeof(last_error),
-        "Incompatible DataBind library: need version >= 1.11.0 with ABI {}, got {} with ABI {}",
-        DATA_BIND_ABI_VERSION,
+        "Incompatible DataBind library: need version >= 2.0.0 with ABI {}, got {} with ABI {}",
+        kRequiredDataBindAbi,
         data_bind_version_string() ? data_bind_version_string() : "<unknown>", library_abi);
     return RULES_FORGE_ERROR_GENERIC;
   }
@@ -845,8 +851,8 @@ struct ruleforge_data_bind_stream_handle_s {
 };
 
 struct ruleforge_data_bind_object_handle_s {
+  DataBindHandle codec;
   DataBindObjectHandle object;
-  std::string schema_path;
 };
 
 namespace {
@@ -855,9 +861,9 @@ using DataBindObjectTextParser = DataBindStatus (*)(
     DataBind *, char const *, char const *, size_t, DataBindObject **,
     DataBindError *);
 using DataBindObjectSerializer = DataBindStatus (*)(
-    DataBindObject const *, char **, size_t *, DataBindError *);
+    DataBind *, DataBindObject const *, char **, size_t *, DataBindError *);
 using DataBindObjectWriter = DataBindStatus (*)(
-    DataBindObject const *, DataBindWriteFn, void *, DataBindError *);
+    DataBind *, DataBindObject const *, DataBindWriteFn, void *, DataBindError *);
 
 static ruleforge_status_t map_data_bind_object_error(
     char const *operation, DataBindStatus status, DataBindError const &error) {
@@ -872,12 +878,16 @@ static ruleforge_status_t map_data_bind_object_error(
 }
 
 static ruleforge_status_t publish_data_bind_object(
-    DataBindObjectHandle object, char const *schema_path,
+    DataBindHandle codec, DataBindObjectHandle object,
     ruleforge_data_bind_object_t *out_object) {
+  if (!codec || !object || !out_object) {
+    set_error("DataBind codec, object, or output handle is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
   try {
     auto handle = std::make_unique<ruleforge_data_bind_object_handle_s>();
+    handle->codec = std::move(codec);
     handle->object = std::move(object);
-    handle->schema_path = schema_path ? schema_path : "";
     *out_object = handle.release();
     last_error[0] = '\0';
     return RULES_FORGE_OK;
@@ -910,7 +920,7 @@ static ruleforge_status_t create_text_data_bind_object(
   if (status != DATA_BIND_OK) {
     return map_data_bind_object_error(operation, status, error);
   }
-  return publish_data_bind_object(std::move(object), schema_path, out_object);
+  return publish_data_bind_object(std::move(codec), std::move(object), out_object);
 }
 
 static ruleforge_status_t serialize_data_bind_object(
@@ -923,12 +933,13 @@ static ruleforge_status_t serialize_data_bind_object(
     *out_len = 0;
   }
   auto *handle = reinterpret_cast<ruleforge_data_bind_object_handle_s *>(object);
-  if (!handle || !handle->object || !out_text) {
-    set_error("DataBindObject handle or serialized output pointer is invalid");
+  if (!handle || !handle->codec || !handle->object || !out_text) {
+    set_error("DataBind codec, object, or serialized output pointer is invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   DataBindError error = DATA_BIND_ERROR_INIT;
-  DataBindStatus status = serialize(handle->object.get(), out_text, out_len, &error);
+  DataBindStatus status = serialize(
+      handle->codec.get(), handle->object.get(), out_text, out_len, &error);
   if (status != DATA_BIND_OK) {
     return map_data_bind_object_error(operation, status, error);
   }
@@ -940,12 +951,13 @@ static ruleforge_status_t write_data_bind_object(
     ruleforge_data_bind_object_t object, ruleforge_write_fn write, void *user,
     DataBindObjectWriter writer, char const *operation) {
   auto *handle = reinterpret_cast<ruleforge_data_bind_object_handle_s *>(object);
-  if (!handle || !handle->object || !write) {
-    set_error("DataBindObject handle or byte sink is invalid");
+  if (!handle || !handle->codec || !handle->object || !write) {
+    set_error("DataBind codec, object, or byte sink is invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   DataBindError error = DATA_BIND_ERROR_INIT;
-  DataBindStatus status = writer(handle->object.get(), write, user, &error);
+  DataBindStatus status = writer(
+      handle->codec.get(), handle->object.get(), write, user, &error);
   if (status != DATA_BIND_OK) {
     return map_data_bind_object_error(operation, status, error);
   }
@@ -1324,7 +1336,7 @@ ruleforge_status_t ruleforge_data_bind_object_from_binary(
     return map_data_bind_object_error(
         "DataBind binary object parse failed: ", status, error);
   }
-  return publish_data_bind_object(std::move(object), schema_path, out_object);
+  return publish_data_bind_object(std::move(codec), std::move(object), out_object);
 }
 
 ruleforge_status_t ruleforge_data_bind_object_from_json(
@@ -1374,7 +1386,7 @@ ruleforge_status_t ruleforge_data_bind_object_from_csv(
     return map_data_bind_object_error(
         "DataBind CSV object parse failed: ", status, error);
   }
-  return publish_data_bind_object(std::move(object), schema_path, out_object);
+  return publish_data_bind_object(std::move(codec), std::move(object), out_object);
 }
 
 ruleforge_status_t ruleforge_data_bind_object_clone(
@@ -1384,8 +1396,8 @@ ruleforge_status_t ruleforge_data_bind_object_clone(
     *out_object = nullptr;
   }
   auto *handle = reinterpret_cast<ruleforge_data_bind_object_handle_s *>(object);
-  if (!handle || !handle->object || !out_object) {
-    set_error("DataBindObject handle or clone output pointer is invalid");
+  if (!handle || !handle->codec || !handle->object || !out_object) {
+    set_error("DataBind codec, object, or clone output pointer is invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   DataBindObject *raw_copy = nullptr;
@@ -1399,7 +1411,7 @@ ruleforge_status_t ruleforge_data_bind_object_clone(
     set_error("Failed to clone DataBindObject");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
-  return publish_data_bind_object(std::move(copy), handle->schema_path.c_str(), out_object);
+  return publish_data_bind_object(handle->codec, std::move(copy), out_object);
 }
 
 char const *ruleforge_data_bind_object_get_type_name(
@@ -1452,17 +1464,13 @@ ruleforge_status_t ruleforge_data_bind_object_serialize_binary(
     *out_binary = nullptr;
   }
   auto *handle = reinterpret_cast<ruleforge_data_bind_object_handle_s *>(object);
-  if (!handle || !handle->object || handle->schema_path.empty() || !out_binary || !out_len) {
-    set_error("DataBindObject handle, schema, or binary output is invalid");
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  auto codec = create_data_bind_or_set_error(handle->schema_path.c_str());
-  if (!codec) {
+  if (!handle || !handle->codec || !handle->object || !out_binary || !out_len) {
+    set_error("DataBind codec, object, or binary output is invalid");
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   DataBindError error = DATA_BIND_ERROR_INIT;
   DataBindStatus status = data_bind_object_serialize_bin(
-      codec.get(), handle->object.get(), out_binary, out_len, &error);
+      handle->codec.get(), handle->object.get(), out_binary, out_len, &error);
   if (status != DATA_BIND_OK) {
     return map_data_bind_object_error(
         "DataBind binary object serialization failed: ", status, error);

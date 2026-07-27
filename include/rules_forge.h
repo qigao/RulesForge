@@ -119,9 +119,10 @@ CXX_C_API const char *ruleforge_get_last_error_message(void);
 
 // --- Schema-bound DataBind Objects ---
 // Each constructor loads schema_path and returns an independently owned object.
-// The object remains valid after the internal DataBind codec is released and
-// must be destroyed with ruleforge_data_bind_object_destroy(). Text inputs are
-// length-delimited UTF-8 and need not be NUL-terminated.
+// The returned handle retains the matching schema codec, so parsing and every
+// later serialization use one immutable schema snapshot even if schema_path is
+// changed or removed. Destroy it with ruleforge_data_bind_object_destroy().
+// Text inputs are length-delimited UTF-8 and need not be NUL-terminated.
 //
 // Common parameters:
 //   schema_path: trusted DataBind schema file used to bind the object.
