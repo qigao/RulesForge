@@ -100,7 +100,22 @@ namespace {
         }
     }
 
+    std::optional<uint64_t> bit_mask_value(ConstraintValue const& value) {
+        if (auto const* unsigned_value = std::get_if<uint64_t>(&value)) {
+            return *unsigned_value;
+        }
+        if (auto const* signed_value = std::get_if<int64_t>(&value); signed_value && *signed_value >= 0) {
+            return static_cast<uint64_t>(*signed_value);
+        }
+        return std::nullopt;
+    }
+
     bool evaluate_compare(CompareOp op, ConstraintValue const& lhs, ConstraintValue const& rhs) {
+        if (op == CompareOp::HasFlag) {
+            auto const lhs_bits = bit_mask_value(lhs);
+            auto const mask = bit_mask_value(rhs);
+            return lhs_bits && mask && *mask != 0 && (*lhs_bits & *mask) == *mask;
+        }
         if (auto lhs_num = comparison_numeric(lhs)) {
             if (auto rhs_num = comparison_numeric(rhs)) {
                 return evaluate_ordered_compare(op, compare_numeric(*lhs_num, *rhs_num));

@@ -2730,6 +2730,38 @@ ruleforge_status_t ruleforge_session_add_data_bind_object(
   }
 }
 
+ruleforge_status_t ruleforge_session_add_data_bind_value(
+    ruleforge_stateful_session_t session, const char *fact_type,
+    const DataBindValue *value, ruleforge_fact_t *out_fact) {
+  if (out_fact) {
+    *out_fact = nullptr;
+  }
+  auto *session_wrapper = reinterpret_cast<StatefulSessionWrapper *>(session);
+  if (!session_wrapper || !session_wrapper->session || !fact_type ||
+      fact_type[0] == '\0' || !value) {
+    set_error("Session, fact type, or DataBindValue is invalid");
+    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    auto type_status =
+        require_schema_imported_fact_type(*session_wrapper->session, fact_type);
+    if (type_status != RULES_FORGE_OK) {
+      return type_status;
+    }
+    auto status = insert_data_bind_fact(*session_wrapper->session, fact_type,
+                                        value, out_fact);
+    if (status == RULES_FORGE_OK) {
+      last_error[0] = '\0';
+    }
+    return status;
+  } catch (SessionInconsistentException const &e) {
+    return map_session_inconsistent(e);
+  } catch (std::exception const &e) {
+    set_error_fmt("Failed to add DataBindValue fact: ", e.what());
+    return RULES_FORGE_ERROR_FACT_INSERTION_FAILED;
+  }
+}
+
 ruleforge_status_t
 ruleforge_session_add_fact_json(ruleforge_stateful_session_t session,
                                 const char *fact_type,

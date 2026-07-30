@@ -66,6 +66,7 @@ enum class TokenType : uint8_t {
     TK_MATCHES,
     TK_MEMBER_OF,
     TK_CONTAINS_KEY,
+    TK_HAS_FLAG,
 
     // --- Temporal keywords ---
     TK_AFTER,
@@ -194,6 +195,7 @@ inline char const* token_type_name(enum TokenType t) {
         case TokenType::TK_MATCHES:          return "MATCHES";
         case TokenType::TK_MEMBER_OF:        return "MEMBER_OF";
         case TokenType::TK_CONTAINS_KEY:     return "CONTAINS_KEY";
+        case TokenType::TK_HAS_FLAG:         return "HAS_FLAG";
         case TokenType::TK_AFTER:            return "AFTER";
         case TokenType::TK_BEFORE:           return "BEFORE";
         case TokenType::TK_WITHIN:           return "WITHIN";

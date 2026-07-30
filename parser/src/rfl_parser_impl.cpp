@@ -62,6 +62,7 @@ static int token_type_to_lemon_id(enum TokenType t) {
         case TokenType::TK_ENDS_WITH:        return TOK_ENDS_WITH;
         case TokenType::TK_LENGTH_IS:        return TOK_LENGTH_IS;
         case TokenType::TK_CONTAINS:         return TOK_CONTAINS;
+        case TokenType::TK_HAS_FLAG:         return TOK_HAS_FLAG;
         case TokenType::TK_MATCHES:          return TOK_MATCHES;
         case TokenType::TK_MEMBER_OF:        return TOK_MEMBER_OF;
         case TokenType::TK_AFTER:            return TOK_AFTER;

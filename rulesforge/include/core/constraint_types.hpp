@@ -30,6 +30,7 @@ enum class CompareOp : uint8_t {
     LT,             // <
     GE,             // >=
     LE,             // <=
+    HasFlag,        // has_flag(value, non-zero mask)
     Contains,       // contains (string substring or collection membership)
     NotContains,    // not contains
     Matches,        // matches (regex)
@@ -56,6 +57,7 @@ inline CompareOp parse_compare_op(std::string_view s) {
     if (s == "<") return CompareOp::LT;
     if (s == ">=") return CompareOp::GE;
     if (s == "<=") return CompareOp::LE;
+    if (s == "has_flag") return CompareOp::HasFlag;
     if (s == "contains") return CompareOp::Contains;
     if (s == "not contains") return CompareOp::NotContains;
     if (s == "matches") return CompareOp::Matches;
@@ -99,6 +101,7 @@ inline std::string_view compare_op_str(CompareOp op) {
         case CompareOp::LT: return "<";
         case CompareOp::GE: return ">=";
         case CompareOp::LE: return "<=";
+        case CompareOp::HasFlag: return "has_flag";
         case CompareOp::Contains: return "contains";
         case CompareOp::NotContains: return "not contains";
         case CompareOp::Matches: return "matches";

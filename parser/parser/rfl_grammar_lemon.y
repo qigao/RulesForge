@@ -915,6 +915,15 @@ temporal_op(A) ::= BEFORE. { A = new TemporalOp(TemporalOp::Before); }
 temporal_op(A) ::= COINCIDES. { A = new TemporalOp(TemporalOp::Coincides); }
 temporal_op(A) ::= DURING. { A = new TemporalOp(TemporalOp::During); }
 
+// Exact non-negative integer bit-mask predicate.
+constraint_item(A) ::= HAS_FLAG LPAREN field_ref(F) COMMA primary_expr_val(V) RPAREN. {
+    A = new ConstraintNode(NodeType::LEAF);
+    A->constraint.left_field = *F;
+    A->constraint.op = CompareOp::HasFlag;
+    set_rhs_value(A->constraint, *V);
+    delete F; delete V;
+}
+
 // Relational with inline binding: $v : field cmp_op value
 constraint_item(A) ::= VARIABLE(VB) COLON field_ref(F) cmp_op(OP) primary_expr_val(V). {
     A = new ConstraintNode(NodeType::LEAF);

@@ -33,6 +33,23 @@ struct QueryTestFixture {
     }
 };
 
+suite("Bit predicates") {
+    it("matches all bits in a non-zero uint64 mask") {
+        QueryTestFixture fixture;
+        fixture.build(R"(
+            declare Event flags: UInt64 end
+            query "flagged"
+                $event: Event(has_flag(flags, 2))
+            end
+        )");
+
+        fixture.createFact("Event", {{"flags", uint64_t{6}}});
+        fixture.createFact("Event", {{"flags", uint64_t{4}}});
+        auto results = fixture.session->execute_query("flagged", {});
+        check_size_eq(results.size(), 1);
+    }
+}
+
 suite("Query Terminal Node") {
     group("Non-Parameterized (Live) Queries") {
         it("returns no results initially") {

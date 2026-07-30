@@ -127,6 +127,7 @@ RflToken RflLexer::scan_normal() {
         "lengthIs"    / [^a-zA-Z0-9_] { return make_token(TokenType::TK_LENGTH_IS, tok_); }
         "contains"    / [^a-zA-Z0-9_] { return make_token(TokenType::TK_CONTAINS, tok_); }
         "containsKey" / [^a-zA-Z0-9_] { return make_token(TokenType::TK_CONTAINS_KEY, tok_); }
+        "has_flag"    / [^a-zA-Z0-9_] { return make_token(TokenType::TK_HAS_FLAG, tok_); }
         "matches"     / [^a-zA-Z0-9_] { return make_token(TokenType::TK_MATCHES, tok_); }
         "memberOf"    / [^a-zA-Z0-9_] { return make_token(TokenType::TK_MEMBER_OF, tok_); }
 

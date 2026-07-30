@@ -3,13 +3,14 @@
 
 #include <stdint.h>          /* int64_t */
 #include <stddef.h>          /* size_t  */
+#include <data_bind.h>
 #include <platform.h>
 
 // --- Version Information ---
 #define RULEFORGE_VERSION_MAJOR 0
-#define RULEFORGE_VERSION_MINOR 7
+#define RULEFORGE_VERSION_MINOR 9
 #define RULEFORGE_VERSION_PATCH 0
-#define RULEFORGE_VERSION_STRING "0.7.0"
+#define RULEFORGE_VERSION_STRING "0.9.0"
 
 // --- Thread Safety ---
 // RulesForge thread safety guarantees:
@@ -389,6 +390,14 @@ CXX_C_API ruleforge_status_t ruleforge_continuous_result_destroy(
 CXX_C_API ruleforge_status_t ruleforge_session_add_data_bind_object(
     ruleforge_stateful_session_t session, ruleforge_data_bind_object_t object,
     ruleforge_fact_t *out_fact);
+
+// Adds an existing schema-bound DataBindValue as one fact. value must be an
+// object whose fact_type schema was imported by the session's knowledge base.
+// The session copies the value; ownership remains with the caller, which may
+// free it immediately after this call. out_fact is optional and session-owned.
+CXX_C_API ruleforge_status_t ruleforge_session_add_data_bind_value(
+    ruleforge_stateful_session_t session, const char *fact_type,
+    const DataBindValue *value, ruleforge_fact_t *out_fact);
 
 // Adds JSON using the schema already imported by the Knowledge Base.
 CXX_C_API ruleforge_status_t ruleforge_session_add_fact_json(

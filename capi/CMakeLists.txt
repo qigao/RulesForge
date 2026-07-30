@@ -2,7 +2,7 @@ include(GenerateExportHeader)
 
 # Version information (keep in sync with rules_forge.h).
 set(RULEFORGE_VERSION_MAJOR 0)
-set(RULEFORGE_VERSION_MINOR 7)
+set(RULEFORGE_VERSION_MINOR 9)
 set(RULEFORGE_VERSION_PATCH 0)
 
 # Define the target name for the shared library
