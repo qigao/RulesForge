@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iosfwd>
@@ -573,7 +575,7 @@ namespace {
                 case '-': result = *lhs_num - *rhs_num; break;
                 case '*': result = *lhs_num * *rhs_num; break;
                 case '/':
-                    if (*rhs_num == 0.0) return std::nullopt;
+                    if (std::fpclassify(*rhs_num) == FP_ZERO) return std::nullopt;
                     result = *lhs_num / *rhs_num;
                     break;
                 default: return std::nullopt;
@@ -694,7 +696,7 @@ namespace {
             scalar_binding_fields);
         if (!value) return std::nullopt;
         if (auto const* boolean = std::get_if<bool>(&*value)) return *boolean;
-        if (auto number = numeric_value(*value)) return *number != 0.0;
+        if (auto number = numeric_value(*value)) return std::fpclassify(*number) != FP_ZERO;
         if (auto const* str = std::get_if<std::string>(&*value)) return !str->empty() && *str != "false" && *str != "0";
         return !std::holds_alternative<NilValue>(*value);
     }

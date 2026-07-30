@@ -66,11 +66,13 @@ ConstraintValue coerce_numeric_assignment_to_existing_type(ConstraintValue const
         (void)current_int;
         if (auto const* new_double = std::get_if<double>(&new_value)) {
             constexpr double min_i64 = static_cast<double>(std::numeric_limits<int64_t>::min());
-            constexpr double max_i64 = static_cast<double>(std::numeric_limits<int64_t>::max());
+            constexpr double max_i64_exclusive = -min_i64;
+            double integer_part = 0.0;
+            double const fractional_part = std::modf(*new_double, &integer_part);
             if (std::isfinite(*new_double) &&
-                std::trunc(*new_double) == *new_double &&
+                std::fpclassify(fractional_part) == FP_ZERO &&
                 *new_double >= min_i64 &&
-                *new_double <= max_i64) {
+                *new_double < max_i64_exclusive) {
                 return static_cast<int64_t>(*new_double);
             }
         }
@@ -110,11 +112,13 @@ ConstraintValue coerce_assignment_to_declared_type(std::optional<FieldType> decl
         case FT_Long:
             if (auto const* new_double = std::get_if<double>(&new_value)) {
                 constexpr double min_i64 = static_cast<double>(std::numeric_limits<int64_t>::min());
-                constexpr double max_i64 = static_cast<double>(std::numeric_limits<int64_t>::max());
+                constexpr double max_i64_exclusive = -min_i64;
+                double integer_part = 0.0;
+                double const fractional_part = std::modf(*new_double, &integer_part);
                 if (std::isfinite(*new_double) &&
-                    std::trunc(*new_double) == *new_double &&
+                    std::fpclassify(fractional_part) == FP_ZERO &&
                     *new_double >= min_i64 &&
-                    *new_double <= max_i64) {
+                    *new_double < max_i64_exclusive) {
                     return static_cast<int64_t>(*new_double);
                 }
             }
@@ -181,7 +185,7 @@ std::string trim_ascii(std::string const& s) {
 
 bool is_truthy(ConstraintValue const& value) {
     if (auto const* boolean = std::get_if<bool>(&value)) return *boolean;
-    if (auto const* d = std::get_if<double>(&value)) return *d != 0.0;
+    if (auto const* d = std::get_if<double>(&value)) return std::fpclassify(*d) != FP_ZERO;
     if (auto const* i = std::get_if<int64_t>(&value)) return *i != 0;
     if (auto const* u = std::get_if<uint64_t>(&value)) return *u != 0;
     if (auto const* duration = std::get_if<DurationValue>(&value)) {
@@ -193,12 +197,16 @@ bool is_truthy(ConstraintValue const& value) {
     return !std::holds_alternative<NilValue>(value);
 }
 
+bool exact_double_equal(double lhs, double rhs) {
+    return !std::isnan(lhs) && !std::isnan(rhs) && !std::islessgreater(lhs, rhs);
+}
+
 bool values_equal_for_switch(ConstraintValue const& lhs, ConstraintValue const& rhs) {
     if (std::holds_alternative<double>(lhs) && std::holds_alternative<int64_t>(rhs)) {
-        return std::get<double>(lhs) == static_cast<double>(std::get<int64_t>(rhs));
+        return exact_double_equal(std::get<double>(lhs), static_cast<double>(std::get<int64_t>(rhs)));
     }
     if (std::holds_alternative<int64_t>(lhs) && std::holds_alternative<double>(rhs)) {
-        return static_cast<double>(std::get<int64_t>(lhs)) == std::get<double>(rhs);
+        return exact_double_equal(static_cast<double>(std::get<int64_t>(lhs)), std::get<double>(rhs));
     }
     auto const lhs_text = scalar_text(lhs);
     auto const rhs_text = scalar_text(rhs);
@@ -225,8 +233,8 @@ std::optional<double> scalar_number(ConstraintValue const& value) {
 bool compare_scalar_values(std::string_view op, ConstraintValue const& lhs, ConstraintValue const& rhs) {
     if (auto lhs_number = scalar_number(lhs)) {
         if (auto rhs_number = scalar_number(rhs)) {
-            if (op == "==") return *lhs_number == *rhs_number;
-            if (op == "!=") return *lhs_number != *rhs_number;
+            if (op == "==") return exact_double_equal(*lhs_number, *rhs_number);
+            if (op == "!=") return !exact_double_equal(*lhs_number, *rhs_number);
             if (op == ">=") return *lhs_number >= *rhs_number;
             if (op == "<=") return *lhs_number <= *rhs_number;
             if (op == ">") return *lhs_number > *rhs_number;
@@ -977,7 +985,7 @@ std::optional<ConstraintValue> RhsExecutor::evaluate_simple_rhs_value(std::strin
             case '-': result = *lhs_number - *rhs_number; break;
             case '*': result = *lhs_number * *rhs_number; break;
             case '/':
-                if (*rhs_number == 0.0) return std::nullopt;
+                if (std::fpclassify(*rhs_number) == FP_ZERO) return std::nullopt;
                 result = *lhs_number / *rhs_number;
                 break;
             default: return std::nullopt;

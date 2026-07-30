@@ -3,6 +3,7 @@
 #include "core/fact.hpp"
 #include "core/value_types.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -84,7 +85,7 @@ int main() {
         ConstraintValue raw_value = field(fact, "raw");
         require(as<int64_t>(id) == 42, "id mismatch");
         require(as<bool>(active), "active mismatch");
-        require(as<double>(price) == 99.5, "price mismatch");
+        require(std::abs(as<double>(price) - 99.5) < 1e-12, "price mismatch");
         require(as<std::string>(name) == "plan", "name mismatch");
         require(as<uint64_t>(counter) == UINT64_MAX, "counter mismatch");
         require(as<BytesValue>(raw_value).bytes == std::vector<uint8_t>({'A', 'z'}),
@@ -102,7 +103,8 @@ int main() {
         require(tiers_value->values.size() == 4, "tiers size mismatch");
         require(as<int64_t>(tiers_value->values[0]) == 1, "tiers[0] mismatch");
         require(as<bool>(tiers_value->values[1]), "tiers[1] mismatch");
-        require(as<double>(tiers_value->values[2]) == 2.5, "tiers[2] mismatch");
+        require(std::abs(as<double>(tiers_value->values[2]) - 2.5) < 1e-12,
+                "tiers[2] mismatch");
         auto const& tier_object = as<std::shared_ptr<ValueMap>>(tiers_value->values[3]);
         require(tier_object != nullptr, "tier object missing");
         require(as<std::string>(tier_object->entries.at(std::string("label"))) == "bulk",
@@ -124,7 +126,7 @@ int main() {
                 "priority mismatch");
         require(as<bool>(attrs_value->entries.at(std::string("enabled"))),
                 "enabled mismatch");
-        require(as<double>(attrs_value->entries.at(std::string("discount"))) == 0.2,
+        require(std::abs(as<double>(attrs_value->entries.at(std::string("discount"))) - 0.2) < 1e-12,
                 "discount mismatch");
 
         Value* status_copy = value_get_field_object(root, "status");

@@ -68,9 +68,12 @@ ConstraintValue to_constraint_value(json_value_t const* value) {
         case TURBO_JSON_NUMBER: {
             double const number = turbo_json_number(value);
             double truncated = 0.0;
-            if (std::modf(number, &truncated) == 0.0
-                && number >= static_cast<double>(std::numeric_limits<int64_t>::min())
-                && number <= static_cast<double>(std::numeric_limits<int64_t>::max())) {
+            double const fractional = std::modf(number, &truncated);
+            constexpr double min_i64 = static_cast<double>(std::numeric_limits<int64_t>::min());
+            constexpr double max_i64_exclusive = -min_i64;
+            if (std::fpclassify(fractional) == FP_ZERO
+                && number >= min_i64
+                && number < max_i64_exclusive) {
                 return static_cast<int64_t>(number);
             }
             return number;

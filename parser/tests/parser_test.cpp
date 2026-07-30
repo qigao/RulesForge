@@ -11,6 +11,8 @@
 #include "core/errors.hpp"
 #include "tinytest.h"
 
+#include <cmath>
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -103,7 +105,7 @@ suite("Parser") {
             check(final_price_node->constraint.op == CompareOp::GT);
             check(final_price_node->constraint.right_literal.has_value());
             check(std::holds_alternative<double>(*final_price_node->constraint.right_literal));
-            check(std::get<double>(*final_price_node->constraint.right_literal) == 0.01);
+            check(std::abs(std::get<double>(*final_price_node->constraint.right_literal) - 0.01) < 1e-12);
         }
 
         it("preserves boolean constraint literals as booleans") {

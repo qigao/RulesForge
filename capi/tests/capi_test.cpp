@@ -3,6 +3,7 @@
 #include "data_bind.h"
 #include "core/fact.hpp"
 
+#include <cmath>
 #include <string>
 #include <cstdio>
 #include <cstdlib>
@@ -580,7 +581,7 @@ end
 
             double score = 0.0;
             check_int_eq(ruleforge_fact_get_field_as_double(fact, "score", &score), RULES_FORGE_OK);
-            check(score == 98.5);
+            check(std::abs(score - 98.5) < 1e-12);
 
             ruleforge_query_result_t query_result = nullptr;
             check_int_eq(ruleforge_session_query(session, "FindCustomer", &query_result), RULES_FORGE_OK);

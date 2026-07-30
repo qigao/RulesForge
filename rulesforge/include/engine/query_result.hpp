@@ -189,10 +189,14 @@ std::optional<T> QueryResultRow::getFieldAs(std::string const& binding, std::str
     // Allow conversion from integral double -> int64_t
     if constexpr (std::is_same_v<T, int64_t>) {
         if (double* p_dbl = std::get_if<double>(&*field_val_opt)) {
+            double integral_part = 0.0;
+            double const fractional_part = std::modf(*p_dbl, &integral_part);
+            constexpr double min_i64 = static_cast<double>(std::numeric_limits<int64_t>::min());
+            constexpr double max_i64_exclusive = -min_i64;
             if (std::isfinite(*p_dbl)
-                && std::trunc(*p_dbl) == *p_dbl
-                && *p_dbl >= static_cast<double>(std::numeric_limits<int64_t>::min())
-                && *p_dbl <= static_cast<double>(std::numeric_limits<int64_t>::max())) {
+                && std::fpclassify(fractional_part) == FP_ZERO
+                && *p_dbl >= min_i64
+                && *p_dbl < max_i64_exclusive) {
                 return static_cast<int64_t>(*p_dbl);
             }
         }
