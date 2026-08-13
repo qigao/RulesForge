@@ -110,7 +110,7 @@ typedef enum {
 CXX_C_API ruleforge_status_t ruleforge_init(void);
 CXX_C_API ruleforge_status_t ruleforge_cleanup(void);
 
-// Returns the library version string (e.g., "0.7.0").
+// Returns the library version string (e.g., "0.9.0").
 CXX_C_API const char *ruleforge_get_version(void);
 
 // Returns a pointer to a thread-local error string.

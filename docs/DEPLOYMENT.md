@@ -28,7 +28,7 @@ one executor.
 ## Input Boundary
 
 Treat `.schema` and RFL files as one versioned rule pack. Validate both during
-CI using representative JSON/CSV/XML/binary payloads. Reject a deployment when
+CI using representative JSON/YAML/CSV/XML/binary payloads. Reject a deployment when
 schema imports, rule compilation, or sample binding fails.
 
 Choose complete-document APIs for bounded payloads already in memory. Choose

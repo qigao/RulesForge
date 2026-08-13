@@ -1,7 +1,7 @@
 # Continuous Rule Engine
 
 This document describes the implemented continuous-session contract in
-RulesForge 0.5. It is not a background service: the caller drives every event,
+RulesForge 0.9.0. It is not a background service: the caller drives every event,
 watermark, drain, acknowledgement, and input chunk.
 
 ## When to Use It
@@ -53,31 +53,33 @@ than treating defaults as capacity planning.
 
 Important fields:
 
-| Field | Purpose |
-|---|---|
-| `max_active_events` | retained event cap |
-| `max_dedup_entries` | remembered event-ID cap |
-| `max_pending_result_batches` | unacknowledged batch cap |
-| `max_pending_results` | unacknowledged output-fact cap |
-| `max_rules_per_step` | firing budget before drain is required |
-| `max_replay_steps` | bounded recovery history |
-| `allowed_lateness_ms` | accepted time behind the watermark |
-| `event_retention_ms` | lifetime of active event facts |
-| `dedup_retention_ms` | lifetime of event IDs |
-| `max_event_time_lead_ms` | accepted time ahead of the watermark |
-| `output_fact_types` | fact types copied into immutable results |
+| Field | Purpose | Default |
+|---|---|---:|
+| `max_active_events` | retained event cap | `10000` |
+| `max_dedup_entries` | remembered event-ID cap | `20000` |
+| `max_pending_result_batches` | unacknowledged batch cap | `128` |
+| `max_pending_results` | unacknowledged output-fact cap | `10000` |
+| `max_input_batch_size` | maximum events in one batch | `1000` |
+| `max_rules_per_step` | firing budget before drain is required | `10000` |
+| `max_replay_steps` | bounded recovery history | `100000` |
+| `allowed_lateness_ms` | accepted time behind the watermark | `0` |
+| `event_retention_ms` | lifetime of active event facts | `3600000` |
+| `dedup_retention_ms` | lifetime of event IDs | `3600000` |
+| `max_event_time_lead_ms` | accepted time ahead of the watermark | `86400000` |
+| `output_fact_types` | fact types copied into immutable results | empty |
 
 ## Event Commit
 
 Each event has a non-empty ID, an imported fact type, an entry point, and an
-event timestamp. `ruleforge_continuous_push_json` binds one complete JSON object
-using the KB's imported schema and commits one event step.
+event timestamp. `ruleforge_continuous_push_json` and
+`ruleforge_continuous_push_yaml` bind one complete JSON or YAML object using the
+KB's imported schema and commit one event step.
 
-JSONPath, CSVPath, and XMLPath adapters bind multiple records. Event ID and
-event time are read from caller-selected fields in each bound record; the entry
-point is fixed for the batch. Complete documents and incremental streams both
-commit the selected records through the same atomic batch operation. Streams
-commit only when `finish` succeeds. See [Data ingestion](./DATA_INGESTION.md).
+JSONPath, YPath, CSVPath, and XMLPath adapters bind multiple records. Event ID
+and event time are read from caller-selected fields in each bound record; the
+entry point is fixed for the batch. Complete documents and incremental streams
+both commit the selected records through the same atomic batch operation.
+Streams commit only when `finish` succeeds. See [Data ingestion](./DATA_INGESTION.md).
 
 Before mutation, the runtime validates the event ID, route, timestamp, duplicate
 state, lateness, future skew, and resource limits. A rejected event does not
@@ -160,9 +162,9 @@ Metrics are observations, not a substitute for checking operation status.
 
 ## Current Limits
 
-- Continuous input supports one explicit JSON event or a path-selected
-  JSON/CSV/XML event batch.
-- DataBind emits streamable JSON/CSV/XML records through synchronous bound-value
+- Continuous input supports one explicit JSON/YAML event or a path-selected
+  JSON/YAML/CSV/XML event batch.
+- DataBind emits streamable JSON/YAML/CSV/XML records through synchronous bound-value
   callbacks during `feed`; RulesForge retains them and commits the batch at
   `finish` to preserve atomic message semantics.
 - Checkpoint/restore and rule-pack hot migration are not implemented.

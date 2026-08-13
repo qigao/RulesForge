@@ -5,7 +5,7 @@ foreach(example_source ${SOURCES})
     add_executable(${EXAMPLE_NAME} ${example_source})
     target_link_libraries(${EXAMPLE_NAME} PRIVATE rfl_parser ${TARGET_NAME})
     if(source_name STREQUAL "fraud_stream_runner")
-        target_link_libraries(${EXAMPLE_NAME} PRIVATE TurboUtils::Parser)
+        target_link_libraries(${EXAMPLE_NAME} PRIVATE TurboParser::Parser)
     endif()
     target_include_directories(${EXAMPLE_NAME} PRIVATE ../include)
 

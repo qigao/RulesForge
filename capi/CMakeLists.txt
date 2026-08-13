@@ -31,8 +31,8 @@ target_include_directories(
 
 target_link_libraries(
     ${CAPI_TARGET_NAME}
-    PRIVATE rfl_parser RulesForge TurboUtils::Parser
-    PUBLIC TurboUtils::Core TurboUtils::DataBind
+    PRIVATE rfl_parser RulesForge TurboParser::Parser
+    PUBLIC TurboUtils::Core TurboParser::DataBind
 )
 set_target_properties(${CAPI_TARGET_NAME} PROPERTIES FOLDER capi/)
 

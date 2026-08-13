@@ -120,7 +120,7 @@ using DataBindValueHandle = std::unique_ptr<DataBindValue, DataBindValueDeleter>
 using DataBindObjectHandle = std::unique_ptr<DataBindObject, DataBindObjectDeleter>;
 using DataBindStreamHandle = std::unique_ptr<data_bind_stream_t, DataBindStreamDeleter>;
 
-constexpr int kMinimumDataBindVersion = 20000;
+constexpr int kMinimumDataBindVersion = 20501;
 constexpr int kRequiredDataBindAbi = 8;
 
 struct DataBindView {
@@ -556,7 +556,7 @@ ruleforge_status_t ruleforge_init() {
       || library_abi != kRequiredDataBindAbi
       || DATA_BIND_ABI_VERSION != kRequiredDataBindAbi) {
     fmt(last_error, sizeof(last_error),
-        "Incompatible DataBind library: need version >= 2.0.0 with ABI {}, got {} with ABI {}",
+        "Incompatible DataBind library: need version >= 2.5.1 with ABI {}, got {} with ABI {}",
         kRequiredDataBindAbi,
         data_bind_version_string() ? data_bind_version_string() : "<unknown>", library_abi);
     return RULES_FORGE_ERROR_GENERIC;
@@ -856,6 +856,26 @@ struct ruleforge_data_bind_object_handle_s {
 };
 
 namespace {
+
+static data_bind_stream_t *create_configured_data_bind_stream(
+    DataBind *codec, DataBindFormat format, DataBindStreamSelection selection,
+    char const *type_name, char const *path, DataBindValue **out_value,
+    DataBindError *error, DataBindRecordFn record_callback = nullptr,
+    void *record_callback_user = nullptr) {
+  DataBindStreamConfig config = DATA_BIND_STREAM_CONFIG_INIT;
+  config.format = format;
+  config.selection = selection;
+  config.type_name = type_name;
+  config.path = path;
+  config.record_callback = record_callback;
+  config.record_callback_user = record_callback_user;
+  config.out_value = out_value;
+
+  data_bind_stream_t *stream = nullptr;
+  DataBindStatus const status =
+      data_bind_stream_create(codec, &config, &stream, error);
+  return status == DATA_BIND_OK ? stream : nullptr;
+}
 
 using DataBindObjectTextParser = DataBindStatus (*)(
     DataBind *, char const *, char const *, size_t, DataBindObject **,
@@ -1296,13 +1316,6 @@ static ruleforge_status_t publish_continuous_path_stream(
   if (!handle->stream) {
     set_error_fmt("Continuous DataBind stream creation failed: ",
                   data_bind_error_detail(DATA_BIND_ERR_INVALID_ARG, handle->error));
-    return RULES_FORGE_ERROR_INVALID_ARGUMENT;
-  }
-  DataBindStatus callback_status = data_bind_stream_set_record_callback(
-      handle->stream.get(), collect_continuous_stream_record, handle.get());
-  if (callback_status != DATA_BIND_OK) {
-    set_error_fmt("Continuous DataBind callback setup failed: ",
-                  data_bind_error_detail(callback_status, handle->error));
     return RULES_FORGE_ERROR_INVALID_ARGUMENT;
   }
   ++handle->session_wrapper->active_data_bind_streams;
@@ -1985,8 +1998,10 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_json_create(
     if (!handle->codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
-    handle->stream.reset(data_bind_stream_json_create(
-        handle->codec.get(), fact_type, &handle->output_value, &handle->error));
+    handle->stream.reset(create_configured_data_bind_stream(
+        handle->codec.get(), DATA_BIND_FORMAT_JSON,
+        DATA_BIND_STREAM_SELECT_ROOT, fact_type, nullptr,
+        &handle->output_value, &handle->error));
     if (!handle->stream) {
       set_error_fmt("DataBind stream creation failed: ",
                     data_bind_error_detail(DATA_BIND_ERR_INVALID_ARG, handle->error));
@@ -2028,8 +2043,10 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_yaml_create(
     if (!handle->codec) {
       return RULES_FORGE_ERROR_INVALID_ARGUMENT;
     }
-    handle->stream.reset(data_bind_stream_yaml_create(
-        handle->codec.get(), fact_type, &handle->output_value, &handle->error));
+    handle->stream.reset(create_configured_data_bind_stream(
+        handle->codec.get(), DATA_BIND_FORMAT_YAML,
+        DATA_BIND_STREAM_SELECT_ROOT, fact_type, nullptr,
+        &handle->output_value, &handle->error));
     if (!handle->stream) {
       set_error_fmt("DataBind stream creation failed: ",
                     data_bind_error_detail(DATA_BIND_ERR_INVALID_ARG, handle->error));
@@ -2056,8 +2073,11 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_json_path_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_json_path_all_create(
-      handle->codec.get(), fact_type, json_path, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_JSON,
+      DATA_BIND_STREAM_SELECT_PATH_ALL, fact_type, json_path,
+      &handle->output_value, &handle->error, collect_continuous_stream_record,
+      handle.get());
   return publish_continuous_path_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2073,8 +2093,11 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_yaml_path_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_yaml_path_all_create(
-      handle->codec.get(), fact_type, yaml_path, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_YAML,
+      DATA_BIND_STREAM_SELECT_PATH_ALL, fact_type, yaml_path,
+      &handle->output_value, &handle->error, collect_continuous_stream_record,
+      handle.get());
   return publish_continuous_path_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2090,8 +2113,11 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_csv_path_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_csv_path_create(
-      handle->codec.get(), fact_type, csv_path, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_CSV,
+      DATA_BIND_STREAM_SELECT_PATH_ALL, fact_type, csv_path,
+      &handle->output_value, &handle->error, collect_continuous_stream_record,
+      handle.get());
   return publish_continuous_path_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2107,8 +2133,11 @@ ruleforge_status_t ruleforge_continuous_data_bind_stream_xml_path_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_xml_path_all_create(
-      handle->codec.get(), fact_type, xml_path, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_XML,
+      DATA_BIND_STREAM_SELECT_PATH_ALL, fact_type, xml_path,
+      &handle->output_value, &handle->error, collect_continuous_stream_record,
+      handle.get());
   return publish_continuous_path_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2354,8 +2383,10 @@ ruleforge_status_t ruleforge_data_bind_stream_json_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_json_create(
-      handle->codec.get(), fact_type, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_JSON,
+      DATA_BIND_STREAM_SELECT_ROOT, fact_type, nullptr,
+      &handle->output_value, &handle->error);
   return publish_data_bind_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2368,8 +2399,10 @@ ruleforge_status_t ruleforge_data_bind_stream_json_all_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_json_all_create(
-      handle->codec.get(), fact_type, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_JSON,
+      DATA_BIND_STREAM_SELECT_ALL, fact_type, nullptr,
+      &handle->output_value, &handle->error);
   return publish_data_bind_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2390,8 +2423,10 @@ ruleforge_status_t ruleforge_data_bind_stream_json_path_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_json_path_create(
-      handle->codec.get(), fact_type, json_path, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_JSON,
+      DATA_BIND_STREAM_SELECT_PATH_FIRST, fact_type, json_path,
+      &handle->output_value, &handle->error);
   return publish_data_bind_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2412,8 +2447,10 @@ ruleforge_status_t ruleforge_data_bind_stream_json_path_all_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_json_path_all_create(
-      handle->codec.get(), fact_type, json_path, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_JSON,
+      DATA_BIND_STREAM_SELECT_PATH_ALL, fact_type, json_path,
+      &handle->output_value, &handle->error);
   return publish_data_bind_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2426,8 +2463,10 @@ ruleforge_status_t ruleforge_data_bind_stream_yaml_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_yaml_create(
-      handle->codec.get(), fact_type, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_YAML,
+      DATA_BIND_STREAM_SELECT_ROOT, fact_type, nullptr,
+      &handle->output_value, &handle->error);
   return publish_data_bind_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2440,8 +2479,10 @@ ruleforge_status_t ruleforge_data_bind_stream_yaml_all_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_yaml_all_create(
-      handle->codec.get(), fact_type, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_YAML,
+      DATA_BIND_STREAM_SELECT_ALL, fact_type, nullptr,
+      &handle->output_value, &handle->error);
   return publish_data_bind_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2462,8 +2503,10 @@ ruleforge_status_t ruleforge_data_bind_stream_yaml_path_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_yaml_path_create(
-      handle->codec.get(), fact_type, yaml_path, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_YAML,
+      DATA_BIND_STREAM_SELECT_PATH_FIRST, fact_type, yaml_path,
+      &handle->output_value, &handle->error);
   return publish_data_bind_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2484,8 +2527,10 @@ ruleforge_status_t ruleforge_data_bind_stream_yaml_path_all_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_yaml_path_all_create(
-      handle->codec.get(), fact_type, yaml_path, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_YAML,
+      DATA_BIND_STREAM_SELECT_PATH_ALL, fact_type, yaml_path,
+      &handle->output_value, &handle->error);
   return publish_data_bind_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2498,8 +2543,10 @@ ruleforge_status_t ruleforge_data_bind_stream_csv_all_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_csv_all_create(
-      handle->codec.get(), fact_type, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_CSV,
+      DATA_BIND_STREAM_SELECT_ALL, fact_type, nullptr,
+      &handle->output_value, &handle->error);
   return publish_data_bind_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2520,8 +2567,10 @@ ruleforge_status_t ruleforge_data_bind_stream_csv_path_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_csv_path_create(
-      handle->codec.get(), fact_type, csv_path, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_CSV,
+      DATA_BIND_STREAM_SELECT_PATH_ALL, fact_type, csv_path,
+      &handle->output_value, &handle->error);
   return publish_data_bind_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2534,8 +2583,10 @@ ruleforge_status_t ruleforge_data_bind_stream_xml_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_xml_create(
-      handle->codec.get(), fact_type, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_XML,
+      DATA_BIND_STREAM_SELECT_ROOT, fact_type, nullptr,
+      &handle->output_value, &handle->error);
   return publish_data_bind_stream(std::move(handle), stream, out_stream);
 }
 
@@ -2556,8 +2607,10 @@ ruleforge_status_t ruleforge_data_bind_stream_xml_path_all_create(
   if (status != RULES_FORGE_OK) {
     return status;
   }
-  auto *stream = data_bind_stream_xml_path_all_create(
-      handle->codec.get(), fact_type, xml_path, &handle->output_value, &handle->error);
+  auto *stream = create_configured_data_bind_stream(
+      handle->codec.get(), DATA_BIND_FORMAT_XML,
+      DATA_BIND_STREAM_SELECT_PATH_ALL, fact_type, xml_path,
+      &handle->output_value, &handle->error);
   return publish_data_bind_stream(std::move(handle), stream, out_stream);
 }
 

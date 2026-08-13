@@ -138,7 +138,7 @@ Why it does not use the batch-oriented `capi_demo`:
 - the runner performs domain-specific flattening and alert consolidation
 
 The public continuous C API can commit one schema-bound JSON event or a
-path-selected JSON/CSV/XML event batch to a named entry point. The existing
+path-selected JSON/YAML/CSV/XML event batch to a named entry point. The existing
 example runner instead does two domain-specific jobs:
 
 1. flatten or extract scenario transactions from the sample JSON

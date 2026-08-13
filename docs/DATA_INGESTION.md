@@ -10,7 +10,7 @@ Input processing has two distinct filtering stages:
 
 ```text
 complete document or chunked stream
-  -> JSONPath / CSVPath / XMLPath structural selection
+  -> JSONPath / YPath / CSVPath / XMLPath structural selection
   -> schema binding and candidate fact insertion
   -> RFL constraints, rules, and queries
 ```
@@ -61,6 +61,11 @@ For example, use `ruleforge_session_add_fact_json(session, "Order", json,
 &fact)`. The type must have been imported by the RFL rule pack. The KB is the
 unique schema source for session ingestion; callers do not pass a schema path.
 
+If the host already owns a parsed value, use
+`ruleforge_session_add_data_bind_object` or
+`ruleforge_session_add_data_bind_value`. RulesForge copies the value into the
+session; the caller retains ownership of the source object or value.
+
 At startup, `ruleforge_kb_has_schema_type` can validate that an external type is
 available. For enum fields, `ruleforge_fact_get_field_as_enum` returns the
 numeric value and DataBind schema name together; `ruleforge_fact_get_enum_name`
@@ -85,6 +90,10 @@ the complete document itself:
 | all JSON values | `ruleforge_data_bind_stream_json_all_create` |
 | one JSON path value | `ruleforge_data_bind_stream_json_path_create` |
 | all JSON path values | `ruleforge_data_bind_stream_json_path_all_create` |
+| one YAML value | `ruleforge_data_bind_stream_yaml_create` |
+| all YAML values | `ruleforge_data_bind_stream_yaml_all_create` |
+| one YAML path value | `ruleforge_data_bind_stream_yaml_path_create` |
+| all YAML path values | `ruleforge_data_bind_stream_yaml_path_all_create` |
 | all CSV rows | `ruleforge_data_bind_stream_csv_all_create` |
 | CSV path rows | `ruleforge_data_bind_stream_csv_path_create` |
 | one XML value | `ruleforge_data_bind_stream_xml_create` |
@@ -100,7 +109,7 @@ create -> feed memory and/or files -> finish -> destroy
 operation. No fact is inserted merely because a chunk was accepted.
 
 Complete and incremental APIs call the corresponding DataBind path operation.
-Given the same schema, payload, fact type, and path, they produce the same
+Given the same KB-imported schema, payload, fact type, and path, they produce the same
 candidate facts; only payload delivery and commit timing differ.
 
 ```c
@@ -109,7 +118,7 @@ ruleforge_fact_t *facts = NULL;
 int fact_count = 0;
 
 ruleforge_status_t status = ruleforge_data_bind_stream_json_create(
-    session, "orders.schema", "Order", &stream);
+    session, "Order", &stream);
 if (status == RULES_FORGE_OK) {
   status = ruleforge_data_bind_stream_feed(stream, first_chunk, first_len);
 }
@@ -137,10 +146,11 @@ dispatch all stream calls to one serialized executor.
 
 ## Continuous Events
 
-Continuous sessions accept one JSON object with explicit event metadata, or a
-path-selected JSON, CSV, or XML batch whose records contain metadata fields.
+Continuous sessions accept one JSON or YAML object with explicit event metadata,
+or a path-selected JSON, YAML, CSV, or XML batch whose records contain metadata
+fields.
 
-The single-event JSON lifecycle is:
+The single-event JSON/YAML lifecycle is:
 
 ```text
 create(session, type, event_id, entry_point, event_time)
@@ -156,17 +166,19 @@ succeeds.
 Path-selected batches use these complete-document APIs:
 
 - `ruleforge_continuous_push_json_path`
+- `ruleforge_continuous_push_yaml_path`
 - `ruleforge_continuous_push_csv_path`
 - `ruleforge_continuous_push_xml_path`
 
-Their incremental equivalents are the three
+Their incremental equivalents are the four
 `ruleforge_continuous_data_bind_stream_*_path_create` constructors. The caller
 names the bound string field containing each event ID and the bound integer
 field containing each event timestamp. All selected records share one entry
 point and commit atomically through the continuous batch operation.
 
-DataBind 2.0 invokes a synchronous callback whenever a streamable JSON array
-item, CSV row, or XML path element has passed path selection and schema binding.
+DataBind 2.5.1 invokes a synchronous callback whenever a streamable JSON/YAML
+array item, CSV row, or XML path element has passed path selection and schema
+binding.
 RulesForge immediately copies that borrowed value into an owned pending event.
 No event enters working memory during `feed`: `finish` atomically submits the
 pending records through the continuous batch operation. This preserves message

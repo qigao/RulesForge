@@ -14,7 +14,7 @@ capi_demo -r payments.rfl -s payments.schema -c payments_test_data.csv -T Order 
 
 `capi/examples` now contains direct C API usage examples only.
 
-Current `capi_demo` reflects the 0.7.0 C API:
+Current `capi_demo` reflects the 0.9.0 C API:
 
 - requires a `.schema` file for JSON and CSV loading
 - expects the RFL rule file to import external input types from that `.schema`

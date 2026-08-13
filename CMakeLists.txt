@@ -35,31 +35,44 @@ include(ProjectOptions.cmake)
 find_package(OpenSSL REQUIRED)
 
 find_package(TurboUtils CONFIG REQUIRED PATHS "${TURBO_UTILS_ROOT}")
+find_package(TurboParser CONFIG REQUIRED PATHS "${TURBOPARSER_ROOT}")
 
 include(CheckCSourceCompiles)
-set(CMAKE_REQUIRED_LIBRARIES TurboUtils::DataBind)
-unset(RULESFORGE_HAS_DATABIND_2_0 CACHE)
+set(RULESFORGE_MINIMUM_DATABIND_VERSION 20501)
+set(RULESFORGE_REQUIRED_DATABIND_ABI 8)
+set(_RULESFORGE_SAVED_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
+set(_RULESFORGE_SAVED_REQUIRED_DEFINITIONS "${CMAKE_REQUIRED_DEFINITIONS}")
+set(CMAKE_REQUIRED_LIBRARIES TurboParser::DataBind)
+set(CMAKE_REQUIRED_DEFINITIONS
+    "-DRULESFORGE_MINIMUM_DATABIND_VERSION=${RULESFORGE_MINIMUM_DATABIND_VERSION}"
+    "-DRULESFORGE_REQUIRED_DATABIND_ABI=${RULESFORGE_REQUIRED_DATABIND_ABI}")
+unset(RULESFORGE_HAS_DATABIND_2_5_1 CACHE)
 check_c_source_compiles([[
   #include <data_bind.h>
-  #if DATA_BIND_VERSION < 20000
-  #error "RulesForge requires DataBind 2.0.0 or newer"
+  #if DATA_BIND_VERSION < RULESFORGE_MINIMUM_DATABIND_VERSION
+  #error "RulesForge requires DataBind 2.5.1 or newer"
   #endif
-  #if DATA_BIND_ABI_VERSION != 8
+  #if DATA_BIND_ABI_VERSION != RULESFORGE_REQUIRED_DATABIND_ABI
   #error "RulesForge requires DataBind ABI 8"
   #endif
   int main() {
-    DataBindObject *object = NULL;
-    char *json = NULL;
-    return data_bind_object_serialize_json(NULL, object, &json, NULL, NULL)
-               == DATA_BIND_ERR_INVALID_ARG
-           ? 0
-           : 1;
+    DataBindStreamConfig config = DATA_BIND_STREAM_CONFIG_INIT;
+    data_bind_stream_t *stream = NULL;
+    DataBindValue *value = NULL;
+    config.format = DATA_BIND_FORMAT_JSON;
+    config.selection = DATA_BIND_STREAM_SELECT_ROOT;
+    config.type_name = "RulesForgeProbe";
+    config.out_value = &value;
+    return (int)data_bind_stream_create(NULL, &config, &stream, NULL);
   }
-]] RULESFORGE_HAS_DATABIND_2_0)
-unset(CMAKE_REQUIRED_LIBRARIES)
-if(NOT RULESFORGE_HAS_DATABIND_2_0)
+]] RULESFORGE_HAS_DATABIND_2_5_1)
+set(CMAKE_REQUIRED_LIBRARIES "${_RULESFORGE_SAVED_REQUIRED_LIBRARIES}")
+set(CMAKE_REQUIRED_DEFINITIONS "${_RULESFORGE_SAVED_REQUIRED_DEFINITIONS}")
+unset(_RULESFORGE_SAVED_REQUIRED_LIBRARIES)
+unset(_RULESFORGE_SAVED_REQUIRED_DEFINITIONS)
+if(NOT RULESFORGE_HAS_DATABIND_2_5_1)
     message(FATAL_ERROR
-            "RulesForge requires DataBind 2.0.0 with ABI 8")
+            "RulesForge requires DataBind 2.5.1 or newer with ABI 8")
 endif()
 
 # Output files directory

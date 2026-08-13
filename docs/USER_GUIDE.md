@@ -75,7 +75,7 @@ backpressure, and recovery semantics.
 
 ## Insert External Data
 
-External JSON, CSV, XML, and binary values must be described by a DataBind
+External JSON, YAML, CSV, XML, and binary values must be described by a DataBind
 `.schema` file imported by the RFL rule pack. There are two equally supported
 input styles:
 
@@ -83,11 +83,13 @@ input styles:
 - incremental stream functions accept chunks and commit only on `finish`.
 
 The Knowledge Base owns and reuses imported DataBind codecs. Use
-`ruleforge_session_add_fact_json` when inserting JSON by imported type; callers
-do not need to pass the schema path again. Path-taking compatibility APIs verify
-that the path matches the KB import rather than loading an independent schema.
+`ruleforge_session_add_fact_json` (or its YAML, CSV, XML, binary, and path
+variants) when inserting by imported type; callers do not pass a schema path to
+session insertion APIs. If the host already owns a parsed DataBind object or
+value, `ruleforge_session_add_data_bind_object` and
+`ruleforge_session_add_data_bind_value` copy it into the session.
 
-JSONPath, CSVPath, and XMLPath select records before insertion in both input
+JSONPath, YPath, CSVPath, and XMLPath select records before insertion in both input
 styles. RFL rules and queries then apply business constraints to the selected
 facts. Path filtering and rule filtering are consecutive stages, not competing
 APIs.

@@ -69,7 +69,7 @@ import "orders.schema"
 ```
 
 RulesForge uses one schema source for external input data:
-- JSON, CSV, XML, and binary payloads must be described by a `.schema` file.
+- JSON, YAML, CSV, XML, and binary payloads must be described by a `.schema` file.
 - RFL `declare` is still supported, but it is for internal derived facts inserted by rules or host code.
 - A RFL `declare` or `enum` cannot reuse the same short type name as an imported schema type.
 - Schema import paths are resolved relative to the RFL file that contains the import, then through configured base directories.
@@ -112,7 +112,7 @@ declare Customer
 end
 ```
 
-Use `declare` for facts produced inside the rule session, for example alerts, decisions, audit rows, or intermediate calculation facts. Do not use it as the schema for external JSON/CSV/XML/binary input. External input types must come from `import schema "name.schema"`.
+Use `declare` for facts produced inside the rule session, for example alerts, decisions, audit rows, or intermediate calculation facts. Do not use it as the schema for external JSON/YAML/CSV/XML/binary input. External input types must come from `import schema "name.schema"`.
 
 External input example:
 
@@ -506,7 +506,7 @@ Current runtime behavior:
 - `add_data(DataSource::fact(...))` delegates to `add_fact(...)`
 - fact validation uses declarations loaded from RFL internal `declare` or schema imports
 - C++ engine runtime is fact-only
-- schema-aware C API helpers use `TurboUtils::DataBind` to bind JSON/CSV/XML/binary payloads into session-owned facts
+- schema-aware C API helpers use `TurboUtils::DataBind` to bind JSON/YAML/CSV/XML/binary payloads into session-owned facts
 - the target external fact type must be imported into the KnowledgeBase from `.schema`
 
 Complete-document and incremental input APIs are documented in
