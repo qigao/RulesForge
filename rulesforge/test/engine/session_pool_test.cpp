@@ -1,6 +1,6 @@
 #include "engine/session_pool.hpp"
 #include "rfl_parser.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 suite("Session Pool") {
     group("Isolation") {

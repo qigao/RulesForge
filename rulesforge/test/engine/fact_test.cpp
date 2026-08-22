@@ -1,6 +1,6 @@
 #include "core/fact.hpp"
 #include "core/value_types.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <set>
 

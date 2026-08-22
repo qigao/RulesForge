@@ -3,7 +3,7 @@
 #include "core/token.hpp"
 #include "core/fact.hpp"
 
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <vector>
 
@@ -62,8 +62,8 @@ suite("TokenPool vs TokenArena") {
             constexpr size_t kUserCapacity = 10;
             TokenPool pool(kUserCapacity);
 
-            check_size_eq(pool.capacity(), kUserCapacity + 1);
-            check_size_eq(pool.allocated_count(), 1);
+            check_equal(pool.capacity(), kUserCapacity + 1);
+            check_equal(pool.allocated_count(), 1);
         }
 
         it("TokenArena cannot free individual tokens") {

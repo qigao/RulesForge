@@ -13,7 +13,7 @@
 #include "semantic_analyzer.hpp"  // SemanticAnalyzer
 #include "core/rfl_parser_state.hpp"
 #include "core/errors.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 // ---------------------------------------------------------------------------
 // Helpers

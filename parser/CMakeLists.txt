@@ -66,7 +66,7 @@ target_include_directories(
 target_link_libraries(
     ${TARGET_NAME}
     PUBLIC TurboUtils::Core TurboParser::Parser
-    PRIVATE TurboParser::DataBind
+    PRIVATE TurboUtils::STL TurboParser::DataBind
 )
 
 if(MSVC)

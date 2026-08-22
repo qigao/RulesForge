@@ -5,7 +5,7 @@
 #include "rete/rete_node_query.hpp"
 #include "expression_descriptor.hpp"
 #include "test_helpers.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <algorithm>
 #include <cmath>

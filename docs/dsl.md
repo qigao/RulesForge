@@ -506,7 +506,7 @@ Current runtime behavior:
 - `add_data(DataSource::fact(...))` delegates to `add_fact(...)`
 - fact validation uses declarations loaded from RFL internal `declare` or schema imports
 - C++ engine runtime is fact-only
-- schema-aware C API helpers use `TurboUtils::DataBind` to bind JSON/YAML/CSV/XML/binary payloads into session-owned facts
+- schema-aware C API helpers use `TurboParser::DataBind` to bind JSON/YAML/CSV/XML/binary payloads into session-owned facts
 - the target external fact type must be imported into the KnowledgeBase from `.schema`
 
 Complete-document and incremental input APIs are documented in

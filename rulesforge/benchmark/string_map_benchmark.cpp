@@ -1,7 +1,7 @@
 #include "core/rfl_strings.hpp"
 #include "core/value_types.hpp"
 
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <array>
 #include <cstdint>
@@ -67,7 +67,7 @@ suite("String Map Benchmarks") {
                     found += map.find(key) != map.end();
                 }
             }
-            check_size_eq(found, kMapCount * kFieldCount);
+            check_equal(found, kMapCount * kFieldCount);
         }
 
         benchmark("unordered_map lookup 10K x 4", 5, kOperations) {
@@ -77,7 +77,7 @@ suite("String Map Benchmarks") {
                     found += map.find(key) != map.end();
                 }
             }
-            check_size_eq(found, kMapCount * kFieldCount);
+            check_equal(found, kMapCount * kFieldCount);
         }
     }
 }

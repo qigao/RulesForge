@@ -2,7 +2,7 @@
 #include "core/rfl_rete_defs.hpp"
 #include "expression_descriptor.hpp"
 #include "core/logging_control.hpp"
-#include <turbo_hash.h>
+#include <turbostl/hash_map.h>
 
 #include <algorithm>
 #include <iomanip>

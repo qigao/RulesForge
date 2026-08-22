@@ -1,6 +1,6 @@
 #include "decision_table_compiler.hpp"
 #include "decision_table_parser.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 suite("DecisionTableCompiler") {
     it("tracks direct compile stats") {

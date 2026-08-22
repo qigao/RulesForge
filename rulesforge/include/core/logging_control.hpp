@@ -46,25 +46,25 @@ std::string format_message(char const* format, Args&&... args) {
 template <typename... Args>
 void debug(char const* format, Args&&... args) {
     std::string message = format_message(format, std::forward<Args>(args)...);
-    TLOG_DEBUG("{}", message.c_str());
+    TLOG_DEBUG(message.c_str());
 }
 
 template <typename... Args>
 void info(char const* format, Args&&... args) {
     std::string message = format_message(format, std::forward<Args>(args)...);
-    TLOG_INFO("{}", message.c_str());
+    TLOG_INFO(message.c_str());
 }
 
 template <typename... Args>
 void warn(char const* format, Args&&... args) {
     std::string message = format_message(format, std::forward<Args>(args)...);
-    TLOG_WARN("{}", message.c_str());
+    TLOG_WARN(message.c_str());
 }
 
 template <typename... Args>
 void error(char const* format, Args&&... args) {
     std::string message = format_message(format, std::forward<Args>(args)...);
-    TLOG_ERROR("{}", message.c_str());
+    TLOG_ERROR(message.c_str());
 }
 
 } // namespace rulesforge::logging_detail

@@ -2,7 +2,7 @@
 #include "engine/i_engine_listener.hpp"
 #include "engine/knowledge_base.hpp"
 #include "engine/stateful_session.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 class MockListener : public IEngineListener {
 public:

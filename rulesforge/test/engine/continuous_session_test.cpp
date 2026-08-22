@@ -1,7 +1,7 @@
 #include "engine/continuous_session.hpp"
 #include "rfl_parser.hpp"
 #include "test_helpers.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -160,8 +160,8 @@ suite("Continuous Session") {
       fact->fields["value"] = int64_t(1);
 
       check_throws_as(session->insert_into("missing", fact), std::invalid_argument);
-      check_size_eq(session->get_fact_count(), 0);
-      check_int_eq(static_cast<int>(fact->id), 0);
+      check_equal(session->get_fact_count(), 0);
+      check_equal(static_cast<int>(fact->id), 0);
     }
   }
 
@@ -171,15 +171,15 @@ suite("Continuous Session") {
       auto result = session.push(event("event-1", 100, 7));
 
       check(result.status == ContinuousStepStatus::Committed);
-      check_int_eq(result.rules_fired, 1);
-      check_size_eq(result.outputs.size(), 1);
-      check_string_eq(result.outputs[0].fact_type, "Alert");
+      check_equal(result.rules_fired, 1);
+      check_equal(result.outputs.size(), 1);
+      check_equal(result.outputs[0].fact_type, "Alert");
       auto field = result.outputs[0].fields.find("value");
       check(field != result.outputs[0].fields.end());
-      check_int_eq(static_cast<int>(std::get<int64_t>(field->second)), 7);
+      check_equal(static_cast<int>(std::get<int64_t>(field->second)), 7);
 
       session.acknowledge(result.batch_id);
-      check_size_eq(session.metrics().pending_result_batches, 0);
+      check_equal(session.metrics().pending_result_batches, 0);
     }
 
     it("rejects duplicate and late events without changing active state") {
@@ -191,8 +191,8 @@ suite("Continuous Session") {
 
       check_throws_as(session.push(event("event-1", 151, 2)), std::invalid_argument);
       check_throws_as(session.push(event("event-2", 139, 2)), std::invalid_argument);
-      check_size_eq(session.metrics().active_events, 1);
-      check_size_eq(session.metrics().dedup_entries, 1);
+      check_equal(session.metrics().active_events, 1);
+      check_equal(session.metrics().dedup_entries, 1);
     }
 
     it("validates a batch before inserting any event") {
@@ -202,8 +202,8 @@ suite("Continuous Session") {
       events.push_back(event("same", 101, 2));
 
       check_throws_as(session.push_batch(events), std::invalid_argument);
-      check_size_eq(session.metrics().active_events, 0);
-      check_size_eq(session.metrics().dedup_entries, 0);
+      check_equal(session.metrics().active_events, 0);
+      check_equal(session.metrics().dedup_entries, 0);
     }
 
     it("restores the last committed state after a failed step") {
@@ -215,18 +215,18 @@ suite("Continuous Session") {
 
       check_throws_as(session.push(event("two", 2, 2)), std::length_error);
       check(session.is_consistent());
-      check_size_eq(session.execute_query("Events").size(), 1);
-      check_size_eq(session.execute_query("Alerts").size(), 1);
-      check_size_eq(session.metrics().active_events, 1);
-      check_size_eq(session.metrics().dedup_entries, 1);
-      check_size_eq(session.metrics().accepted_events, 1);
-      check_size_eq(session.metrics().replay_recoveries, 1);
+      check_equal(session.execute_query("Events").size(), 1);
+      check_equal(session.execute_query("Alerts").size(), 1);
+      check_equal(session.metrics().active_events, 1);
+      check_equal(session.metrics().dedup_entries, 1);
+      check_equal(session.metrics().accepted_events, 1);
+      check_equal(session.metrics().replay_recoveries, 1);
 
       auto resumed = session.push(event("three", 3, 3));
-      check_int_eq(static_cast<int>(resumed.batch_id), 2);
+      check_equal(static_cast<int>(resumed.batch_id), 2);
       session.acknowledge(resumed.batch_id);
-      check_size_eq(session.execute_query("Events").size(), 2);
-      check_size_eq(session.execute_query("Alerts").size(), 2);
+      check_equal(session.execute_query("Events").size(), 2);
+      check_equal(session.execute_query("Alerts").size(), 2);
     }
   }
 
@@ -261,12 +261,12 @@ suite("Continuous Session") {
 
       auto first = session.push(event("one", 1, 1));
       check(first.status == ContinuousStepStatus::DrainRequired);
-      check_int_eq(first.rules_fired, 1);
+      check_equal(first.rules_fired, 1);
       session.acknowledge(first.batch_id);
 
       auto second = session.drain();
       check(second.status == ContinuousStepStatus::Committed);
-      check_int_eq(second.rules_fired, 1);
+      check_equal(second.rules_fired, 1);
       session.acknowledge(second.batch_id);
     }
 
@@ -286,7 +286,7 @@ suite("Continuous Session") {
       auto first = session.push(event("one", 1, 1));
       session.acknowledge(first.batch_id);
       check_throws_as(session.push(event("two", 2, 2)), std::length_error);
-      check_size_eq(session.metrics().active_events, 1);
+      check_equal(session.metrics().active_events, 1);
     }
 
     it("releases active capacity before deduplication retention expires") {
@@ -300,12 +300,12 @@ suite("Continuous Session") {
       auto expired = session.advance_watermark(20);
       session.acknowledge(expired.batch_id);
 
-      check_size_eq(session.metrics().active_events, 0);
-      check_size_eq(session.metrics().dedup_entries, 1);
+      check_equal(session.metrics().active_events, 0);
+      check_equal(session.metrics().dedup_entries, 1);
       check_throws_as(session.push(event("one", 20, 2)), std::invalid_argument);
       auto second = session.push(event("two", 20, 2));
       session.acknowledge(second.batch_id);
-      check_size_eq(session.metrics().active_events, 1);
+      check_equal(session.metrics().active_events, 1);
     }
   }
 }

@@ -9,7 +9,7 @@
 #include "core/rfl_parser_state.hpp"
 #include "core/parsed_rule.hpp"
 #include "core/errors.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <cmath>
 
@@ -351,7 +351,7 @@ suite("Parser") {
 
             auto errors = parse_expect_errors(drl, "rules.rfl");
             check(!errors.empty());
-            check_str_contains(errors.front().message.c_str(), ".schema");
+            check_contains(errors.front().message.c_str(), ".schema");
         }
 
         it("rejects implementation-specific schema import qualifiers") {
@@ -365,7 +365,7 @@ suite("Parser") {
 
             auto errors = parse_expect_errors(drl, "rules.rfl");
             check(!errors.empty());
-            check_str_contains(errors.front().message.c_str(), "Expected 'schema'");
+            check_contains(errors.front().message.c_str(), "Expected 'schema'");
         }
 
         it("rejects string imports that are not schema files") {
@@ -379,7 +379,7 @@ suite("Parser") {
 
             auto errors = parse_expect_errors(drl, "rules.rfl");
             check(!errors.empty());
-            check_str_contains(errors.front().message.c_str(), ".schema");
+            check_contains(errors.front().message.c_str(), ".schema");
         }
 
         it("parses generic container field types in declarations") {
@@ -436,9 +436,9 @@ suite("Parser") {
             )";
 
             auto state = parse_success(drl);
-            check_size_eq(state.parsed_declarations.size(), 1);
+            check_equal(state.parsed_declarations.size(), 1);
             auto const& fields = state.parsed_declarations[0].fields;
-            check_size_eq(fields.size(), 9);
+            check_equal(fields.size(), 9);
             check(fields[0].type == FT_UInt64);
             check(fields[1].type == FT_Bytes);
             check(fields[2].type == FT_DateTime);

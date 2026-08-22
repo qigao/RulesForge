@@ -1,7 +1,7 @@
 #include "engine/knowledge_base.hpp"
 #include "rfl_parser.hpp"
 #include "engine/stateful_session.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 #include <iostream>
 
 std::unique_ptr<StatefulSession> create_tracing_session() {

@@ -9,7 +9,7 @@
 #include "engine/query_result.hpp"
 #include "engine/stateful_session.hpp"
 #include "test_helpers.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 struct DecisionTableTestFixture {
     std::string const test_dir = "dt_test_files";

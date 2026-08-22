@@ -1,5 +1,5 @@
 #include "rhs_parser.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 using namespace rulesforge;
 
@@ -492,7 +492,7 @@ suite("RhsParser") {
                 R"(invoke sendWebhook($user.id))", make_bindings(), &error);
 
             check_empty(actions);
-            check_string_contains(error, "Expected action keyword");
+            check_contains(error, "Expected action keyword");
         }
 
         it("rejects external calls in assignments") {

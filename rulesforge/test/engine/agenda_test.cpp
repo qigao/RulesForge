@@ -1,7 +1,7 @@
 #include "engine/agenda.hpp"
 #include "core/parsed_rule.hpp"
 
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <array>
 #include <vector>
@@ -43,8 +43,8 @@ suite("Agenda") {
             ++popped;
         }
 
-        check_size_eq(popped, activation_count);
-        check_size_eq(agenda.size(), 0);
+        check_equal(popped, activation_count);
+        check_equal(agenda.size(), 0);
     }
 
     it("uses exact salience ordering") {
@@ -63,9 +63,9 @@ suite("Agenda") {
         check_true(second.has_value());
         check_true(third.has_value());
         if (first && second && third) {
-            check_size_eq(first->hash_value, 2);
-            check_size_eq(second->hash_value, 3);
-            check_size_eq(third->hash_value, 1);
+            check_equal(first->hash_value, 2);
+            check_equal(second->hash_value, 3);
+            check_equal(third->hash_value, 1);
         }
     }
 }

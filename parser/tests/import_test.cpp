@@ -11,7 +11,7 @@
 #include "rfl_parser_impl.hpp"    // rfl_parse_lemon
 #include "core/rfl_parser_state.hpp"
 #include "core/errors.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <algorithm>
 #include <string>

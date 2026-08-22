@@ -12,7 +12,8 @@ add_library(${TARGET_NAME} STATIC ${SOURCES})
 
 target_link_libraries(
     ${TARGET_NAME}
-    PUBLIC  TurboUtils::Core Threads::Threads
+    PUBLIC TurboUtils::Core Threads::Threads
+    PRIVATE TurboUtils::STL TurboParser::Parser TurboParser::DataBind
 )
 target_include_directories(
     ${TARGET_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -44,6 +45,7 @@ if(WIN32)
         POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:TurboParser::Parser>
+                $<TARGET_FILE:TurboParser::DataBind>
                 $<TARGET_FILE:TurboParser::Mustache>
                 $<TARGET_FILE:TurboUtils::Core>
                 "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"

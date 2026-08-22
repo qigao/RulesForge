@@ -1,7 +1,7 @@
 #include "engine/agenda.hpp"
 #include "core/parsed_rule.hpp"
 
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <vector>
 
@@ -43,7 +43,7 @@ suite("Agenda Benchmarks") {
         benchmark_ops("add 10k operations", 1, operation_count) {
             fill_agenda(agenda, add_rules);
         }
-        check_size_eq(agenda.size(), operation_count);
+        check_equal(agenda.size(), operation_count);
 
         auto pop_rules = make_mock_rules(operation_count);
         Agenda pop_agenda;
@@ -54,8 +54,8 @@ suite("Agenda Benchmarks") {
                 ++popped;
             }
         }
-        check_size_eq(popped, operation_count);
-        check_size_eq(pop_agenda.size(), 0);
+        check_equal(popped, operation_count);
+        check_equal(pop_agenda.size(), 0);
 
         auto mixed_rules = make_mock_rules(operation_count);
         Agenda mixed_agenda;
@@ -71,7 +71,7 @@ suite("Agenda Benchmarks") {
                 }
             }
         }
-        check_size_eq(mixed_agenda.size(), 5000);
+        check_equal(mixed_agenda.size(), 5000);
 
         auto batch_rules = make_mock_rules(operation_count);
         Agenda batch_agenda;
@@ -82,7 +82,7 @@ suite("Agenda Benchmarks") {
                 batch_popped += batch_agenda.pop_next_batch_activations(100).size();
             }
         }
-        check_size_eq(batch_popped, operation_count);
-        check_size_eq(batch_agenda.size(), 0);
+        check_equal(batch_popped, operation_count);
+        check_equal(batch_agenda.size(), 0);
     }
 }

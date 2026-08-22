@@ -3,7 +3,7 @@
 #include "core/token.hpp"
 #include "core/fact.hpp"
 
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <vector>
 #include <random>

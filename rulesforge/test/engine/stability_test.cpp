@@ -2,7 +2,7 @@
 #include "engine/knowledge_base.hpp"
 #include "engine/stateful_session.hpp"
 #include "test_helpers.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 struct StabilityTestFixture {
     std::shared_ptr<KnowledgeBase> kb;

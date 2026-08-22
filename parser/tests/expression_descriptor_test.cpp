@@ -1,5 +1,5 @@
 #include "expression_descriptor.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 using namespace rulesforge;
 

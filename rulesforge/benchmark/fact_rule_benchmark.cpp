@@ -6,7 +6,7 @@
 // 3. Incremental insert + fire (streaming)
 // 4. Fact retraction throughput and latency
 
-#include "tinytest.h"
+#include "tinytest.hpp"
 #include "decision_table_compiler.hpp"
 #include "decision_table_parser.hpp"
 #include "rfl_parser.hpp"
@@ -460,8 +460,8 @@ end
                      (long long)percentile(fire_us, 0.95),
                      (long long)percentile(fire_us, 0.99));
 
-                check_int_lt(percentile(insert_us, 0.99), 10000);
-                check_int_lt(percentile(fire_us, 0.99), 50000);
+                check_less(percentile(insert_us, 0.99), 10000);
+                check_less(percentile(fire_us, 0.99), 50000);
             } catch (std::exception const& e) {
                 info("EXCEPTION: %s", e.what());
                 check(false);
@@ -518,7 +518,7 @@ end
                  (long long)percentile(retract_us, 0.95),
                  (long long)percentile(retract_us, 0.99));
 
-            check_int_lt(percentile(retract_us, 0.99), 10000);
+            check_less(percentile(retract_us, 0.99), 10000);
         }
     }
 }

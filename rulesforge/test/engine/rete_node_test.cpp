@@ -3,7 +3,7 @@
 #include "engine/query_result.hpp"
 #include "engine/stateful_session.hpp"
 #include "test_helpers.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 using namespace rulesforge;
 
@@ -46,7 +46,7 @@ suite("Bit predicates") {
         fixture.createFact("Event", {{"flags", uint64_t{6}}});
         fixture.createFact("Event", {{"flags", uint64_t{4}}});
         auto results = fixture.session->execute_query("flagged", {});
-        check_size_eq(results.size(), 1);
+        check_equal(results.size(), 1);
     }
 }
 

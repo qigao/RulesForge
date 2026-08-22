@@ -3,7 +3,7 @@
 #include "engine/stateful_session.hpp"
 #include "core/exceptions.hpp"
 #include "test_helpers.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 struct TestFixture {
     std::unique_ptr<StatefulSession> session;

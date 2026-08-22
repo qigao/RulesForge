@@ -1,6 +1,6 @@
 #include "core/rfl_strings.hpp"
 
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <array>
 #include <string_view>
@@ -15,8 +15,9 @@ suite("RFL Strings") {
             auto first = StringInterner::instance().intern("shared-field");
             auto second = StringInterner::instance().intern(std::string_view("shared-field"));
 
-            check_str_eq(first.data(), second.data());
-            check_ptr_eq(first.data(), second.data());
+            check_equal(static_cast<void const*>(first.data()),
+                        static_cast<void const*>(second.data()));
+            check_equal(first.data(), second.data());
         }
 
         it("supports concurrent interning") {
@@ -39,7 +40,8 @@ suite("RFL Strings") {
             }
 
             for (size_t index = 1; index < results.size(); ++index) {
-                check_ptr_eq(results[index].data(), results[0].data());
+                check_equal(static_cast<void const*>(results[index].data()),
+                            static_cast<void const*>(results[0].data()));
             }
         }
     }
@@ -53,13 +55,13 @@ suite("RFL Strings") {
             fields["middle"] = 3;
             fields["alpha"] = 4;
 
-            check_size_eq(fields.size(), 3);
-            check_int_eq(fields.find("alpha")->second, 4);
+            check_equal(fields.size(), 3);
+            check_equal(fields.find("alpha")->second, 4);
 
             auto it = fields.begin();
-            check_str_eq(it++->first.data(), "alpha");
-            check_str_eq(it++->first.data(), "middle");
-            check_str_eq(it->first.data(), "zeta");
+            check_equal(it++->first.data(), "alpha");
+            check_equal(it++->first.data(), "middle");
+            check_equal(it->first.data(), "zeta");
         }
     }
 }

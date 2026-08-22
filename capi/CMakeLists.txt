@@ -14,7 +14,7 @@ add_library(
                                binary_splitters.c
 )
 
-target_compile_definitions(${CAPI_TARGET_NAME} PRIVATE SHARED_CXX)
+target_compile_definitions(${CAPI_TARGET_NAME} PRIVATE RULES_FORGE_BUILD)
 
 # Include directories for the CAPI. PUBLIC: Only the C API header - this is what
 # consumers need

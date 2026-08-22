@@ -3,7 +3,7 @@
 #include "engine/query_result.hpp"
 #include "engine/stateful_session.hpp"
 #include "test_helpers.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 template <typename T>
 T get_field(Fact const& f, std::string const& field) {

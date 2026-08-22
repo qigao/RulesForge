@@ -1,6 +1,6 @@
 #include "engine/continuous_session.hpp"
 #include "rfl_parser.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <cstdint>
 #include <memory>

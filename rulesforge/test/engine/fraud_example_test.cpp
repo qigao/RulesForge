@@ -4,7 +4,7 @@
 #include "engine/stateful_session.hpp"
 #include "rfl_parser.hpp"
 #include "test_helpers.hpp"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <algorithm>
 #include <cmath>
