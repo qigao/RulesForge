@@ -3,12 +3,12 @@
 #include <fstream>
 #include <set>
 #include <sstream>
-#include <turbo_parser.h>
+#include <csv_parser.h>
 
 namespace {
-    DecisionTable build_table_from_csv(turbo_csv_doc_t* doc) {
+    DecisionTable build_table_from_csv(csv_doc_t* doc) {
         DecisionTable table;
-        size_t row_count = turbo_csv_row_count(doc);
+        size_t row_count = csv_row_count(doc);
         if (row_count == 0) return table;
 
         std::set<std::string> const preamble_keywords = {
@@ -20,7 +20,7 @@ namespace {
 
             // Determine column count by reading until we get nulls
             for (size_t c = 0;; ++c) {
-                char const* val = turbo_csv_get(doc, r, c);
+                char const* val = csv_get(doc, r, c);
                 if (!val) break;
                 record.emplace_back(val);
             }
@@ -56,19 +56,15 @@ DecisionTable DecisionTableParser::parse(std::string const& file_path, ParsingRe
 }
 
 DecisionTable DecisionTableParser::parse_string(std::string const& csv_content, std::string const& source_name, ParsingResult& result) {
-    turbo_csv_doc_t* doc = nullptr;
-    int rc = turbo_parse_csv(
-        reinterpret_cast<uint8_t const*>(csv_content.data()),
-        csv_content.size(), &doc);
+    csv_doc_t* doc = csv_parse(csv_content.data(), csv_content.size());
 
-    if (rc != 0 || !doc) {
+    if (!doc) {
         result.success = false;
         result.errors.push_back({source_name, 0, 0, "CSV parse error"});
-        if (doc) turbo_free_csv(&doc);
         return {};
     }
 
     DecisionTable table = build_table_from_csv(doc);
-    turbo_free_csv(&doc);
+    csv_free(doc);
     return table;
 }

@@ -9,7 +9,7 @@
 #include <vector>
 
 #include <cxxopts.hpp>
-#include <turbo_parser.h>
+#include <json_parser.h>
 
 #include "rules_forge.h"
 
@@ -58,58 +58,54 @@ ruleforge_validation_mode_t parse_validation_mode(const std::string &mode) {
   throw std::runtime_error("Invalid validation mode: " + mode + " (expected none|warn|strict)");
 }
 
-struct TurboJsonDeleter {
-  void operator()(turbo_json_doc_t *value) const {
+struct JsonDeleter {
+  void operator()(json_value_t *value) const {
     if (value) {
-      turbo_free_json(&value);
+      json_free(value);
     }
   }
 };
 
-using TurboJsonHandle = std::unique_ptr<turbo_json_doc_t, TurboJsonDeleter>;
+using JsonHandle = std::unique_ptr<json_value_t, JsonDeleter>;
 
-struct TurboJsonStringDeleter {
+struct JsonStringDeleter {
   void operator()(char *value) const {
     if (value) {
-      turbo_json_serialize_free(value);
+      json_serialize_free(value);
     }
   }
 };
 
-using TurboJsonStringHandle = std::unique_ptr<char, TurboJsonStringDeleter>;
+using JsonStringHandle = std::unique_ptr<char, JsonStringDeleter>;
 
-TurboJsonHandle parse_json_document(const std::string &content) {
-  turbo_json_doc_t *root = nullptr;
-  int rc = turbo_parse_json(reinterpret_cast<const uint8_t *>(content.data()), content.size(), &root);
-  if (rc != 0 || !root) {
-    if (root) {
-      turbo_free_json(&root);
-    }
+JsonHandle parse_json_document(const std::string &content) {
+  json_value_t *root = json_parse(content.data(), content.size());
+  if (!root) {
     throw std::runtime_error("JSON parsing failed");
   }
-  return TurboJsonHandle(root);
+  return JsonHandle(root);
 }
 
-TurboJsonHandle filter_fact_json(const json_value_t *fact) {
-  if (!fact || turbo_json_type(fact) != TURBO_JSON_OBJECT) {
-    return TurboJsonHandle(nullptr);
+JsonHandle filter_fact_json(const json_value_t *fact) {
+  if (!fact || json_type(fact) != JSON_OBJECT) {
+    return JsonHandle(nullptr);
   }
 
-  TurboJsonHandle filtered(turbo_json_create_object());
+  JsonHandle filtered(json_create_object());
   if (!filtered) {
     throw std::runtime_error("Failed to allocate filtered JSON object");
   }
 
-  size_t count = turbo_json_object_size(fact);
+  size_t count = json_object_size(fact);
   for (size_t i = 0; i < count; ++i) {
-    const char *key = turbo_json_object_key(fact, i);
-    json_value_t *value = turbo_json_object_value(fact, i);
+    const char *key = json_object_key(fact, i);
+    json_value_t *value = json_object_value(fact, i);
     if (!key || key[0] == '_' || !value) {
       continue;
     }
-    json_value_t *clone = turbo_json_clone(value);
+    json_value_t *clone = json_clone(value);
     if (clone) {
-      turbo_json_object_add(filtered.get(), key, clone);
+      json_object_add(filtered.get(), key, clone);
     }
   }
   return filtered;
@@ -120,20 +116,20 @@ int load_facts_from_json(ruleforge_stateful_session_t session, const json_value_
                          const std::string &fact_type, bool verbose,
                          std::vector<ruleforge_fact_t> *loaded_facts) {
   int loaded = 0;
-  if (!facts_array || turbo_json_type(facts_array) != TURBO_JSON_ARRAY) {
+  if (!facts_array || json_type(facts_array) != JSON_ARRAY) {
     return loaded;
   }
 
-  size_t count = turbo_json_array_size(facts_array);
+  size_t count = json_array_size(facts_array);
   for (size_t i = 0; i < count; ++i) {
-    json_value_t *item = turbo_json_array_get(facts_array, i);
-    TurboJsonHandle filtered = filter_fact_json(item);
+    json_value_t *item = json_array_get(facts_array, i);
+    JsonHandle filtered = filter_fact_json(item);
     if (!filtered) {
       continue;
     }
 
     size_t json_len = 0;
-    TurboJsonStringHandle json_text(turbo_json_serialize(filtered.get(), &json_len));
+    JsonStringHandle json_text(json_serialize(filtered.get(), &json_len));
     if (!json_text) {
       continue;
     }
@@ -158,16 +154,16 @@ int load_facts_from_json(ruleforge_stateful_session_t session, const json_value_
 std::string find_data_array_key(const json_value_t *root) {
   std::string best_key;
   size_t best_size = 0;
-  if (!root || turbo_json_type(root) != TURBO_JSON_OBJECT) {
+  if (!root || json_type(root) != JSON_OBJECT) {
     return best_key;
   }
 
-  size_t count = turbo_json_object_size(root);
+  size_t count = json_object_size(root);
   for (size_t i = 0; i < count; ++i) {
-    const char *key = turbo_json_object_key(root, i);
-    json_value_t *value = turbo_json_object_value(root, i);
-    if (key && value && turbo_json_type(value) == TURBO_JSON_ARRAY) {
-      size_t size = turbo_json_array_size(value);
+    const char *key = json_object_key(root, i);
+    json_value_t *value = json_object_value(root, i);
+    if (key && value && json_type(value) == JSON_ARRAY) {
+      size_t size = json_array_size(value);
       if (size > best_size) {
         best_size = size;
         best_key = key;
@@ -400,7 +396,7 @@ int main(int argc, char *argv[]) {
     if (result.count("json")) {
       std::string json_path = result["json"].as<std::string>();
       std::string json_content = read_file(json_path);
-      TurboJsonHandle root = parse_json_document(json_content);
+      JsonHandle root = parse_json_document(json_content);
 
       // Build type mappings
       std::map<std::string, std::string> type_mappings;
@@ -447,12 +443,12 @@ int main(int argc, char *argv[]) {
 
       // Load facts for each mapping
       for (const auto &[array_key, fact_type] : type_mappings) {
-        json_value_t *array_value = turbo_json_object_get(root.get(), array_key.c_str());
+        json_value_t *array_value = json_object_get(root.get(), array_key.c_str());
         if (!array_value) {
           std::cerr << "Warning: JSON key '" << array_key << "' not found, skipping" << std::endl;
           continue;
         }
-        if (turbo_json_type(array_value) != TURBO_JSON_ARRAY) {
+        if (json_type(array_value) != JSON_ARRAY) {
           std::cerr << "Warning: JSON key '" << array_key << "' is not an array, skipping"
                     << std::endl;
           continue;

@@ -12,8 +12,8 @@ add_library(${TARGET_NAME} STATIC ${SOURCES})
 
 target_link_libraries(
     ${TARGET_NAME}
-    PUBLIC TurboUtils::Core Threads::Threads
-    PRIVATE TurboUtils::STL TurboParser::Parser TurboParser::DataBind
+    PUBLIC Salts::Core Threads::Threads
+    PRIVATE Salts::CSTL Salts::DataBind
 )
 target_include_directories(
     ${TARGET_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -38,19 +38,6 @@ set_target_properties(${TARGET_NAME} PROPERTIES LINKER_LANGUAGE CXX)
 if(WIN32)
     target_compile_definitions(
         ${TARGET_NAME} PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN
-    )
-    # Keep runtime DLLs beside every generated executable.
-    add_custom_command(
-        TARGET ${TARGET_NAME}
-        POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:TurboParser::Parser>
-                $<TARGET_FILE:TurboParser::DataBind>
-                $<TARGET_FILE:TurboParser::Mustache>
-                $<TARGET_FILE:TurboUtils::Core>
-                "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
-        COMMAND_EXPAND_LISTS
-        VERBATIM
     )
 endif()
 

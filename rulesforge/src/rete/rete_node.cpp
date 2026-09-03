@@ -3,8 +3,6 @@
 #include "engine/knowledge_base.hpp"
 #include "rete/rete_node.hpp"
 #include "engine/stateful_session.hpp"
-#include "turbo_parser.h"
-
 #include <algorithm>
 #include <atomic>
 #include <cctype>

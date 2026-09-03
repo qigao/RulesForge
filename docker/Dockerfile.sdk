@@ -1,28 +1,26 @@
-ARG TurboUtils_SDK_IMAGE=TurboUtils-sdk:bookworm
-ARG TURBOSCRIPT_SDK_IMAGE=turboscript-sdk:bookworm
+ARG SALTS_SDK_IMAGE=salts-sdk:bookworm
+ARG SALTS_UTILS_SDK_IMAGE=salts-utils-sdk:bookworm
 
-FROM ${TURBOSCRIPT_SDK_IMAGE} AS turboscript-sdk
-FROM ${TurboUtils_SDK_IMAGE}
+FROM ${SALTS_UTILS_SDK_IMAGE} AS salts-utils-sdk
+FROM ${SALTS_SDK_IMAGE}
 
-ENV CMAKE_PREFIX_PATH=/opt/TurboUtils
-ENV TurboUtils_ROOT=/opt/TurboUtils
-ENV TURBOSCRIPT_ROOT=/opt/turboscript
+ENV CMAKE_PREFIX_PATH=/opt/salts:/opt/salts-utils
+ENV SALTS_ROOT=/opt/salts
+ENV SALTS_UTILS_ROOT=/opt/salts-utils
 ENV VCPKG_ROOT=/opt/vcpkg
-ENV LD_LIBRARY_PATH=/opt/turboscript/lib:/opt/TurboUtils/lib
+ENV LD_LIBRARY_PATH=/opt/salts-utils/lib:/opt/salts/lib
 
 WORKDIR /src/rulesforge
 
 COPY vcpkg.json ./
 RUN vcpkg install --triplet x64-linux
 
-COPY --from=turboscript-sdk /opt/turboscript /opt/turboscript
+COPY --from=salts-utils-sdk /opt/salts-utils /opt/salts-utils
 COPY . ./
 
 RUN cmake -S . -B build -G Ninja \
     -D CMAKE_BUILD_TYPE=Release \
-    -D CMAKE_PREFIX_PATH=/opt/TurboUtils\;/opt/turboscript \
-    -D TurboUtils_ROOT=/opt/TurboUtils \
-    -D TURBOSCRIPT_ROOT=/opt/turboscript \
+    -D CMAKE_PREFIX_PATH=/opt/salts\;/opt/salts-utils \
     -D CMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
     -D VCPKG_TARGET_TRIPLET=x64-linux \
     -D BUILD_TESTING=OFF \

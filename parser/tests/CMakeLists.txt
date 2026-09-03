@@ -9,7 +9,7 @@ foreach(test_source ${PARSER_TEST_SOURCES})
     get_filename_component(test_name ${test_source} NAME_WE)
     set(executable_name "${test_name}.parser")
     add_executable(${executable_name} ${test_source})
-    target_link_libraries(${executable_name} PRIVATE TurboUtils::TinyTest rfl_parser)
+    target_link_libraries(${executable_name} PRIVATE Salts::TinyTest rfl_parser)
     target_compile_definitions(${executable_name} PRIVATE RFL_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/rulesforge/test")
     add_test(NAME ${executable_name} COMMAND ${executable_name})
     target_include_directories(${executable_name} PRIVATE

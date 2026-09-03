@@ -551,7 +551,7 @@ end
             ruleforge_cleanup();
         }
 
-        it("adds schema-bound JSON fact through TurboUtils DataBind") {
+        it("adds schema-bound JSON fact through Salts DataBind") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;
             check_equal(ruleforge_kb_create(&kb), RULES_FORGE_OK);
@@ -759,7 +759,7 @@ end
             ruleforge_cleanup();
         }
 
-        it("loads YAML roots and YPATH-selected facts through TurboUtils DataBind") {
+        it("loads YAML roots and YPATH-selected facts through Salts DataBind") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;
             check_equal(ruleforge_kb_create(&kb), RULES_FORGE_OK);
@@ -847,7 +847,7 @@ end
             ruleforge_cleanup();
         }
 
-        it("adds schema-bound extended scalar facts through TurboUtils DataBind") {
+        it("adds schema-bound extended scalar facts through Salts DataBind") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;
             check_equal(ruleforge_kb_create(&kb), RULES_FORGE_OK);
@@ -921,14 +921,14 @@ end
             auto id_field = internal_fact->fields.find("id");
             check(id_field != internal_fact->fields.end());
             auto const* uuid = id_field != internal_fact->fields.end()
-                ? std::get_if<turbo_uuid_t>(&id_field->second)
+                ? std::get_if<salts_uuid_t>(&id_field->second)
                 : nullptr;
             check_not_null(uuid);
-            turbo_uuid_t expected_uuid{};
+            salts_uuid_t expected_uuid{};
             check_equal(
-                turbo_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &expected_uuid),
-                TURBO_OK);
-            check(uuid != nullptr && turbo_uuid_equal(uuid, &expected_uuid));
+                salts_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &expected_uuid),
+                SALTS_OK);
+            check(uuid != nullptr && salts_uuid_equal(uuid, &expected_uuid));
 
             auto counter_field = internal_fact->fields.find("counter");
             check(counter_field != internal_fact->fields.end());
@@ -1082,7 +1082,7 @@ end
             ruleforge_cleanup();
         }
 
-        it("adds schema-bound binary fact through TurboUtils DataBind") {
+        it("adds schema-bound binary fact through Salts DataBind") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;
             check_equal(ruleforge_kb_create(&kb), RULES_FORGE_OK);
@@ -1140,7 +1140,7 @@ end
             ruleforge_cleanup();
         }
 
-        it("adds schema-bound CSV facts through TurboUtils DataBind") {
+        it("adds schema-bound CSV facts through Salts DataBind") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;
             check_equal(ruleforge_kb_create(&kb), RULES_FORGE_OK);
@@ -1354,7 +1354,7 @@ end
             ruleforge_cleanup();
         }
 
-        it("adds schema-bound XML facts through TurboUtils DataBind") {
+        it("adds schema-bound XML facts through Salts DataBind") {
             ruleforge_init();
             ruleforge_knowledge_base_t kb = nullptr;
             check_equal(ruleforge_kb_create(&kb), RULES_FORGE_OK);

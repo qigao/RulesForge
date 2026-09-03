@@ -13,7 +13,7 @@
 
 本文件保留核心约束与原则。详细技术规范已迁移为全局skills，按需激活：
 
-- **`turboutils`** - TurboUtils 完整 API 参考（内存管理、字符串、文件、日志、并发、无锁数据结构）
+- **`cstl`** - Salts CSTL 容器、所有权、泛型与 Stream 集成指南
 - **`coronet`** - CoroNet 协程网络开发指南（coroutine、TCP/TLS/UDP/KCP/Pipe/WebSocket、DNS/mDNS、连接池、后端与关闭路径）
 - **`cmake-presets`** - CMake Presets 构建测试指南（configure/build/test preset、target 构建、build tree 恢复）
 - **`c-design-patterns`** - C 语言设计模式实现指南（12 种模式、SOLID 原则、反模式警告）
@@ -24,7 +24,7 @@
 - **`plugin-system`** - 插件系统开发规范（架构设计、隔离机制、热重载、安全）
 - **`tinytest`** - TinyTest 测试框架指南（C/C++ 测试结构、断言、fixture、JUnit/TAP、benchmark）
 
-激活方式：在任务中涉及对应主题时使用相应全局 skill；需要显式指定时使用 `$turboutils`、`$coronet`、`$cmake-presets`、`$c-design-patterns`、`$cpp-design-patterns`、`$cpp-tmp`、`$performance-optimization`、`$logging-guide`、`$plugin-system` 或 `$tinytest`。
+激活方式：在任务中涉及对应主题时使用相应全局 skill；需要显式指定时使用 `$cstl`、`$coronet`、`$cmake-presets`、`$c-design-patterns`、`$cpp-design-patterns`、`$cpp-tmp`、`$performance-optimization`、`$logging-guide`、`$plugin-system` 或 `$tinytest`。
 
 ---
 
@@ -207,36 +207,34 @@
 
 ### 标准库与成熟算法优先
 
-> **详细 API 参见**: 全局 skill `turboutils`
+> **详细 API 参见**: 全局 skill `cstl`、`memory-design-protocols` 与 `logging-guide`
 
 #### 库优先级顺序（从高到低）
 
-1. **TurboUtils**（仓库 `utils/` 模块；构建时优先通过 CMake target `TurboUtils::Core` 使用）— 最优先
+1. **Salts**（构建时按能力选择 `Salts::*` CMake target）— 最优先
 2. **项目内模块**（`exprtk/`、`plugins/` 等）
 3. **vendor/ 库**（sds、croar、mir、monocypher、sha2、uuid、miniblas）
 4. **vcpkg 依赖**（xxhash、sqlite3、zstd、openssl、c-ares、aklomp-base64、simde）
 5. **C 标准库**（libc：`string.h`、`stdlib.h`、`stdio.h`）
-6. **底层系统 API**（仅允许封装在 TurboUtils 平台/协程适配层或项目适配层之后使用）
+6. **底层系统 API**（仅允许封装在 Salts 平台/协程适配层或项目适配层之后使用）
 
 #### 手写实现触发条件（严格约束）
 
 允许手写实现的前提：
-1. **TurboUtils/vendor/vcpkg 无对应功能**，且项目内没有稳定复用点；或现有库无法满足接口/平台/许可约束
+1. **Salts/vendor/vcpkg 无对应功能**，且项目内没有稳定复用点；或现有库无法满足接口/平台/许可约束
 2. 若是为了替换现有库或优化成熟通用能力，必须有 profiling 证明现有路径是瓶颈（≥20% 总耗时）
 3. 若是因为特殊约束（嵌入式、实时性、代码体积 <50KB），必须说明约束来源
 4. 高风险基础设施必须提供 Benchmark 对比、测试覆盖率目标和文档化理由
 
 #### 避免重复造轮子（强制规则）
 
-- ❌ **禁止手写**：动态数组 → 用 `turbo_vec_t` / `TURBO_VEC_DEFINE`，临时数组可用 `mem_pool_t`
-- ❌ **禁止手写**：字符串拼接 → 用 `tstr_t`（TurboUtils）或 `sds`（vendor）
-- ❌ **禁止手写**：哈希表/集合 → 用 `turbo_hash_map_t` / `TURBO_HASH_MAP_DEFINE` 或 `turbo_set_t` / `TURBO_SET_DEFINE`
-- ❌ **禁止手写**：双端队列 → 用 `turbo_deque_t` / `TURBO_DEQUE_DEFINE`
-- ❌ **禁止手写**：文件读写 → 用 `turbo_fs`（TurboUtils）
-- ❌ **禁止手写**：日志系统 → 用 `tlog`（TurboUtils）
-- ❌ **禁止手写**：线程池 → 用 `turbo_threadpool`（TurboUtils）
-- ❌ **禁止手写**：无锁队列 → 用 `disruptor` 或 `ring_buffer_spsc`（TurboUtils）
-- ❌ **禁止手写**：内存池 → 用 `mem_pool_t` 或 `object_pool_t`（TurboUtils）
+- ❌ **禁止手写**：动态数组、哈希表、集合与双端队列 → 用 CSTL 对应容器
+- ❌ **禁止手写**：字符串拼接 → 用 `salts_str` 或 `sds`（vendor）
+- ❌ **禁止手写**：文件读写 → 用 Salts 文件系统模块
+- ❌ **禁止手写**：日志系统 → 用 `tlog`（Salts）
+- ❌ **禁止手写**：线程池 → 用 Salts executor
+- ❌ **禁止手写**：无锁队列 → 用 `disruptor` 或 `ring_buffer_spsc`（Salts）
+- ❌ **禁止手写**：内存池 → 用 `mem_pool_t` 或 `object_pool_t`（Salts）
 
 ### 依赖管理与接口设计
 
@@ -363,7 +361,7 @@
 - 内存安全：
   - 避免 use-after-free：明确所有权、文档化生命周期、AddressSanitizer 检测
   - 避免 double-free：每个指针只有一个释放点、NULL 检查后释放、释放后置 NULL
-  - 避免缓冲区溢出：使用 `strncpy`、`snprintf`、边界检查、`turbo_buffer` 动态数组
+  - 避免缓冲区溢出：使用 `strncpy`、`snprintf`、边界检查或有边界的 Salts buffer
   - 避免悬空指针：指针生命周期不超过被指向对象、返回值文档化所有权转移
 - 权限与隔离：
   - 最小权限原则：进程、线程、插件只拥有必要权限

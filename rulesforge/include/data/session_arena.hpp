@@ -49,7 +49,7 @@ private:
 using MemoryPressureCallback = std::function<void(size_t used, size_t max_size, int usage_percent)>;
 
 /**
- * @brief Per-session arena allocator using TurboUtils's mem_pool_t
+ * @brief Per-session arena allocator using Salts' mem_pool_t
  *
  * The arena is used for temporary objects that live only during a single
  * fire_all_rules() call.

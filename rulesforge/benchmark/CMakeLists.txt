@@ -16,7 +16,7 @@ function(add_rulesforge_benchmark source)
 
     add_executable(${executable_name} ${source})
     target_link_libraries(
-        ${executable_name} PRIVATE TurboUtils::TinyTest ${ARGN} ${TARGET_NAME}
+        ${executable_name} PRIVATE Salts::TinyTest ${ARGN} ${TARGET_NAME}
     )
 
     set_target_properties(${executable_name} PROPERTIES FOLDER ${folder_name})

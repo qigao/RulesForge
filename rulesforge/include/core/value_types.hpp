@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/rfl_strings.hpp"
-#include <turbo_uuid.h>
+#include <salts_uuid.h>
 
 #include <chrono>
 #include <compare>
@@ -97,17 +97,17 @@ struct TypedList;
 struct ValueSet;
 struct ValueMap;
 
-inline bool operator==(turbo_uuid_t const &a, turbo_uuid_t const &b) {
-  return turbo_uuid_equal(&a, &b);
+inline bool operator==(salts_uuid_t const &a, salts_uuid_t const &b) {
+  return salts_uuid_equal(&a, &b);
 }
 
-inline bool operator!=(turbo_uuid_t const &a, turbo_uuid_t const &b) {
+inline bool operator!=(salts_uuid_t const &a, salts_uuid_t const &b) {
   return !(a == b);
 }
 
 using ConstraintValue =
     std::variant<std::string, int64_t, double, FactList, NilValue, std::shared_ptr<TypedList>,
-                 std::shared_ptr<ValueSet>, std::shared_ptr<ValueMap>, turbo_uuid_t, bool,
+                 std::shared_ptr<ValueSet>, std::shared_ptr<ValueMap>, salts_uuid_t, bool,
                  uint64_t, BytesValue, EnumValue, DateTimeValue, DateValue, TimeValue,
                  DurationValue, DecimalValue, BigIntValue, MoneyValue>;
 
@@ -183,7 +183,7 @@ concept ConstraintValueMember =
     std::is_same_v<T, std::shared_ptr<TypedList>>  ||
     std::is_same_v<T, std::shared_ptr<ValueSet>>   ||
     std::is_same_v<T, std::shared_ptr<ValueMap>>   ||
-    std::is_same_v<T, turbo_uuid_t>                ||
+    std::is_same_v<T, salts_uuid_t>                ||
     std::is_same_v<T, bool>                        ||
     std::is_same_v<T, uint64_t>                    ||
     std::is_same_v<T, BytesValue>                  ||

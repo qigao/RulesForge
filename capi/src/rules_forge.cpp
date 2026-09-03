@@ -331,12 +331,12 @@ static ConstraintValue data_bind_value_to_constraint(
     return map;
   }
   case DATA_BIND_VALUE_UUID: {
-    turbo_uuid_t uuid{};
+    salts_uuid_t uuid{};
     require_data_bind_value(data_bind_value_get_uuid(value, uuid.bytes), "UUID");
     return uuid;
   }
   case DATA_BIND_VALUE_DATETIME: {
-    turbo_datetime_t extracted{};
+    DataBindDateTime extracted{};
     require_data_bind_value(data_bind_value_get_datetime(value, &extracted), "datetime");
     return DateTimeValue{extracted.year, extracted.month, extracted.day, extracted.hour,
                          extracted.minute, extracted.second, extracted.millisecond,

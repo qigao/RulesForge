@@ -1,6 +1,6 @@
 # Data Ingestion
 
-RulesForge uses TurboUtils DataBind at the C API boundary. DataBind validates
+RulesForge uses Salts DataBind at the C API boundary. DataBind validates
 external values against `.schema` declarations and RulesForge converts the
 bound values into session-owned facts. The rule engine itself remains fact-only.
 Imported DataBind codecs are retained by the immutable Knowledge Base and reused

@@ -9,7 +9,7 @@ foreach(test_source ${TEST_SOURCES})
     add_executable(${executable_name} ${test_source})
     target_link_libraries(
         ${executable_name}
-        PRIVATE TurboUtils::TinyTest rfl_parser ${TARGET_NAME} Threads::Threads
+        PRIVATE Salts::TinyTest rfl_parser ${TARGET_NAME} Threads::Threads
     )
     target_compile_definitions(
         ${executable_name}

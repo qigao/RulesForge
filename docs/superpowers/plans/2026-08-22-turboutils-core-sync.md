@@ -1,21 +1,21 @@
-# RulesForge TurboUtils Core Sync Implementation Plan
+# RulesForge Salts Core Sync Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rebuild and install RulesForge against the current TurboUtils and TurboParser SDKs without changing its public rule, DataBind, ownership, or error semantics.
+**Goal:** Rebuild and install RulesForge against the current Salts and SaltsUtils SDKs without changing its public rule, DataBind, ownership, or error semantics.
 
-**Architecture:** RulesForge owns its C ABI marker, while TurboUtils and TurboParser remain one-way installed dependencies. TurboUtils STL is linked only by targets that compile the hash implementation, and current tlog/TinyTest entry points replace removed compatibility surfaces.
+**Architecture:** RulesForge owns its C ABI marker, while Salts and SaltsUtils remain one-way installed dependencies. CSTL is linked only by targets that compile the hash implementation, and current tlog/TinyTest entry points replace removed compatibility surfaces.
 
-**Tech Stack:** C++20, C17 C API, CMake Presets, TurboUtils::Core/STL/TinyTest, TurboParser::Parser/DataBind, TinyTest.
+**Tech Stack:** C++20, C17 C API, CMake Presets, Salts::Core/CSTL/TinyTest, concrete Salts parser targets, Salts::DataBind, TinyTest.
 
-**Spec:** User request to fix `C:\projects\cpp\rulesforge` after the TurboUtils Core migration.
+**Spec:** User request to fix `C:\projects\cpp\turbonet\rulesforge` after the Salts Core migration.
 
 ## Global Constraints
 
 - Preserve the existing RulesForge C function signatures, status codes, DataBind ABI 8 contract, serialization behavior, and ownership rules.
 - Preserve the pre-existing changes in `CMakeUserPresets.json`, `docs/dsl.md`, and `presets/Compilers.json`.
-- Use installed TurboUtils and TurboParser headers and exported targets only.
-- Verify the rebuilt installed DLL no longer imports removed TurboUtils Core symbols.
+- Use installed Salts and SaltsUtils headers and exported targets only.
+- Verify the rebuilt installed DLL no longer imports removed Salts Core symbols.
 
 ---
 
@@ -29,7 +29,7 @@
 - Modify: `parser/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `TurboUtils::Core`, `TurboUtils::STL`, `TurboParser::Parser`, and `TurboParser::DataBind`.
+- Consumes: `Salts::Core`, `Salts::CSTL`, concrete Salts parser targets, and `Salts::DataBind`.
 - Produces: `RULES_FORGE_C_API` declarations and correctly linked `RulesForge`, `rfl_parser`, and `rules_forge` targets.
 
 - [ ] **Step 1: Verify the failing build boundary**
@@ -44,7 +44,7 @@ Define `RULES_FORGE_API`/`RULES_FORGE_C_API`, replace `CXX_C_API`, replace `SHAR
 
 - [ ] **Step 3: Link each implementation dependency at its owning target**
 
-Link `TurboUtils::STL`, `TurboParser::Parser`, and `TurboParser::DataBind` privately where their implementation headers/functions are compiled; retain existing public dependencies required by installed headers.
+Link `Salts::CSTL`, concrete Salts parser targets, and `Salts::DataBind` privately where their implementation headers/functions are compiled; retain existing public dependencies required by installed headers.
 
 - [ ] **Step 4: Rebuild the focused target**
 
@@ -59,7 +59,7 @@ Expected: export and include-boundary errors are gone; any remaining current-SDK
 - Modify: `rulesforge/src/core/rfl_rete_defs.cpp`
 
 **Interfaces:**
-- Consumes: current one-message `TLOG_*` macros and `<turbostl/hash_map.h>`.
+- Consumes: current one-message `TLOG_*` macros and `<cstl.h>`.
 - Produces: the same preformatted log text and the same byte-hash result.
 
 - [ ] **Step 1: Preserve the existing local formatter and pass its completed message to tlog**
@@ -68,7 +68,7 @@ Replace two-argument raw `TLOG_*` calls with one-message calls; do not change lo
 
 - [ ] **Step 2: Include the STL-owned hash header**
 
-Replace `<turbo_hash.h>` with `<turbostl/hash_map.h>` while keeping `turbo_hash_bytes` call semantics.
+Use `<cstl.h>` while keeping `hash_bytes` call semantics.
 
 - [ ] **Step 3: Build RulesForge and parser targets**
 
@@ -108,7 +108,7 @@ Expected: PASS.
 
 **Interfaces:**
 - Consumes: the rebuilt RulesForge package.
-- Produces: a DLL usable by TurboFlow with no removed `turbo_hash_bytes` Core import.
+- Produces: a DLL usable by downstream flows with no removed Core hash import.
 
 - [ ] **Step 1: Fresh configure and full build**
 
@@ -122,9 +122,9 @@ Run: `ctest --preset win-release-user --output-on-failure`.
 
 Run: `cmake --build --preset win-release-user --target install`.
 
-- [ ] **Step 4: Verify DLL imports and TurboFlow regression tests**
+- [ ] **Step 4: Verify DLL imports and downstream regression tests**
 
-Inspect `rules_forge.dll` imports, rebuild TurboFlow so its runtime copy is refreshed, then run the previously blocked TurboFlow CTest suite.
+Inspect `rules_forge.dll` imports, refresh downstream runtime copies, then run the previously blocked downstream CTest suite.
 
 - [ ] **Step 5: Review the final patch**
 

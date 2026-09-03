@@ -1,8 +1,8 @@
 #ifndef RULES_FORGE_EXPORT_H
 #define RULES_FORGE_EXPORT_H
 
-/* RulesForge owns its ABI marker. TurboUtils' TURBO_API only describes
- * TurboUtils libraries and must not leak their producer/consumer state here. */
+/* RulesForge owns its ABI marker. Salts' SALTS_C_API only describes Salts
+ * libraries and must not leak their producer/consumer state here. */
 #ifndef RULES_FORGE_API
 #  if defined(_WIN32) && defined(RULES_FORGE_BUILD)
 #    define RULES_FORGE_API __declspec(dllexport)

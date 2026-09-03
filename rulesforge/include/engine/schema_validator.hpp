@@ -240,7 +240,7 @@ private:
                 return expected == FT_BigInt;
             } else if constexpr (std::is_same_v<T, MoneyValue>) {
                 return expected == FT_Money;
-            } else if constexpr (std::is_same_v<T, turbo_uuid_t>) {
+            } else if constexpr (std::is_same_v<T, salts_uuid_t>) {
                 return (FT_UUID_COMPAT & expected) != 0;
             } else if constexpr (std::is_same_v<T, NilValue>) {
                 return true;  // Nil is valid for any type
@@ -275,7 +275,7 @@ private:
             else if constexpr (std::is_same_v<T, DecimalValue>) return "decimal";
             else if constexpr (std::is_same_v<T, BigIntValue>) return "bigint";
             else if constexpr (std::is_same_v<T, MoneyValue>) return "money";
-            else if constexpr (std::is_same_v<T, turbo_uuid_t>) return "uuid";
+            else if constexpr (std::is_same_v<T, salts_uuid_t>) return "uuid";
             else if constexpr (std::is_same_v<T, NilValue>) return "nil";
             else if constexpr (std::is_same_v<T, FactList>) return "List";
             else if constexpr (std::is_same_v<T, std::shared_ptr<TypedList>>) return "List";

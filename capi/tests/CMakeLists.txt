@@ -4,7 +4,7 @@ project(capi_tests CXX)
 
 add_executable(capi_test capi_test.cpp)
 target_include_directories(capi_test PRIVATE ${CMAKE_SOURCE_DIR}/rulesforge/include)
-target_link_libraries(capi_test PRIVATE rules_forge TurboUtils::TinyTest)
+target_link_libraries(capi_test PRIVATE rules_forge Salts::TinyTest)
 add_test(NAME capi_test COMMAND capi_test)
 
 set_target_properties(capi_test PROPERTIES FOLDER capi/tests)

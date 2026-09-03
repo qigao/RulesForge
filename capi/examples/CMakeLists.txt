@@ -1,7 +1,7 @@
 find_package(cxxopts REQUIRED)
 
 add_executable(capi_demo capi_demo.cpp)
-target_link_libraries(capi_demo PRIVATE rules_forge cxxopts::cxxopts TurboParser::Parser TurboUtils::Core)
+target_link_libraries(capi_demo PRIVATE rules_forge cxxopts::cxxopts Salts::JsonParser Salts::Core)
 set_target_properties(capi_demo PROPERTIES FOLDER capi/examples)
 
 # Copy sample files to output directory
