@@ -16,7 +16,8 @@ function(add_rulesforge_benchmark source)
 
     add_executable(${executable_name} ${source})
     target_link_libraries(
-        ${executable_name} PRIVATE Salts::TinyTest rfl_parser ${TARGET_NAME}
+        ${executable_name}
+        PRIVATE Salts::TinyTest rfl_parser ${RULESFORGE_ENGINE_TARGET}
     )
 
     set_target_properties(${executable_name} PROPERTIES FOLDER ${folder_name})

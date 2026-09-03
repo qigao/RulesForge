@@ -6,7 +6,7 @@ set(RULEFORGE_VERSION_MINOR 9)
 set(RULEFORGE_VERSION_PATCH 0)
 
 # Define the target name for the shared library
-set(CAPI_TARGET_NAME rules_forge)
+set(CAPI_TARGET_NAME RulesForge)
 
 # Add the shared library target
 add_library(
@@ -31,7 +31,7 @@ target_include_directories(
 
 target_link_libraries(
     ${CAPI_TARGET_NAME}
-    PRIVATE rfl_parser RulesForge
+    PRIVATE rfl_parser ${RULESFORGE_ENGINE_TARGET}
     PUBLIC Salts::Core Salts::DataBind
 )
 set_target_properties(${CAPI_TARGET_NAME} PROPERTIES FOLDER capi/)

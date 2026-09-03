@@ -4,7 +4,7 @@
 
 **Goal:** Remove the standalone RulesForge C++ static-library product so C and C++ hosts both consume the shared C ABI.
 
-**Architecture:** Compile the engine as an internal CMake object library and fold those objects into `rules_forge`. Keep the parser archive internal, install only the C header/shared target, and describe the C ABI as the sole supported integration contract.
+**Architecture:** Compile the engine as an internal CMake object library and fold those objects into the final `RulesForge` shared target. Keep the parser archive internal, install only the C header/shared target, and describe the C ABI as the sole supported integration contract.
 
 **Tech Stack:** C17 ABI, C++20 implementation, CMake 3.20+, MSVC/Ninja, CTest.
 
@@ -19,7 +19,7 @@
 
 - [x] Configure, build, and test the unchanged Release preset.
 - [x] Confirm the old build emits `rulesforge/RulesForge.lib` as a standalone static engine archive.
-- [x] Confirm the install rules export only `rules_forge` and the C headers.
+- [x] Confirm the install rules export only `RulesForge` and the C headers.
 
 ### Task 2: Make the C ABI the only product boundary
 
@@ -42,7 +42,7 @@
 - Verify: installed RulesForge package
 
 - [x] Fresh-configure, build, and run Release tests.
-- [x] Verify `RulesForge.lib` is absent while `rules_forge.dll` and its import library remain.
+- [x] Verify the final target produces `RulesForge.dll` and its import library without a separate engine archive.
 - [x] Fresh-configure, build, and run Debug tests.
 - [x] Install both configurations and validate an installed C consumer.
 - [x] Review the final diff and commit the isolated branch.

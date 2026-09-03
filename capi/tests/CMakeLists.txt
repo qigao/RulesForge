@@ -4,7 +4,7 @@ project(capi_tests CXX)
 
 add_executable(capi_test capi_test.cpp)
 target_include_directories(capi_test PRIVATE ${CMAKE_SOURCE_DIR}/rulesforge/include)
-target_link_libraries(capi_test PRIVATE rules_forge Salts::TinyTest)
+target_link_libraries(capi_test PRIVATE RulesForge Salts::TinyTest)
 add_test(NAME capi_test COMMAND capi_test)
 
 set_target_properties(capi_test PROPERTIES FOLDER capi/tests)
@@ -19,7 +19,7 @@ if(WIN32)
     )
 endif()
 
-# Value bridge test (standalone, doesn't depend on rules_forge lib)
+# Value bridge test (standalone, doesn't depend on the RulesForge library)
 add_executable(test_value_bridge
     test_value_bridge.c
     ${CMAKE_SOURCE_DIR}/capi/rfl_value_bridge.cpp

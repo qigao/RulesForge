@@ -88,6 +88,7 @@ include(FindTools)
 # Add subdirectories
 add_subdirectory(parser)
 
+set(RULESFORGE_ENGINE_TARGET rulesforge_engine_objects)
 add_subdirectory(rulesforge)
 add_subdirectory(capi)
 
