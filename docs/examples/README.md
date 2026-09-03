@@ -102,7 +102,7 @@ parser entry pattern.
 - validating business rule structure
 - learning RFL patterns from non-trivial rule sets
 - testing query outputs against known sample domains
-- building your own integration harness on top of the public C API or C++ API
+- building your own C or C++ integration harness on top of the public C ABI
 
 ## Related Docs
 

@@ -20,8 +20,10 @@ arbitrary host functions.
 
 The installed C contract is [`include/rules_forge.h`](../include/rules_forge.h).
 It defines ownership, thread affinity, status codes, DataBind input functions,
-and continuous-session functions. The C++ headers under `rulesforge/include`
-are intended for applications that need direct engine integration.
+and continuous-session functions. C and C++ applications both integrate through
+this C ABI and the installed `rules_forge` shared library. The C++ headers under
+`rulesforge/include` are internal implementation interfaces and are not
+installed.
 
 Documents describe the current implementation, not a compatibility promise
 beyond the public headers and exported library ABI.

@@ -492,7 +492,7 @@ all external side effects.
 
 RulesForge engine sessions accept already constructed facts. External files and payloads must be schema-bound when they enter through the public C API.
 
-### C++ API
+### Internal C++ engine behavior
 
 ```cpp
 #include "engine/data_source.hpp"
@@ -508,6 +508,9 @@ Current runtime behavior:
 - C++ engine runtime is fact-only
 - schema-aware C API helpers use `Salts::DataBind` to bind JSON/YAML/CSV/XML/binary payloads into session-owned facts
 - the target external fact type must be imported into the KnowledgeBase from `.schema`
+
+These interfaces support the in-tree implementation and tests. Applications,
+including C++ applications, use the installed C ABI in `rules_forge.h`.
 
 Complete-document and incremental input APIs are documented in
 [`DATA_INGESTION.md`](./DATA_INGESTION.md). Input and file I/O remain host

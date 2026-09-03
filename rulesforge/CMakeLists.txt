@@ -1,11 +1,13 @@
 set(TARGET_NAME RulesForge)
 
-# Collect RulesForge sources (excluding parser which is now separate)
+# Collect the internal C++ engine sources (excluding the separate parser).
 file(GLOB_RECURSE SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h*
      ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c*
 )
 
-add_library(${TARGET_NAME} STATIC ${SOURCES})
+# Compile the engine once for the shared C ABI and the in-tree C++ tests without
+# producing a standalone C++ static library.
+add_library(${TARGET_NAME} OBJECT ${SOURCES})
 
 
 # Link dependencies

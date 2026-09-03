@@ -29,7 +29,7 @@ target_include_directories(test_value_bridge PRIVATE
     ${CMAKE_SOURCE_DIR}/capi
     ${CMAKE_SOURCE_DIR}/rulesforge/include
 )
-target_link_libraries(test_value_bridge PRIVATE RulesForge)
+target_link_libraries(test_value_bridge PRIVATE rfl_parser)
 add_test(NAME test_value_bridge COMMAND test_value_bridge)
 
 set_target_properties(test_value_bridge PROPERTIES FOLDER capi/tests)
@@ -52,7 +52,7 @@ target_include_directories(value_bridge_fact_test PRIVATE
     ${CMAKE_SOURCE_DIR}/capi
     ${CMAKE_SOURCE_DIR}/rulesforge/include
 )
-target_link_libraries(value_bridge_fact_test PRIVATE RulesForge)
+target_link_libraries(value_bridge_fact_test PRIVATE rfl_parser)
 add_test(NAME value_bridge_fact_test COMMAND value_bridge_fact_test)
 
 set_target_properties(value_bridge_fact_test PROPERTIES FOLDER capi/tests)
