@@ -424,6 +424,17 @@ std::size_t StatefulSession::advance_event_time(std::int64_t watermark_ms) {
 }
 
 int StatefulSession::fire_all_rules_impl(int max_rules, bool fail_fast) {
+    if (execution_active_) {
+        throw std::logic_error("Cannot reenter rule execution on the same session");
+    }
+    struct ExecutionScope final {
+        bool& active;
+        explicit ExecutionScope(bool& flag) : active(flag) { active = true; }
+        ~ExecutionScope() noexcept { active = false; }
+        ExecutionScope(ExecutionScope const&) = delete;
+        ExecutionScope& operator=(ExecutionScope const&) = delete;
+    } execution_scope(execution_active_);
+
     int total_fired_count = 0;
     constexpr size_t kAgendaBatchSize = 64;
 
@@ -1208,6 +1219,9 @@ void StatefulSession::flush_pending_nodes() {
 }
 
 void StatefulSession::reset() {
+    if (execution_active_) {
+        throw std::logic_error("Cannot reset a session during rule execution");
+    }
     halt_requested_ = false;
     deferred_mode_ = false;
     in_rhs_transaction_ = false;
