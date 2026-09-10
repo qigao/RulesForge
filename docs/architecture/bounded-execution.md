@@ -5,6 +5,16 @@
 [TurboFlow #73](https://github.com/qigao/turbo-flow/issues/73)。
 执行准入前置单独跟踪于 [RulesForge #7](https://github.com/qigao/RulesForge/issues/7)。
 
+## 已交付的 WHILE 局部边界
+
+RulesForge #9 已收紧现有 RHS `while` 的局部安全限制：配置必须为正数，默认值仍为
+1000；N 表示最多进入循环体 N 次。第 N 次执行后允许再求值一次只读条件，条件为
+false 时正常完成；若仍为 true，则在第 N+1 次循环体产生副作用前失败，并由既有
+RHS 事务回滚。`break` 和 `continue` 保留控制语义，`continue` 仍计入次数。
+
+此限制只计算 `while` 循环体进入次数，不是表达式、匹配、命令或 CPU deadline
+预算；因此不构成 #6 或 TurboFlow #73 的完整有界执行能力，两项仍保持开放。
+
 ## 背景与证据
 
 事实基线：`809048ae11e54eb7a10952af19f3639d3d135d20`。

@@ -57,6 +57,7 @@ struct SwitchCase {
 };
 
 struct CompiledAction {
+    static constexpr int kDefaultWhileMaxIterations = 1000;
     RhsActionType type = RhsActionType::UPDATE;
     std::string target_var;           // UPDATE/RETRACT target ($var)
     std::string target_type;          // INSERT type name
@@ -70,7 +71,7 @@ struct CompiledAction {
     std::string iter_source_field;    // FOR field iteration ($var.field)
     std::vector<std::string> iter_source_list;  // FOR value list iteration ($a, $b, $c)
     std::vector<CompiledAction> body_actions;  // FOR/WHILE body
-    int max_iterations = 1000;        // WHILE safety limit
+    int max_iterations = kDefaultWhileMaxIterations; // Maximum permitted WHILE body executions
     std::shared_ptr<rulesforge::ExpressionDescriptor> switch_expr;  // SWITCH expression
     std::vector<SwitchCase> switch_cases;  // SWITCH cases
 };
