@@ -1,6 +1,10 @@
 #include "rfl_parser.hpp"
 #include "engine/knowledge_base.hpp"
 #include "engine/stateful_session.hpp"
+#include "engine/cpp_rhs_action_plan_builder.hpp"
+#include "engine/rhs_backend_plan.hpp"
+#include "engine/rhs_executor.hpp"
+#include "rhs_parser.hpp"
 #include "test_helpers.hpp"
 #include "tinytest.hpp"
 
@@ -451,6 +455,241 @@ suite("RHS Control Flow") {
     }
 
     group("while") {
+        it("allows exactly the configured default number of body executions") {
+            auto session = build_session(R"(
+                declare Counter
+                    count: int
+                    limit: int
+                end
+                declare Result
+                    count: int
+                end
+                rule "Exact While Limit"
+                when
+                    $c : Counter(count == 0)
+                then
+                    while $c.count < $c.limit {
+                        update $c { count = $c.count + 1 }
+                    }
+                    insert Result { count = $c.count }
+                end
+            )");
+
+            auto fact = std::make_shared<Fact>();
+            fact->type = "Counter";
+            fact->fields["count"] = int64_t(0);
+            fact->fields["limit"] = int64_t(1000);
+            session->add_fact(fact.get());
+
+            bool threw = false;
+            try {
+                (void)session->fire_all_rules();
+            } catch (std::runtime_error const&) {
+                threw = true;
+            }
+            check_equal(threw, false);
+            check_equal(std::get<int64_t>(fact->fields["count"]), int64_t{1000});
+            Fact* result = find_fact_by_type(*session, "Result");
+            check(result != nullptr);
+            if (result) check_equal(std::get<int64_t>(result->fields["count"]), int64_t{1000});
+        }
+
+        it("completes boundary counts below the default limit") {
+            for (int64_t const limit : {int64_t{0}, int64_t{1}, int64_t{999}}) {
+                auto session = build_session(R"(
+                    declare Counter count: int limit: int end
+                    declare Result count: int end
+                    rule "While Boundary" when $c : Counter(count == 0) then
+                        while $c.count < $c.limit { update $c { count = $c.count + 1 } }
+                        insert Result { count = $c.count }
+                    end
+                )");
+                auto fact = std::make_shared<Fact>();
+                fact->type = "Counter";
+                fact->fields["count"] = int64_t{0};
+                fact->fields["limit"] = limit;
+                session->add_fact(fact.get());
+                check_equal(session->fire_all_rules(), 1);
+                check_equal(std::get<int64_t>(fact->fields["count"]), limit);
+                auto* result = find_fact_by_type(*session, "Result");
+                check(result != nullptr);
+                if (result) check_equal(std::get<int64_t>(result->fields["count"]), limit);
+            }
+        }
+
+        it("rolls back before an over-limit body execution") {
+            auto session = build_session(R"(
+                declare Counter count: int limit: int end
+                declare Result count: int end
+                rule "While Over Limit" when $c : Counter(count == 0) then
+                    while $c.count < $c.limit { update $c { count = $c.count + 1 } }
+                    insert Result { count = $c.count }
+                end
+            )");
+            auto fact = std::make_shared<Fact>();
+            fact->type = "Counter";
+            fact->fields["count"] = int64_t{0};
+            fact->fields["limit"] = int64_t{1001};
+            session->add_fact(fact.get());
+            bool threw = false;
+            try { (void)session->fire_all_rules(); }
+            catch (std::runtime_error const& e) {
+                threw = std::string(e.what()).find("max iterations") != std::string::npos;
+            }
+            check_equal(threw, true);
+            check_equal(std::get<int64_t>(fact->fields["count"]), int64_t{0});
+            check(find_fact_by_type(*session, "Result") == nullptr);
+
+            session->reset();
+            auto retry = std::make_shared<Fact>();
+            retry->type = "Counter";
+            retry->fields["count"] = int64_t{0};
+            retry->fields["limit"] = int64_t{1};
+            session->add_fact(retry.get());
+            check_equal(session->fire_all_rules(), 1);
+            check_equal(std::get<int64_t>(retry->fields["count"]), int64_t{1});
+            check(find_fact_by_type(*session, "Result") != nullptr);
+        }
+
+        it("counts continue iterations and allows break on the last permitted body") {
+            auto session = build_session(R"(
+                declare Counter count: int end
+                declare Result count: int end
+                rule "Continue Exact Limit" salience 2 when $c : Counter(count == 0) then
+                    while $c.count < 1000 {
+                        update $c { count = $c.count + 1 }
+                        continue
+                    }
+                    insert Result { count = $c.count }
+                end
+            )");
+            auto fact = std::make_shared<Fact>();
+            fact->type = "Counter";
+            fact->fields["count"] = int64_t{0};
+            session->add_fact(fact.get());
+            check_equal(session->fire_all_rules(), 1);
+            check_equal(std::get<int64_t>(fact->fields["count"]), int64_t{1000});
+            check(find_fact_by_type(*session, "Result") != nullptr);
+
+            auto break_session = build_session(R"(
+                declare Counter count: int end
+                rule "Break At Limit" when $c : Counter(count == 0) then
+                    while $c.count < 1001 {
+                        update $c { count = $c.count + 1 }
+                        if $c.count == 1000 { break }
+                    }
+                end
+            )");
+            auto break_fact = std::make_shared<Fact>();
+            break_fact->type = "Counter";
+            break_fact->fields["count"] = int64_t{0};
+            break_session->add_fact(break_fact.get());
+            check_equal(break_session->fire_all_rules(), 1);
+            check_equal(std::get<int64_t>(break_fact->fields["count"]), int64_t{1000});
+
+            auto over_limit_session = build_session(R"(
+                declare Counter count: int end
+                rule "Continue Over Limit" when $c : Counter(count == 0) then
+                    while 1 > 0 {
+                        update $c { count = $c.count + 1 }
+                        continue
+                    }
+                end
+            )");
+            auto over_limit_fact = std::make_shared<Fact>();
+            over_limit_fact->type = "Counter";
+            over_limit_fact->fields["count"] = int64_t{0};
+            over_limit_session->add_fact(over_limit_fact.get());
+            bool over_limit_threw = false;
+            try { (void)over_limit_session->fire_all_rules(); }
+            catch (std::runtime_error const& e) {
+                over_limit_threw = std::string(e.what()).find("max iterations") != std::string::npos;
+            }
+            check_equal(over_limit_threw, true);
+            check_equal(std::get<int64_t>(over_limit_fact->fields["count"]), int64_t{0});
+        }
+
+        it("rejects a zero limit while building plans") {
+            auto actions = rulesforge::RhsParser::parse("while 1 > 0 { break }", {});
+            actions.front().max_iterations = 0;
+            rulesforge::CppRhsActionScript zero_out;
+            std::string zero_reason;
+            check_equal(rulesforge::CppRhsActionPlanBuilder::build(actions, zero_out, &zero_reason), false);
+            check_equal(zero_reason, std::string("while_limit_invalid"));
+            check_equal(zero_out.root_actions.empty(), true);
+            check_equal(actions.front().max_iterations, 0);
+        }
+
+        it("rejects a negative limit while building plans") {
+            auto actions = rulesforge::RhsParser::parse("while 1 > 0 { break }", {});
+            actions.front().max_iterations = -1;
+            rulesforge::CppRhsActionScript out;
+            std::string reason;
+            check_equal(rulesforge::CppRhsActionPlanBuilder::build(actions, out, &reason), false);
+            check_equal(reason, std::string("while_limit_invalid"));
+            check_equal(out.root_actions.empty(), true);
+            check_equal(actions.front().max_iterations, -1);
+
+            auto nested = rulesforge::RhsParser::parse(
+                "if 1 > 0 { while 1 > 0 { break } }", {});
+            check_equal(nested.size(), size_t{1});
+            nested.front().then_actions.front().max_iterations = 0;
+            rulesforge::CppRhsActionScript nested_out;
+            std::string nested_reason;
+            check_equal(rulesforge::CppRhsActionPlanBuilder::build(nested, nested_out, &nested_reason), false);
+            check_equal(nested_reason, std::string("while_limit_invalid"));
+            check_equal(nested_out.root_actions.empty(), true);
+        }
+
+        it("clears partial plan output after an invalid while limit") {
+            auto valid = rulesforge::RhsParser::parse("insert Result { count = 1 }", {});
+            rulesforge::CppRhsActionScript out;
+            std::string reason;
+            check_equal(rulesforge::CppRhsActionPlanBuilder::build(valid, out, &reason), true);
+            check_equal(out.root_actions.empty(), false);
+
+            auto invalid = rulesforge::RhsParser::parse(
+                "insert Result { count = 1 } while 1 > 0 { break }", {});
+            invalid.back().max_iterations = 0;
+            check_equal(rulesforge::CppRhsActionPlanBuilder::build(invalid, out, &reason), false);
+            check_equal(reason, std::string("while_limit_invalid"));
+            check_equal(out.root_actions.empty(), true);
+            check_equal(out.command_actions.empty(), true);
+            check_equal(out.condition_actions.empty(), true);
+            check_equal(out.condition_switch_case_indices.empty(), true);
+            check_equal(out.for_actions.empty(), true);
+            check_equal(out.while_actions.empty(), true);
+            check_equal(out.script.empty(), true);
+        }
+
+        auto check_runtime_limit_rejected = [](int invalid_limit) {
+            auto actions = rulesforge::RhsParser::parse("while 0 > 1 { break }", {});
+            actions.front().max_iterations = invalid_limit;
+
+            rulesforge::RhsCompiledCommandProgram program;
+            program.script.root_actions.push_back(&actions.front());
+            auto session = build_session("declare Placeholder\n value: int\nend\n");
+            rulesforge::RhsExecutor executor(*session);
+            Token token{};
+            std::map<std::string, int> bindings;
+
+            bool threw = false;
+            try {
+                executor.execute(program, token, bindings, "Corrupted While Limit");
+            } catch (std::runtime_error const& e) {
+                threw = std::string(e.what()).find("requires positive max iterations")
+                        != std::string::npos;
+            }
+            check_equal(threw, true);
+        };
+
+        it("rejects a corrupted zero limit at runtime") {
+            check_runtime_limit_rejected(0);
+        }
+
+        it("rejects a corrupted negative limit at runtime") {
+            check_runtime_limit_rejected(-1);
+        }
         it("loops until condition is false") {
             auto session = build_session(R"(
                 declare Counter
