@@ -100,7 +100,17 @@ public:
   void retract_from(std::string const& stream_name, Fact* fact);
   void validate_entry_point_route(std::string const& stream_name,
                                   std::string const& fact_type) const;
+  /**
+   * Execute pending rules. Sessions remain caller-serialized; this method does
+   * not make concurrent access safe. Reentry on this session throws
+   * std::logic_error before execution state is modified.
+   */
   int fire_all_rules(int max_rules = -1);
+  /**
+   * Execute pending rules and propagate RHS failures. Sessions remain
+   * caller-serialized; reentry on this session throws std::logic_error before
+   * execution state is modified.
+   */
   int fire_all_rules_fail_fast(int max_rules = -1);
   std::size_t advance_event_time(std::int64_t watermark_ms);
   void enable_event_time_mode() { event_time_mode_ = true; }
@@ -216,6 +226,9 @@ public:
    *
    * WARNING: Does not reset network memory or compiled network.
    * Only suitable for stateless rule processing.
+   *
+   * This session remains caller-serialized. Calling reset during rule execution
+   * on this session throws std::logic_error before session state is modified.
    */
   void reset();
 
@@ -333,6 +346,7 @@ private:
   Agenda agenda_;
   std::vector<std::shared_ptr<IEngineListener>> listeners_;
   bool halt_requested_ = false;
+  bool execution_active_ = false;
 
   bool in_rhs_transaction_ = false;
   bool is_consistent_ = true;
