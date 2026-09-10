@@ -611,6 +611,7 @@ suite("RHS Control Flow") {
 
         it("rejects a zero limit while building plans") {
             auto actions = rulesforge::RhsParser::parse("while 1 > 0 { break }", {});
+            check_equal(actions.size(), size_t{1});
             actions.front().max_iterations = 0;
             rulesforge::CppRhsActionScript zero_out;
             std::string zero_reason;
@@ -622,6 +623,7 @@ suite("RHS Control Flow") {
 
         it("rejects a negative limit while building plans") {
             auto actions = rulesforge::RhsParser::parse("while 1 > 0 { break }", {});
+            check_equal(actions.size(), size_t{1});
             actions.front().max_iterations = -1;
             rulesforge::CppRhsActionScript out;
             std::string reason;
@@ -633,6 +635,7 @@ suite("RHS Control Flow") {
             auto nested = rulesforge::RhsParser::parse(
                 "if 1 > 0 { while 1 > 0 { break } }", {});
             check_equal(nested.size(), size_t{1});
+            check_equal(nested.front().then_actions.size(), size_t{1});
             nested.front().then_actions.front().max_iterations = 0;
             rulesforge::CppRhsActionScript nested_out;
             std::string nested_reason;
@@ -643,6 +646,7 @@ suite("RHS Control Flow") {
 
         it("clears partial plan output after an invalid while limit") {
             auto valid = rulesforge::RhsParser::parse("insert Result { count = 1 }", {});
+            check_equal(valid.size(), size_t{1});
             rulesforge::CppRhsActionScript out;
             std::string reason;
             check_equal(rulesforge::CppRhsActionPlanBuilder::build(valid, out, &reason), true);
@@ -650,6 +654,7 @@ suite("RHS Control Flow") {
 
             auto invalid = rulesforge::RhsParser::parse(
                 "insert Result { count = 1 } while 1 > 0 { break }", {});
+            check_equal(invalid.size(), size_t{2});
             invalid.back().max_iterations = 0;
             check_equal(rulesforge::CppRhsActionPlanBuilder::build(invalid, out, &reason), false);
             check_equal(reason, std::string("while_limit_invalid"));
@@ -664,6 +669,7 @@ suite("RHS Control Flow") {
 
         auto check_runtime_limit_rejected = [](int invalid_limit) {
             auto actions = rulesforge::RhsParser::parse("while 0 > 1 { break }", {});
+            check_equal(actions.size(), size_t{1});
             actions.front().max_iterations = invalid_limit;
 
             rulesforge::RhsCompiledCommandProgram program;
