@@ -156,7 +156,7 @@ ctest --preset win-release-user -R "^(engine_session_test\.RulesForge|rhs_contro
 共享 session 实现影响所有引擎消费者；合并前完整 build/CTest 两个 user preset，
 如发现无关基线失败，报告证据并区分，不跳过或放松测试。此阶段不运行 install。
 
-- [ ] **Step 6: 审查、提交并更新 #6，不关闭父任务。**
+- [x] **Step 6: 审查、提交并更新 #6，不关闭父任务。**
 
 ```text
 git diff --check
