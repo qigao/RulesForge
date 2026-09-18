@@ -311,8 +311,7 @@ jobs:
         run: |
           set -euxo pipefail
           ctest --preset linux-release-user \
-            -R '^test_turbo_flow_install_consumer        if: always()
-        shell: bash
+            -R '^test_turbo_flow_install_consumer        shell: bash
         run: |
           set -euxo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
