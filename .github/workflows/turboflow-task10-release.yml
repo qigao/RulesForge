@@ -326,8 +326,7 @@ jobs:
           TURBODB_ROOT: /opt/turbodb/release
         run: |
           set -euxo pipefail
-          ctest --preset linux-release-user \
-            -R '^(test_protocol_network_jtt808|test_protocol_network_coap)        shell: bash
+          ctest --preset linux-release-user -R '^(test_protocol_network_jtt808|test_protocol_network_coap)        shell: bash
         working-directory: .ci/task10/turbo-flow
         env:
           TURBO_FLOW_ACTIVE_PRESET: linux-release-user
@@ -362,10 +361,7 @@ jobs:
           if-no-files-found: warn
           path: |
             ${{ runner.temp }}/task10-*.log
- \
-            --output-on-failure \
-            2>&1 | tee "$RUNNER_TEMP/task10-protocol-network-e2e.log"
-
+ --output-on-failure 2>&1 | tee "$RUNNER_TEMP/task10-protocol-network-e2e.log"
       - name: Run TurboFlow installed consumer and ABI contract
         shell: bash
         working-directory: .ci/task10/turbo-flow
