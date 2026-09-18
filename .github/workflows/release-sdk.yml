@@ -1,0 +1,185 @@
+name: Release SDK
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rulesforge-release-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  VCPKG_COMMIT: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+  SALTS_COMMIT: 2804c2eb809fed4cb89f917f0a8cd00f482abb64
+  SALTS_UTILS_COMMIT: 0b3876018e5bdaed70fecbc0d0863cb394dd6044
+
+jobs:
+  linux-release:
+    name: Linux Release SDK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact RulesForge head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact source identity
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --check HEAD^ HEAD
+          git diff --exit-code
+
+      - name: Checkout pinned Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ env.SALTS_COMMIT }}
+          path: .ci/deps/salts
+          persist-credentials: false
+
+      - name: Checkout pinned SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: ${{ env.SALTS_UTILS_COMMIT }}
+          path: .ci/deps/salts-utils
+          persist-credentials: false
+
+      - name: Checkout pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_COMMIT }}
+          path: vcpkg
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: rulesforge-vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            rulesforge-vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-
+
+      - name: Cache pinned dependency SDKs
+        id: dependency-sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/sdk/salts-release
+            ${{ runner.temp }}/sdk/salts-utils-release
+          key: rulesforge-dependency-sdk-${{ runner.os }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-${{ env.VCPKG_COMMIT }}
+
+      - name: Prepare Linux toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils autoconf automake libtool
+          ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          sudo mkdir -p /opt
+          sudo ln -sfn "$GITHUB_WORKSPACE/vcpkg" /opt/vcpkg
+
+      - name: Install pinned re2c 4.6 with Unicode tables
+        if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: bash .ci/deps/salts-utils/cmake/ci/install-re2c.sh
+
+      - name: Build standalone host Lemon
+        if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S .ci/deps/salts-utils/tools/lemon -B "$RUNNER_TEMP/host-lemon" -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/host-lemon" --target lemon -j2
+
+      - name: Build pinned Salts Release SDK
+        if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          PROJECT_ROOT: ${{ runner.temp }}/salts-project
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        run: |
+          set -euxo pipefail
+          cmake -S .ci/deps/salts -B "$RUNNER_TEMP/build/salts-release" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdk/salts-release" \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
+          cmake --build "$RUNNER_TEMP/build/salts-release" --target install -j2
+
+      - name: Build pinned SaltsUtils Release SDK
+        if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          SALTS_ROOT: ${{ runner.temp }}/sdk/salts-release
+        run: |
+          set -euxo pipefail
+          cmake -S .ci/deps/salts-utils -B "$RUNNER_TEMP/build/salts-utils-release" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdk/salts-utils-release" \
+            -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$RUNNER_TEMP/host-lemon/lemon" \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
+          cmake --build "$RUNNER_TEMP/build/salts-utils-release" --target install -j2
+
+      - name: Validate cached dependency SDKs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -d "$RUNNER_TEMP/sdk/salts-release/include"
+          test -d "$RUNNER_TEMP/sdk/salts-utils-release/include"
+          sudo ln -sfn "$RUNNER_TEMP/sdk/salts-release" /opt/salts-release
+          sudo ln -sfn "$RUNNER_TEMP/sdk/salts-utils-release" /opt/salts-utils-release
+
+      - name: Configure RulesForge Release
+        shell: bash
+        env:
+          PKG_ROOT: /opt
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+          VCPKG_INSTALLED_DIR: ${{ github.workspace }}/vcpkg_installed
+          SALTS_ROOT: ${{ runner.temp }}/sdk/salts-release
+          SALTS_UTILS_ROOT: ${{ runner.temp }}/sdk/salts-utils-release
+        run: |
+          set -euxo pipefail
+          cmake --preset linux-release-user \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdk/rules-forge-release" \
+            2>&1 | tee "$RUNNER_TEMP/rulesforge-release-configure.log"
+
+      - name: Build and install RulesForge Release SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build --preset linux-release-user -j2 2>&1 | tee "$RUNNER_TEMP/rulesforge-release-build.log"
+          cmake --build build/linux-gcc-release --target install -j2 2>&1 | tee "$RUNNER_TEMP/rulesforge-release-install.log"
+          test -d "$RUNNER_TEMP/sdk/rules-forge-release/include"
+
+      - name: Verify committed source remained untouched
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
+
+      - name: Upload Release SDK evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rulesforge-release-sdk-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/rulesforge-release-*.log
+            ${{ runner.temp }}/sdk/rules-forge-release/
