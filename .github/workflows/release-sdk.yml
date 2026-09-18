@@ -63,7 +63,7 @@ jobs:
           repository: microsoft/vcpkg
           ref: ${{ env.VCPKG_COMMIT }}
           path: vcpkg
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Cache vcpkg binary archives
