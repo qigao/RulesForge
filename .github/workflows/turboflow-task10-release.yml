@@ -1,0 +1,322 @@
+name: TurboFlow Task 10 Release Integration
+
+on:
+  push:
+    branches: [ci/turboflow-task10-release]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: turboflow-task10-release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPECTED_RULES_FORGE_SHA: ${{ github.sha }}
+  VCPKG_COMMIT: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+  SALTS_COMMIT: 2804c2eb809fed4cb89f917f0a8cd00f482abb64
+  SALTS_UTILS_COMMIT: 0b3876018e5bdaed70fecbc0d0863cb394dd6044
+  CHTTP_COMMIT: 7c1863b0b1539e92cd4ce0d820e57c623cb609d6
+  TURBODB_COMMIT: 855e9c3eeb77d41fa1fc20fc44cc01ebe9c77a41
+  TURBO_FLOW_COMMIT: 6bd0d11cdf1ec2b67bb36fdeb8fbd9813b6a1601
+
+jobs:
+  linux-release-integration:
+    name: Linux Release install/package/ABI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout exact RulesForge head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_RULES_FORGE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact RulesForge source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_RULES_FORGE_SHA"
+          git diff --check HEAD^ HEAD
+          git diff --exit-code
+
+      - name: Checkout pinned Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ env.SALTS_COMMIT }}
+          path: .ci/deps/salts
+          persist-credentials: false
+
+      - name: Checkout pinned SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: ${{ env.SALTS_UTILS_COMMIT }}
+          path: .ci/deps/salts-utils
+          persist-credentials: false
+
+      - name: Checkout pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_COMMIT }}
+          path: vcpkg
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: rulesforge-vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            rulesforge-vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-
+
+      - name: Restore pinned dependency SDKs
+        id: dependency-sdk-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ runner.temp }}/sdk/salts-release
+            ${{ runner.temp }}/sdk/salts-utils-release
+          key: rulesforge-dependency-sdk-${{ runner.os }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-${{ env.VCPKG_COMMIT }}
+
+      - name: Prepare Linux toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils autoconf automake libtool
+          ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          sudo mkdir -p /opt
+          sudo ln -sfn "$GITHUB_WORKSPACE/vcpkg" /opt/vcpkg
+
+      - name: Install pinned re2c 4.6 with Unicode tables
+        if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: bash .ci/deps/salts-utils/cmake/ci/install-re2c.sh
+
+      - name: Build standalone host Lemon
+        if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S .ci/deps/salts-utils/tools/lemon -B "$RUNNER_TEMP/host-lemon" -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/host-lemon" --target lemon -j2
+
+      - name: Build pinned Salts Release SDK
+        if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          PROJECT_ROOT: ${{ runner.temp }}/salts-project
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        run: |
+          set -euxo pipefail
+          cmake -S .ci/deps/salts -B "$RUNNER_TEMP/build/salts-release" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdk/salts-release" \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
+          cmake --build "$RUNNER_TEMP/build/salts-release" --target install -j2
+
+      - name: Build pinned SaltsUtils Release SDK
+        if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          SALTS_ROOT: ${{ runner.temp }}/sdk/salts-release
+        run: |
+          set -euxo pipefail
+          cmake -S .ci/deps/salts-utils -B "$RUNNER_TEMP/build/salts-utils-release" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdk/salts-utils-release" \
+            -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$RUNNER_TEMP/host-lemon/lemon" \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
+          cmake --build "$RUNNER_TEMP/build/salts-utils-release" --target install -j2
+
+      - name: Save pinned dependency SDKs
+        if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ runner.temp }}/sdk/salts-release
+            ${{ runner.temp }}/sdk/salts-utils-release
+          key: rulesforge-dependency-sdk-${{ runner.os }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-${{ env.VCPKG_COMMIT }}
+
+      - name: Publish dependency SDK roots
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -d "$RUNNER_TEMP/sdk/salts-release/include"
+          test -d "$RUNNER_TEMP/sdk/salts-utils-release/include"
+          sudo mkdir -p /opt/salts /opt/salts-utils
+          sudo ln -sfn "$RUNNER_TEMP/sdk/salts-release" /opt/salts/release
+          sudo ln -sfn "$RUNNER_TEMP/sdk/salts-utils-release" /opt/salts-utils/release
+
+      - name: Configure RulesForge Release
+        shell: bash
+        env:
+          PKG_ROOT: /opt
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+          VCPKG_INSTALLED_DIR: ${{ github.workspace }}/vcpkg_installed
+        run: |
+          set -euxo pipefail
+          cmake --preset linux-release-user \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdk/rules-forge-release" \
+            2>&1 | tee "$RUNNER_TEMP/task10-rulesforge-configure.log"
+
+      - name: Build and install RulesForge Release SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build --preset linux-release-user -j2 \
+            2>&1 | tee "$RUNNER_TEMP/task10-rulesforge-build.log"
+          cmake --build build/linux-gcc-release --target install -j2 \
+            2>&1 | tee "$RUNNER_TEMP/task10-rulesforge-install.log"
+          test -d "$RUNNER_TEMP/sdk/rules-forge-release/include"
+          sudo mkdir -p /opt/rules_forge
+          sudo ln -sfn "$RUNNER_TEMP/sdk/rules-forge-release" /opt/rules_forge/release
+
+      - name: Checkout pinned CHttp
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/chttp
+          ref: ${{ env.CHTTP_COMMIT }}
+          path: .ci/task10/chttp
+          persist-credentials: false
+
+      - name: Checkout pinned TurboDB
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/turbodb
+          ref: ${{ env.TURBODB_COMMIT }}
+          path: .ci/task10/turbodb
+          persist-credentials: false
+
+      - name: Checkout exact TurboFlow Task 9 GREEN head
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/turbo-flow
+          ref: ${{ env.TURBO_FLOW_COMMIT }}
+          path: .ci/task10/turbo-flow
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build and install CHttp Release SDK
+        shell: bash
+        env:
+          SALTS_ROOT: /opt/salts/release
+          SALTS_UTILS_ROOT: /opt/salts-utils/release
+        run: |
+          set -euxo pipefail
+          test "$(git -C .ci/task10/chttp rev-parse HEAD)" = "$CHTTP_COMMIT"
+          cmake -S .ci/task10/chttp -B "$RUNNER_TEMP/build/chttp-release" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdk/http-services-release" \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DVCPKG_INSTALLED_DIR="$RUNNER_TEMP/vcpkg-installed/chttp" \
+            -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF -DBUILD_EXAMPLES=OFF \
+            2>&1 | tee "$RUNNER_TEMP/task10-chttp-configure.log"
+          cmake --build "$RUNNER_TEMP/build/chttp-release" --target install -j2 \
+            2>&1 | tee "$RUNNER_TEMP/task10-chttp-build.log"
+          sudo mkdir -p /opt/http-services
+          sudo ln -sfn "$RUNNER_TEMP/sdk/http-services-release" /opt/http-services/release
+          test -d /opt/http-services/release/lib/cmake/Chttp
+
+      - name: Build and install TurboDB SQLite Release SDK
+        shell: bash
+        env:
+          SALTS_ROOT: /opt/salts/release
+        run: |
+          set -euxo pipefail
+          test "$(git -C .ci/task10/turbodb rev-parse HEAD)" = "$TURBODB_COMMIT"
+          cmake -S .ci/task10/turbodb -B "$RUNNER_TEMP/build/turbodb-release" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdk/turbodb-release" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DVCPKG_INSTALLED_DIR="$RUNNER_TEMP/vcpkg-installed/turbodb" \
+            -DENABLE_ASAN=OFF -DBUILD_TESTING=OFF -DENABLE_TESTS=OFF \
+            -DBUILD_TESTS=OFF -DORM_BUILD_TESTS=OFF -DTIDESDB_BUILD_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_BUILD_REDIS=OFF \
+            -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DTURBODB_DBTOOLS_WITH_PGSQL=OFF \
+            2>&1 | tee "$RUNNER_TEMP/task10-turbodb-configure.log"
+          cmake --build "$RUNNER_TEMP/build/turbodb-release" --target install -j2 \
+            2>&1 | tee "$RUNNER_TEMP/task10-turbodb-build.log"
+          sudo mkdir -p /opt/turbodb
+          sudo ln -sfn "$RUNNER_TEMP/sdk/turbodb-release" /opt/turbodb/release
+          test -d /opt/turbodb/release/include
+
+      - name: Configure full TurboFlow Release
+        shell: bash
+        working-directory: .ci/task10/turbo-flow
+        env:
+          PKG_ROOT: /opt
+          SALTS_ROOT: /opt/salts/release
+          SALTS_UTILS_ROOT: /opt/salts-utils/release
+          RULES_FORGE_ROOT: /opt/rules_forge/release
+          HTTP_SERVICES_ROOT: /opt/http-services/release
+          TURBODB_ROOT: /opt/turbodb/release
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$TURBO_FLOW_COMMIT"
+          sudo mkdir -p /opt/turboflow
+          sudo rm -rf /opt/turboflow/release
+          mkdir -p "$RUNNER_TEMP/sdk/turboflow-release"
+          sudo ln -s "$RUNNER_TEMP/sdk/turboflow-release" /opt/turboflow/release
+          cmake --preset linux-release-user \
+            2>&1 | tee "$RUNNER_TEMP/task10-turboflow-configure.log"
+
+      - name: Build and install full TurboFlow Release
+        shell: bash
+        working-directory: .ci/task10/turbo-flow
+        run: |
+          set -euxo pipefail
+          cmake --build --preset linux-release-user -j2 \
+            2>&1 | tee "$RUNNER_TEMP/task10-turboflow-build.log"
+          cmake --build --preset install-linux-release-user -j2 \
+            2>&1 | tee "$RUNNER_TEMP/task10-turboflow-install.log"
+
+      - name: Run TurboFlow installed consumer and ABI contract
+        shell: bash
+        working-directory: .ci/task10/turbo-flow
+        env:
+          TURBO_FLOW_ACTIVE_PRESET: linux-release-user
+          TURBO_FLOW_ROOT: /opt/turboflow/release
+          SALTS_ROOT: /opt/salts/release
+          SALTS_UTILS_ROOT: /opt/salts-utils/release
+          RULES_FORGE_ROOT: /opt/rules_forge/release
+          HTTP_SERVICES_ROOT: /opt/http-services/release
+          TURBODB_ROOT: /opt/turbodb/release
+        run: |
+          set -euxo pipefail
+          ctest --preset linux-release-user \
+            -R '^test_turbo_flow_install_consumer$' --output-on-failure \
+            2>&1 | tee "$RUNNER_TEMP/task10-install-consumer.log"
+          test "$(git rev-parse HEAD)" = "$TURBO_FLOW_COMMIT"
+          git diff --exit-code
+
+      - name: Verify RulesForge source remained untouched
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_RULES_FORGE_SHA"
+          git diff --exit-code
+
+      - name: Upload Task 10 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turboflow-task10-release-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/task10-*.log
