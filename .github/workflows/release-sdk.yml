@@ -74,6 +74,14 @@ jobs:
           restore-keys: |
             rulesforge-vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-
 
+      - name: Restore bootstrapped vcpkg tool
+        id: vcpkg-tool-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vcpkg/vcpkg
+          key: rulesforge-vcpkg-tool-${{ runner.os }}-${{ env.VCPKG_COMMIT }}
+
+
       - name: Restore pinned dependency SDKs
         id: dependency-sdk-cache
         uses: actions/cache/restore@v4
@@ -89,9 +97,29 @@ jobs:
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils autoconf automake libtool
-          ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          if [[ ! -x ./vcpkg/vcpkg ]]; then
+            for attempt in 1 2 3 4 5; do
+              if ./vcpkg/bootstrap-vcpkg.sh -disableMetrics; then
+                break
+              fi
+              if [[ "$attempt" -eq 5 ]]; then
+                echo "vcpkg bootstrap failed after 5 attempts" >&2
+                exit 1
+              fi
+              sleep $((attempt * 10))
+            done
+          fi
+          chmod +x ./vcpkg/vcpkg
+          ./vcpkg/vcpkg version
           sudo mkdir -p /opt
           sudo ln -sfn "$GITHUB_WORKSPACE/vcpkg" /opt/vcpkg
+
+      - name: Save bootstrapped vcpkg tool
+        if: steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vcpkg/vcpkg
+          key: rulesforge-vcpkg-tool-${{ runner.os }}-${{ env.VCPKG_COMMIT }}
 
       - name: Install pinned re2c 4.6 with Unicode tables
         shell: bash
