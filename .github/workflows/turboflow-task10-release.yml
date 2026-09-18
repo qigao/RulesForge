@@ -95,7 +95,6 @@ jobs:
           sudo ln -sfn "$GITHUB_WORKSPACE/vcpkg" /opt/vcpkg
 
       - name: Install pinned re2c 4.6 with Unicode tables
-        if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
         shell: bash
         run: bash .ci/deps/salts-utils/cmake/ci/install-re2c.sh
 
