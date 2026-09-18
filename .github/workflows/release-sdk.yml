@@ -74,9 +74,9 @@ jobs:
           restore-keys: |
             rulesforge-vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-
 
-      - name: Cache pinned dependency SDKs
+      - name: Restore pinned dependency SDKs
         id: dependency-sdk-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ${{ runner.temp }}/sdk/salts-release
@@ -134,14 +134,24 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-linux -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
           cmake --build "$RUNNER_TEMP/build/salts-utils-release" --target install -j2
 
+      - name: Save pinned dependency SDKs
+        if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ runner.temp }}/sdk/salts-release
+            ${{ runner.temp }}/sdk/salts-utils-release
+          key: rulesforge-dependency-sdk-${{ runner.os }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-${{ env.VCPKG_COMMIT }}
+
       - name: Validate cached dependency SDKs
         shell: bash
         run: |
           set -euxo pipefail
           test -d "$RUNNER_TEMP/sdk/salts-release/include"
           test -d "$RUNNER_TEMP/sdk/salts-utils-release/include"
-          sudo ln -sfn "$RUNNER_TEMP/sdk/salts-release" /opt/salts-release
-          sudo ln -sfn "$RUNNER_TEMP/sdk/salts-utils-release" /opt/salts-utils-release
+          sudo mkdir -p /opt/salts /opt/salts-utils
+          sudo ln -sfn "$RUNNER_TEMP/sdk/salts-release" /opt/salts/release
+          sudo ln -sfn "$RUNNER_TEMP/sdk/salts-utils-release" /opt/salts-utils/release
 
       - name: Configure RulesForge Release
         shell: bash
