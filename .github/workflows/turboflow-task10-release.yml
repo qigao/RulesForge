@@ -217,6 +217,8 @@ jobs:
           cmake -S .ci/task10/chttp -B "$RUNNER_TEMP/build/chttp-release" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdk/http-services-release" \
+            -DSALTS_ROOT=/opt/salts/release \
+            -DSALTS_UTILS_ROOT=/opt/salts-utils/release \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DVCPKG_INSTALLED_DIR="$RUNNER_TEMP/vcpkg-installed/chttp" \
