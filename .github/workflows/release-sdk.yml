@@ -149,8 +149,9 @@ jobs:
           set -euxo pipefail
           test -d "$RUNNER_TEMP/sdk/salts-release/include"
           test -d "$RUNNER_TEMP/sdk/salts-utils-release/include"
-          sudo ln -sfn "$RUNNER_TEMP/sdk/salts-release" /opt/salts-release
-          sudo ln -sfn "$RUNNER_TEMP/sdk/salts-utils-release" /opt/salts-utils-release
+          sudo mkdir -p /opt/salts /opt/salts-utils
+          sudo ln -sfn "$RUNNER_TEMP/sdk/salts-release" /opt/salts/release
+          sudo ln -sfn "$RUNNER_TEMP/sdk/salts-utils-release" /opt/salts-utils/release
 
       - name: Configure RulesForge Release
         shell: bash
