@@ -326,7 +326,81 @@ jobs:
           TURBODB_ROOT: /opt/turbodb/release
         run: |
           set -euxo pipefail
-          ctest --preset linux-release-user -R '^(test_protocol_network_intake_config|test_protocol_network_jtt808|test_protocol_network_coap) --output-on-failure 2>&1 | tee "$RUNNER_TEMP/task10-protocol-network-e2e.log"
+          ctest --preset linux-release-user -R '^(test_protocol_network_intake_config|test_protocol_network_jtt808|test_protocol_network_coap)
+      - name: Run TurboFlow installed consumer and ABI contract
+        shell: bash
+        working-directory: .ci/task10/turbo-flow
+        env:
+          TURBO_FLOW_ACTIVE_PRESET: linux-release-user
+          TURBO_FLOW_ROOT: /opt/turboflow/release
+          SALTS_ROOT: /opt/salts/release
+          SALTS_UTILS_ROOT: /opt/salts-utils/release
+          RULES_FORGE_ROOT: /opt/rules_forge/release
+          HTTP_SERVICES_ROOT: /opt/http-services/release
+          TURBODB_ROOT: /opt/turbodb/release
+        run: |
+          set -euxo pipefail
+          ctest --preset linux-release-user \
+            -R '^test_turbo_flow_install_consumer$' --output-on-failure \
+            2>&1 | tee "$RUNNER_TEMP/task10-install-consumer.log"
+          test "$(git rev-parse HEAD)" = "$TURBO_FLOW_COMMIT"
+          git diff --exit-code
+
+      - name: Verify RulesForge source remained untouched
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_RULES_FORGE_SHA"
+          git diff --exit-code
+
+      - name: Upload Task 10 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turboflow-task10-release-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/task10-*.log
+ --output-on-failure 2>&1 | tee "$RUNNER_TEMP/task10-protocol-network-e2e.log"
+      - name: Run TurboFlow installed consumer and ABI contract
+        shell: bash
+        working-directory: .ci/task10/turbo-flow
+        env:
+          TURBO_FLOW_ACTIVE_PRESET: linux-release-user
+          TURBO_FLOW_ROOT: /opt/turboflow/release
+          SALTS_ROOT: /opt/salts/release
+          SALTS_UTILS_ROOT: /opt/salts-utils/release
+          RULES_FORGE_ROOT: /opt/rules_forge/release
+          HTTP_SERVICES_ROOT: /opt/http-services/release
+          TURBODB_ROOT: /opt/turbodb/release
+        run: |
+          set -euxo pipefail
+          ctest --preset linux-release-user \
+            -R '^test_turbo_flow_install_consumer$' --output-on-failure \
+            2>&1 | tee "$RUNNER_TEMP/task10-install-consumer.log"
+          test "$(git rev-parse HEAD)" = "$TURBO_FLOW_COMMIT"
+          git diff --exit-code
+
+      - name: Verify RulesForge source remained untouched
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_RULES_FORGE_SHA"
+          git diff --exit-code
+
+      - name: Upload Task 10 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turboflow-task10-release-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/task10-*.log
+ --output-on-failure 2>&1 | tee "$RUNNER_TEMP/task10-protocol-network-e2e.log"
       - name: Run TurboFlow installed consumer and ABI contract
         shell: bash
         working-directory: .ci/task10/turbo-flow
