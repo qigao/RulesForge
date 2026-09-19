@@ -37,12 +37,32 @@ find_package(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
 find_package(SaltsUtils CONFIG REQUIRED
              PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
 
+if(NOT DEFINED ENV{DATABIND_ROOT} OR "$ENV{DATABIND_ROOT}" STREQUAL "")
+    message(FATAL_ERROR "DATABIND_ROOT must name the installed DataBind profile")
+endif()
+if(NOT IS_DIRECTORY "$ENV{DATABIND_ROOT}")
+    message(FATAL_ERROR
+            "DATABIND_ROOT is not a directory: $ENV{DATABIND_ROOT}")
+endif()
+find_package(DataBind 3 CONFIG REQUIRED COMPONENTS Runtime
+             PATHS "$ENV{DATABIND_ROOT}" NO_DEFAULT_PATH)
+if(NOT TARGET DataBind::Runtime)
+    message(FATAL_ERROR
+            "DATABIND_ROOT package does not provide DataBind::Runtime")
+endif()
+if(TARGET Salts::DataBind OR TARGET Salts::DataBindCore OR
+   TARGET Salts::DataBindCMeta OR TARGET Salts::DataBindCFlow OR
+   TARGET Salts::TbeSchema)
+    message(FATAL_ERROR
+            "Legacy SaltsUtils-owned DataBind/TBE targets must not be present")
+endif()
+
 include(CheckCSourceCompiles)
 set(RULESFORGE_MINIMUM_DATABIND_VERSION 30000)
 set(RULESFORGE_REQUIRED_DATABIND_ABI 9)
 set(_RULESFORGE_SAVED_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
 set(_RULESFORGE_SAVED_REQUIRED_DEFINITIONS "${CMAKE_REQUIRED_DEFINITIONS}")
-set(CMAKE_REQUIRED_LIBRARIES Salts::DataBind)
+set(CMAKE_REQUIRED_LIBRARIES DataBind::Runtime)
 set(CMAKE_REQUIRED_DEFINITIONS
     "-DRULESFORGE_MINIMUM_DATABIND_VERSION=${RULESFORGE_MINIMUM_DATABIND_VERSION}"
     "-DRULESFORGE_REQUIRED_DATABIND_ABI=${RULESFORGE_REQUIRED_DATABIND_ABI}")
