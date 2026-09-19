@@ -72,7 +72,7 @@ unset(_RULESFORGE_SAVED_REQUIRED_LIBRARIES)
 unset(_RULESFORGE_SAVED_REQUIRED_DEFINITIONS)
 if(NOT RULESFORGE_HAS_DATABIND_3_0)
     message(FATAL_ERROR
-            "RulesForge requires DataBind 3.0.0 or newer with ABI 8")
+            "RulesForge requires DataBind 3.0.0 or newer with ABI 9")
 endif()
 
 # Output files directory
