@@ -37,6 +37,19 @@ find_package(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
 find_package(SaltsUtils CONFIG REQUIRED
              PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
 
+file(REAL_PATH "$ENV{SALTS_UTILS_ROOT}" RULESFORGE_SALTS_UTILS_REAL_ROOT)
+if(NOT DEFINED SaltsUtils_DIR OR SaltsUtils_DIR STREQUAL "")
+    message(FATAL_ERROR "SaltsUtils package root cannot be verified")
+endif()
+file(REAL_PATH "${SaltsUtils_DIR}" RULESFORGE_SALTS_UTILS_REAL_DIR)
+cmake_path(IS_PREFIX RULESFORGE_SALTS_UTILS_REAL_ROOT
+           "${RULESFORGE_SALTS_UTILS_REAL_DIR}" NORMALIZE
+           RULESFORGE_SALTS_UTILS_IS_WITHIN_ROOT)
+if(NOT RULESFORGE_SALTS_UTILS_IS_WITHIN_ROOT)
+    message(FATAL_ERROR
+            "SaltsUtils resolved outside SALTS_UTILS_ROOT: ${SaltsUtils_DIR}")
+endif()
+
 foreach(_RULESFORGE_STALE_DATABIND_TARGET IN ITEMS
         Salts::DataBind
         Salts::DataBindCore
@@ -56,8 +69,24 @@ if(NOT IS_DIRECTORY "$ENV{DATABIND_ROOT}")
     message(FATAL_ERROR
             "DATABIND_ROOT is not a directory: $ENV{DATABIND_ROOT}")
 endif()
+file(REAL_PATH "$ENV{DATABIND_ROOT}" RULESFORGE_DATABIND_REAL_ROOT)
+if(RULESFORGE_DATABIND_REAL_ROOT STREQUAL RULESFORGE_SALTS_UTILS_REAL_ROOT)
+    message(FATAL_ERROR
+            "DATABIND_ROOT must be physically distinct from SALTS_UTILS_ROOT")
+endif()
 find_package(DataBind 3 CONFIG REQUIRED
              PATHS "$ENV{DATABIND_ROOT}" NO_DEFAULT_PATH)
+if(NOT DEFINED DataBind_DIR OR DataBind_DIR STREQUAL "")
+    message(FATAL_ERROR "DataBind package root cannot be verified")
+endif()
+file(REAL_PATH "${DataBind_DIR}" RULESFORGE_DATABIND_REAL_DIR)
+cmake_path(IS_PREFIX RULESFORGE_DATABIND_REAL_ROOT
+           "${RULESFORGE_DATABIND_REAL_DIR}" NORMALIZE
+           RULESFORGE_DATABIND_IS_WITHIN_ROOT)
+if(NOT RULESFORGE_DATABIND_IS_WITHIN_ROOT)
+    message(FATAL_ERROR
+            "DataBind resolved outside DATABIND_ROOT: ${DataBind_DIR}")
+endif()
 if(NOT TARGET Salts::DataBind OR NOT TARGET Salts::TbeSchema)
     message(FATAL_ERROR
             "DATABIND_ROOT does not provide the canonical DataBind base targets")
