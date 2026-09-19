@@ -204,6 +204,24 @@ jobs:
           cmake --build build/linux-gcc-release --target install -j2 2>&1 | tee "$RUNNER_TEMP/rulesforge-release-install.log"
           test -d "$RUNNER_TEMP/sdk/rules-forge-release/include"
 
+      - name: Consume installed RulesForge through independent DataBind root
+        shell: bash
+        env:
+          RULES_FORGE_ROOT: ${{ runner.temp }}/sdk/rules-forge-release
+          SALTS_ROOT: ${{ runner.temp }}/sdk/salts-release
+          DATABIND_ROOT: ${{ runner.temp }}/sdk/salts-utils-release
+          CMAKE_PREFIX_PATH: ${{ github.workspace }}/vcpkg_installed/x64-linux
+          LD_LIBRARY_PATH: ${{ runner.temp }}/sdk/rules-forge-release/lib:${{ runner.temp }}/sdk/salts-utils-release/lib:${{ runner.temp }}/sdk/salts-release/lib
+        run: |
+          set -euxo pipefail
+          test -z "${SALTS_UTILS_ROOT:-}"
+          cmake -S tests/package_consumer -B "$RUNNER_TEMP/build/rulesforge-consumer" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux
+          cmake --build "$RUNNER_TEMP/build/rulesforge-consumer" -j2
+          "$RUNNER_TEMP/build/rulesforge-consumer/rulesforge_package_consumer"
+
       - name: Verify committed source remained untouched
         if: always()
         shell: bash
