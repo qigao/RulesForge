@@ -18,7 +18,7 @@ env:
   EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
   VCPKG_COMMIT: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   SALTS_COMMIT: 801202e58c2d86b35202414d4812e79a2fd25bae
-  SALTS_UTILS_COMMIT: 8c2ad79b94dff2996dfaa949c9351e6cd338b9eb
+  SALTS_UTILS_COMMIT: 06d61e088d600b89a1811e76791ccff982bbf7c4
 
 jobs:
   linux-release:
