@@ -15,8 +15,8 @@ RulesForge participates in the [Salts](https://github.com/qigao/salts) ecosystem
 Its current build uses:
 
 - **Salts** for shared systems/runtime foundations and C-facing semantic infrastructure.
-- **SaltsUtils** for the currently packaged DataBind implementation.
-- **DataBind** for schema-defined external facts, native/dynamic values, parsing, and incremental ingestion.
+- **SaltsUtils** for concrete parser and utility components used internally by the build.
+- **DataBind** as an independently resolved package for schema-defined external facts, native/dynamic values, parsing, and incremental ingestion.
 
 The target ecosystem boundary is:
 
@@ -29,7 +29,7 @@ Salts
     RulesForge
 ```
 
-DataBind is currently exported from SaltsUtils while its sibling package/repository split is in progress. RulesForge already treats the DataBind ABI as an explicit dependency boundary.
+DataBind now has its own installed CMake package and is resolved through `DATABIND_ROOT`. Its sources may still be physically hosted with salts-utils during the staged repository extraction, but package ownership is already independent.
 
 ## What RulesForge owns
 
@@ -128,8 +128,8 @@ See [Data ingestion](docs/DATA_INGESTION.md) for the full API matrix and ownersh
 The current build requires:
 
 ```text
-DataBind >= 2.5.1
-DataBind ABI == 8
+DataBind >= 3.0.0
+DataBind ABI == 9
 ```
 
 Configuration fails if the required version/ABI contract is not available.
@@ -164,10 +164,11 @@ Requirements include:
 - C17 compiler support for the C boundary
 - C++20 compiler support for the engine implementation
 - an installed Salts SDK
-- an installed SaltsUtils/DataBind provider matching the required ABI
+- an installed SaltsUtils SDK for parser/utility dependencies
+- an installed DataBind 3 SDK matching ABI 9
 - OpenSSL through the configured dependency environment
 
-The top-level CMake configuration resolves Salts and SaltsUtils explicitly from `SALTS_ROOT` and `SALTS_UTILS_ROOT`.
+The top-level CMake configuration resolves three explicit ownership roots: Salts from `SALTS_ROOT`, parser/utilities from `SALTS_UTILS_ROOT`, and DataBind from `DATABIND_ROOT`. There is no DataBind fallback through SaltsUtils.
 
 ## Design principles
 

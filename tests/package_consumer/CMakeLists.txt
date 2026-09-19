@@ -1,0 +1,24 @@
+cmake_minimum_required(VERSION 3.20)
+project(RulesForgePackageConsumer LANGUAGES C)
+
+if(NOT DEFINED ENV{RULES_FORGE_ROOT} OR "$ENV{RULES_FORGE_ROOT}" STREQUAL "")
+  message(FATAL_ERROR "RULES_FORGE_ROOT is required")
+endif()
+
+find_package(RulesForge 0.9 CONFIG REQUIRED
+  PATHS "$ENV{RULES_FORGE_ROOT}"
+  NO_DEFAULT_PATH)
+
+if(NOT TARGET RulesForge::RulesForge)
+  message(FATAL_ERROR "RulesForge::RulesForge is missing")
+endif()
+if(NOT TARGET Salts::DataBind)
+  message(FATAL_ERROR "RulesForge package did not resolve Salts::DataBind")
+endif()
+if(DEFINED ENV{SALTS_UTILS_ROOT} AND NOT "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
+  message(FATAL_ERROR
+    "Installed RulesForge consumer must not require SALTS_UTILS_ROOT")
+endif()
+
+add_executable(rulesforge_package_consumer main.c)
+target_link_libraries(rulesforge_package_consumer PRIVATE RulesForge::RulesForge)

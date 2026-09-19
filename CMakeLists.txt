@@ -37,6 +37,32 @@ find_package(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
 find_package(SaltsUtils CONFIG REQUIRED
              PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
 
+foreach(_RULESFORGE_STALE_DATABIND_TARGET IN ITEMS
+        Salts::DataBind
+        Salts::DataBindCore
+        Salts::DataBindCMeta
+        Salts::DataBindCFlow
+        Salts::TbeSchema)
+    if(TARGET ${_RULESFORGE_STALE_DATABIND_TARGET})
+        message(FATAL_ERROR
+                "SALTS_UTILS_ROOT still owns DataBind target: ${_RULESFORGE_STALE_DATABIND_TARGET}")
+    endif()
+endforeach()
+
+if(NOT DEFINED ENV{DATABIND_ROOT} OR "$ENV{DATABIND_ROOT}" STREQUAL "")
+    message(FATAL_ERROR "DATABIND_ROOT must name the installed DataBind profile")
+endif()
+if(NOT IS_DIRECTORY "$ENV{DATABIND_ROOT}")
+    message(FATAL_ERROR
+            "DATABIND_ROOT is not a directory: $ENV{DATABIND_ROOT}")
+endif()
+find_package(DataBind 3 CONFIG REQUIRED
+             PATHS "$ENV{DATABIND_ROOT}" NO_DEFAULT_PATH)
+if(NOT TARGET Salts::DataBind OR NOT TARGET Salts::TbeSchema)
+    message(FATAL_ERROR
+            "DATABIND_ROOT does not provide the canonical DataBind base targets")
+endif()
+
 include(CheckCSourceCompiles)
 set(RULESFORGE_MINIMUM_DATABIND_VERSION 30000)
 set(RULESFORGE_REQUIRED_DATABIND_ABI 9)
