@@ -120,8 +120,8 @@ using DataBindValueHandle = std::unique_ptr<DataBindValue, DataBindValueDeleter>
 using DataBindObjectHandle = std::unique_ptr<DataBindObject, DataBindObjectDeleter>;
 using DataBindStreamHandle = std::unique_ptr<data_bind_stream_t, DataBindStreamDeleter>;
 
-constexpr int kMinimumDataBindVersion = 20501;
-constexpr int kRequiredDataBindAbi = 8;
+constexpr int kMinimumDataBindVersion = 30000;
+constexpr int kRequiredDataBindAbi = 9;
 
 struct DataBindView {
   DataBind *value = nullptr;

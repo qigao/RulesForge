@@ -38,22 +38,22 @@ find_package(SaltsUtils CONFIG REQUIRED
              PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
 
 include(CheckCSourceCompiles)
-set(RULESFORGE_MINIMUM_DATABIND_VERSION 20501)
-set(RULESFORGE_REQUIRED_DATABIND_ABI 8)
+set(RULESFORGE_MINIMUM_DATABIND_VERSION 30000)
+set(RULESFORGE_REQUIRED_DATABIND_ABI 9)
 set(_RULESFORGE_SAVED_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
 set(_RULESFORGE_SAVED_REQUIRED_DEFINITIONS "${CMAKE_REQUIRED_DEFINITIONS}")
 set(CMAKE_REQUIRED_LIBRARIES Salts::DataBind)
 set(CMAKE_REQUIRED_DEFINITIONS
     "-DRULESFORGE_MINIMUM_DATABIND_VERSION=${RULESFORGE_MINIMUM_DATABIND_VERSION}"
     "-DRULESFORGE_REQUIRED_DATABIND_ABI=${RULESFORGE_REQUIRED_DATABIND_ABI}")
-unset(RULESFORGE_HAS_DATABIND_2_5_1 CACHE)
+unset(RULESFORGE_HAS_DATABIND_3_0 CACHE)
 check_c_source_compiles([[
   #include <data_bind.h>
   #if DATA_BIND_VERSION < RULESFORGE_MINIMUM_DATABIND_VERSION
-  #error "RulesForge requires DataBind 2.5.1 or newer"
+  #error "RulesForge requires DataBind 3.0.0 or newer"
   #endif
   #if DATA_BIND_ABI_VERSION != RULESFORGE_REQUIRED_DATABIND_ABI
-  #error "RulesForge requires DataBind ABI 8"
+  #error "RulesForge requires DataBind ABI 9"
   #endif
   int main() {
     DataBindStreamConfig config = DATA_BIND_STREAM_CONFIG_INIT;
@@ -65,14 +65,14 @@ check_c_source_compiles([[
     config.out_value = &value;
     return (int)data_bind_stream_create(NULL, &config, &stream, NULL);
   }
-]] RULESFORGE_HAS_DATABIND_2_5_1)
+]] RULESFORGE_HAS_DATABIND_3_0)
 set(CMAKE_REQUIRED_LIBRARIES "${_RULESFORGE_SAVED_REQUIRED_LIBRARIES}")
 set(CMAKE_REQUIRED_DEFINITIONS "${_RULESFORGE_SAVED_REQUIRED_DEFINITIONS}")
 unset(_RULESFORGE_SAVED_REQUIRED_LIBRARIES)
 unset(_RULESFORGE_SAVED_REQUIRED_DEFINITIONS)
-if(NOT RULESFORGE_HAS_DATABIND_2_5_1)
+if(NOT RULESFORGE_HAS_DATABIND_3_0)
     message(FATAL_ERROR
-            "RulesForge requires DataBind 2.5.1 or newer with ABI 8")
+            "RulesForge requires DataBind 3.0.0 or newer with ABI 9")
 endif()
 
 # Output files directory
