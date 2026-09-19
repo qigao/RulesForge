@@ -15,7 +15,7 @@ add_library(${RULESFORGE_ENGINE_TARGET} OBJECT ${SOURCES})
 target_link_libraries(
     ${RULESFORGE_ENGINE_TARGET}
     PUBLIC Salts::Core Threads::Threads
-    PRIVATE Salts::CSTL Salts::DataBind
+    PRIVATE Salts::CSTL DataBind::Runtime
 )
 target_include_directories(
     ${RULESFORGE_ENGINE_TARGET}
