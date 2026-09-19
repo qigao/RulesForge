@@ -32,7 +32,7 @@ target_include_directories(
 target_link_libraries(
     ${CAPI_TARGET_NAME}
     PRIVATE rfl_parser ${RULESFORGE_ENGINE_TARGET}
-    PUBLIC Salts::Core Salts::DataBind
+    PUBLIC Salts::Core DataBind::Runtime
 )
 set_target_properties(${CAPI_TARGET_NAME} PROPERTIES FOLDER capi/)
 
