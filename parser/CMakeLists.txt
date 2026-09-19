@@ -66,7 +66,7 @@ target_include_directories(
 target_link_libraries(
     ${TARGET_NAME}
     PUBLIC Salts::Core
-    PRIVATE Salts::CSTL Salts::CsvParser Salts::DataBind
+    PRIVATE Salts::CSTL Salts::CsvParser DataBind::Runtime
 )
 
 if(MSVC)
