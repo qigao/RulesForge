@@ -1,16 +1,42 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-if(DEFINED ENV{SALTS_ROOT})
-    find_dependency(Salts CONFIG PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
-else()
-    find_dependency(Salts CONFIG)
+
+if(NOT DEFINED ENV{SALTS_ROOT} OR "$ENV{SALTS_ROOT}" STREQUAL "")
+    set(RulesForge_FOUND FALSE)
+    set(RulesForge_NOT_FOUND_MESSAGE
+        "SALTS_ROOT must name the installed Salts profile")
+    return()
 endif()
-if(DEFINED ENV{SALTS_UTILS_ROOT})
-    find_dependency(SaltsUtils CONFIG PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
-else()
-    find_dependency(SaltsUtils CONFIG)
+if(NOT DEFINED ENV{DATABIND_ROOT} OR "$ENV{DATABIND_ROOT}" STREQUAL "")
+    set(RulesForge_FOUND FALSE)
+    set(RulesForge_NOT_FOUND_MESSAGE
+        "DATABIND_ROOT must name the installed DataBind profile")
+    return()
 endif()
+
+find_dependency(Salts CONFIG REQUIRED
+    PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
+find_dependency(DataBind 3 CONFIG REQUIRED COMPONENTS Runtime
+    PATHS "$ENV{DATABIND_ROOT}" NO_DEFAULT_PATH)
+
+if(NOT TARGET DataBind::Runtime)
+    set(RulesForge_FOUND FALSE)
+    set(RulesForge_NOT_FOUND_MESSAGE
+        "DataBind package does not provide DataBind::Runtime")
+    return()
+endif()
+
+foreach(_RULESFORGE_LEGACY_DATABIND_TARGET IN ITEMS
+    Salts::DataBind Salts::DataBindCore Salts::DataBindCMeta
+    Salts::DataBindCFlow Salts::TbeSchema)
+    if(TARGET ${_RULESFORGE_LEGACY_DATABIND_TARGET})
+        set(RulesForge_FOUND FALSE)
+        set(RulesForge_NOT_FOUND_MESSAGE
+            "Legacy duplicate DataBind ownership is present: ${_RULESFORGE_LEGACY_DATABIND_TARGET}")
+        return()
+    endif()
+endforeach()
 
 include("${CMAKE_CURRENT_LIST_DIR}/RulesForgeTargets.cmake")
 
