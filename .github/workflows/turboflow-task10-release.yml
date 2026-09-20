@@ -16,10 +16,10 @@ env:
   EXPECTED_RULES_FORGE_SHA: ${{ github.sha }}
   VCPKG_COMMIT: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   SALTS_COMMIT: 2804c2eb809fed4cb89f917f0a8cd00f482abb64
-  SALTS_UTILS_COMMIT: 0b3876018e5bdaed70fecbc0d0863cb394dd6044
+  SALTS_UTILS_COMMIT: 47bdfdcfcbb64dc3dc25d6768dd2d3b74b7cc3f7
   CHTTP_COMMIT: 7c1863b0b1539e92cd4ce0d820e57c623cb609d6
   TURBODB_COMMIT: 855e9c3eeb77d41fa1fc20fc44cc01ebe9c77a41
-  TURBO_FLOW_COMMIT: fc7628d98561b1d9d72ce234f5631c872413c76a
+  TURBO_FLOW_COMMIT: fc308e542849e8c0486e0a568137f44882770b69
 
 jobs:
   linux-release-integration:
@@ -90,6 +90,7 @@ jobs:
           path: |
             ${{ runner.temp }}/sdk/salts-release
             ${{ runner.temp }}/sdk/salts-utils-release
+            ${{ runner.temp }}/sdk/databind-release
           key: rulesforge-dependency-sdk-${{ runner.os }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-${{ env.VCPKG_COMMIT }}
 
       - name: Prepare Linux toolchain
@@ -150,7 +151,7 @@ jobs:
             -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
           cmake --build "$RUNNER_TEMP/build/salts-release" --target install -j2
 
-      - name: Build pinned SaltsUtils Release SDK
+      - name: Build pinned SaltsUtils and DataBind Release SDKs
         if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
@@ -159,12 +160,20 @@ jobs:
           set -euxo pipefail
           cmake -S .ci/deps/salts-utils -B "$RUNNER_TEMP/build/salts-utils-release" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdk/salts-utils-release" \
             -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$RUNNER_TEMP/host-lemon/lemon" \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
-          cmake --build "$RUNNER_TEMP/build/salts-utils-release" --target install -j2
+          cmake --build "$RUNNER_TEMP/build/salts-utils-release" -j2
+          cmake --install "$RUNNER_TEMP/build/salts-utils-release" \
+            --prefix "$RUNNER_TEMP/sdk/salts-utils-release" --component Unspecified
+          cmake --install "$RUNNER_TEMP/build/salts-utils-release" \
+            --prefix "$RUNNER_TEMP/sdk/databind-release" --component DataBind
+          test -f "$RUNNER_TEMP/sdk/salts-utils-release/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test ! -e "$RUNNER_TEMP/sdk/salts-utils-release/lib/cmake/DataBind/DataBindConfig.cmake"
+          test -f "$RUNNER_TEMP/sdk/databind-release/lib/cmake/DataBind/DataBindConfig.cmake"
+          test ! -e "$RUNNER_TEMP/sdk/databind-release/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test -x "$RUNNER_TEMP/sdk/databind-release/bin/tbe_compiler"
 
       - name: Save pinned dependency SDKs
         if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
@@ -173,6 +182,7 @@ jobs:
           path: |
             ${{ runner.temp }}/sdk/salts-release
             ${{ runner.temp }}/sdk/salts-utils-release
+            ${{ runner.temp }}/sdk/databind-release
           key: rulesforge-dependency-sdk-${{ runner.os }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-${{ env.VCPKG_COMMIT }}
 
       - name: Publish dependency SDK roots
@@ -181,9 +191,11 @@ jobs:
           set -euxo pipefail
           test -d "$RUNNER_TEMP/sdk/salts-release/include"
           test -d "$RUNNER_TEMP/sdk/salts-utils-release/include"
-          sudo mkdir -p /opt/salts /opt/salts-utils
+          test -f "$RUNNER_TEMP/sdk/databind-release/lib/cmake/DataBind/DataBindConfig.cmake"
+          sudo mkdir -p /opt/salts /opt/salts-utils /opt/databind
           sudo ln -sfn "$RUNNER_TEMP/sdk/salts-release" /opt/salts/release
           sudo ln -sfn "$RUNNER_TEMP/sdk/salts-utils-release" /opt/salts-utils/release
+          sudo ln -sfn "$RUNNER_TEMP/sdk/databind-release" /opt/databind/release
 
       - name: Configure RulesForge Release
         shell: bash
@@ -290,6 +302,7 @@ jobs:
           PKG_ROOT: /opt
           SALTS_ROOT: /opt/salts/release
           SALTS_UTILS_ROOT: /opt/salts-utils/release
+          DATABIND_ROOT: /opt/databind/release
           RULES_FORGE_ROOT: /opt/rules_forge/release
           HTTP_SERVICES_ROOT: /opt/http-services/release
           TURBODB_ROOT: /opt/turbodb/release
