@@ -42,8 +42,8 @@ int reject_serialized_bytes(void const*, size_t, void*) {
 suite("CAPI") {
     group("Initialization and Cleanup") {
         it("initializes and cleans up") {
-            check_greater_equal(DATA_BIND_VERSION, 20501);
-            check_equal(DATA_BIND_ABI_VERSION, 8);
+            check_greater_equal(DATA_BIND_VERSION, 30000);
+            check_equal(DATA_BIND_ABI_VERSION, 9);
             check_equal(data_bind_library_version(), DATA_BIND_VERSION);
             check_equal(data_bind_abi_version(), DATA_BIND_ABI_VERSION);
             check_not_null(data_bind_version_string());

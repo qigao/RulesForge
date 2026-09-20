@@ -17,8 +17,8 @@ concurrency:
 env:
   EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
   VCPKG_COMMIT: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
-  SALTS_COMMIT: 2804c2eb809fed4cb89f917f0a8cd00f482abb64
-  SALTS_UTILS_COMMIT: 0b3876018e5bdaed70fecbc0d0863cb394dd6044
+  SALTS_COMMIT: 801202e58c2d86b35202414d4812e79a2fd25bae
+  SALTS_UTILS_COMMIT: 47bdfdcfcbb64dc3dc25d6768dd2d3b74b7cc3f7
 
 jobs:
   linux-release:
@@ -74,6 +74,14 @@ jobs:
           restore-keys: |
             rulesforge-vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-
 
+      - name: Restore bootstrapped vcpkg tool
+        id: vcpkg-tool-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vcpkg/vcpkg
+          key: rulesforge-vcpkg-tool-${{ runner.os }}-${{ env.VCPKG_COMMIT }}
+
+
       - name: Restore pinned dependency SDKs
         id: dependency-sdk-cache
         uses: actions/cache/restore@v4
@@ -81,6 +89,7 @@ jobs:
           path: |
             ${{ runner.temp }}/sdk/salts-release
             ${{ runner.temp }}/sdk/salts-utils-release
+            ${{ runner.temp }}/sdk/databind-release
           key: rulesforge-dependency-sdk-${{ runner.os }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-${{ env.VCPKG_COMMIT }}
 
       - name: Prepare Linux toolchain
@@ -89,12 +98,31 @@ jobs:
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils autoconf automake libtool
-          ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          if [[ ! -x ./vcpkg/vcpkg ]]; then
+            for attempt in 1 2 3 4 5; do
+              if ./vcpkg/bootstrap-vcpkg.sh -disableMetrics; then
+                break
+              fi
+              if [[ "$attempt" -eq 5 ]]; then
+                echo "vcpkg bootstrap failed after 5 attempts" >&2
+                exit 1
+              fi
+              sleep $((attempt * 10))
+            done
+          fi
+          chmod +x ./vcpkg/vcpkg
+          ./vcpkg/vcpkg version
           sudo mkdir -p /opt
           sudo ln -sfn "$GITHUB_WORKSPACE/vcpkg" /opt/vcpkg
 
+      - name: Save bootstrapped vcpkg tool
+        if: steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vcpkg/vcpkg
+          key: rulesforge-vcpkg-tool-${{ runner.os }}-${{ env.VCPKG_COMMIT }}
+
       - name: Install pinned re2c 4.6 with Unicode tables
-        if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
         shell: bash
         run: bash .ci/deps/salts-utils/cmake/ci/install-re2c.sh
 
@@ -120,7 +148,7 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-linux -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
           cmake --build "$RUNNER_TEMP/build/salts-release" --target install -j2
 
-      - name: Build pinned SaltsUtils Release SDK
+      - name: Build pinned SaltsUtils and DataBind Release SDKs
         if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
@@ -128,11 +156,15 @@ jobs:
         run: |
           set -euxo pipefail
           cmake -S .ci/deps/salts-utils -B "$RUNNER_TEMP/build/salts-utils-release" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdk/salts-utils-release" \
+            -DCMAKE_BUILD_TYPE=Release \
             -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$RUNNER_TEMP/host-lemon/lemon" \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
-          cmake --build "$RUNNER_TEMP/build/salts-utils-release" --target install -j2
+          cmake --build "$RUNNER_TEMP/build/salts-utils-release" -j2
+          cmake --install "$RUNNER_TEMP/build/salts-utils-release" \
+            --prefix "$RUNNER_TEMP/sdk/salts-utils-release" --component Unspecified
+          cmake --install "$RUNNER_TEMP/build/salts-utils-release" \
+            --prefix "$RUNNER_TEMP/sdk/databind-release" --component DataBind
 
       - name: Save pinned dependency SDKs
         if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
@@ -141,6 +173,7 @@ jobs:
           path: |
             ${{ runner.temp }}/sdk/salts-release
             ${{ runner.temp }}/sdk/salts-utils-release
+            ${{ runner.temp }}/sdk/databind-release
           key: rulesforge-dependency-sdk-${{ runner.os }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-${{ env.VCPKG_COMMIT }}
 
       - name: Validate cached dependency SDKs
@@ -149,9 +182,18 @@ jobs:
           set -euxo pipefail
           test -d "$RUNNER_TEMP/sdk/salts-release/include"
           test -d "$RUNNER_TEMP/sdk/salts-utils-release/include"
-          sudo mkdir -p /opt/salts /opt/salts-utils
+          test -f "$RUNNER_TEMP/sdk/salts-utils-release/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test ! -e "$RUNNER_TEMP/sdk/salts-utils-release/lib/cmake/DataBind/DataBindConfig.cmake"
+          test -f "$RUNNER_TEMP/sdk/databind-release/lib/cmake/DataBind/DataBindConfig.cmake"
+          test ! -e "$RUNNER_TEMP/sdk/databind-release/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test -f "$RUNNER_TEMP/sdk/databind-release/include/data_bind.h"
+          test -x "$RUNNER_TEMP/sdk/databind-release/bin/tbe_compiler"
+          test -d "$RUNNER_TEMP/sdk/databind-release/bin/templates"
+          test "$(realpath "$RUNNER_TEMP/sdk/salts-utils-release")" != "$(realpath "$RUNNER_TEMP/sdk/databind-release")"
+          sudo mkdir -p /opt/salts /opt/salts-utils /opt/databind
           sudo ln -sfn "$RUNNER_TEMP/sdk/salts-release" /opt/salts/release
           sudo ln -sfn "$RUNNER_TEMP/sdk/salts-utils-release" /opt/salts-utils/release
+          sudo ln -sfn "$RUNNER_TEMP/sdk/databind-release" /opt/databind/release
 
       - name: Configure RulesForge Release
         shell: bash
@@ -161,6 +203,7 @@ jobs:
           VCPKG_INSTALLED_DIR: ${{ github.workspace }}/vcpkg_installed
           SALTS_ROOT: ${{ runner.temp }}/sdk/salts-release
           SALTS_UTILS_ROOT: ${{ runner.temp }}/sdk/salts-utils-release
+          DATABIND_ROOT: ${{ runner.temp }}/sdk/databind-release
         run: |
           set -euxo pipefail
           cmake --preset linux-release-user \
@@ -174,6 +217,24 @@ jobs:
           cmake --build --preset linux-release-user -j2 2>&1 | tee "$RUNNER_TEMP/rulesforge-release-build.log"
           cmake --build build/linux-gcc-release --target install -j2 2>&1 | tee "$RUNNER_TEMP/rulesforge-release-install.log"
           test -d "$RUNNER_TEMP/sdk/rules-forge-release/include"
+
+      - name: Consume installed RulesForge without SaltsUtils root
+        shell: bash
+        env:
+          RULES_FORGE_ROOT: ${{ runner.temp }}/sdk/rules-forge-release
+          SALTS_ROOT: ${{ runner.temp }}/sdk/salts-release
+          DATABIND_ROOT: ${{ runner.temp }}/sdk/databind-release
+          CMAKE_PREFIX_PATH: ${{ github.workspace }}/vcpkg_installed/x64-linux
+          LD_LIBRARY_PATH: ${{ runner.temp }}/sdk/rules-forge-release/lib:${{ runner.temp }}/sdk/databind-release/lib:${{ runner.temp }}/sdk/salts-utils-release/lib:${{ runner.temp }}/sdk/salts-release/lib
+        run: |
+          set -euxo pipefail
+          test -z "${SALTS_UTILS_ROOT:-}"
+          cmake -S tests/package_consumer -B "$RUNNER_TEMP/build/rulesforge-consumer" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux
+          cmake --build "$RUNNER_TEMP/build/rulesforge-consumer" -j2
+          "$RUNNER_TEMP/build/rulesforge-consumer/rulesforge_package_consumer"
 
       - name: Verify committed source remained untouched
         if: always()

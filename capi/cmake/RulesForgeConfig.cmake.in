@@ -1,15 +1,48 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-if(DEFINED ENV{SALTS_ROOT})
-    find_dependency(Salts CONFIG PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
-else()
-    find_dependency(Salts CONFIG)
+
+if(NOT DEFINED ENV{SALTS_ROOT} OR "$ENV{SALTS_ROOT}" STREQUAL "")
+    set(RulesForge_FOUND FALSE)
+    set(RulesForge_NOT_FOUND_MESSAGE
+        "SALTS_ROOT must name the installed Salts profile")
+    return()
 endif()
-if(DEFINED ENV{SALTS_UTILS_ROOT})
-    find_dependency(SaltsUtils CONFIG PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
-else()
-    find_dependency(SaltsUtils CONFIG)
+if(NOT DEFINED ENV{DATABIND_ROOT} OR "$ENV{DATABIND_ROOT}" STREQUAL "")
+    set(RulesForge_FOUND FALSE)
+    set(RulesForge_NOT_FOUND_MESSAGE
+        "DATABIND_ROOT must name the installed DataBind profile")
+    return()
+endif()
+
+find_dependency(Salts CONFIG REQUIRED
+    PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
+find_dependency(DataBind 3 CONFIG REQUIRED
+    PATHS "$ENV{DATABIND_ROOT}" NO_DEFAULT_PATH)
+
+file(REAL_PATH "$ENV{DATABIND_ROOT}" _RulesForge_DataBind_real_root)
+if(NOT DEFINED DataBind_DIR OR DataBind_DIR STREQUAL "")
+    set(RulesForge_FOUND FALSE)
+    set(RulesForge_NOT_FOUND_MESSAGE
+        "DataBind package root cannot be verified")
+    return()
+endif()
+file(REAL_PATH "${DataBind_DIR}" _RulesForge_DataBind_real_dir)
+cmake_path(IS_PREFIX _RulesForge_DataBind_real_root
+           "${_RulesForge_DataBind_real_dir}" NORMALIZE
+           _RulesForge_DataBind_is_within_root)
+if(NOT _RulesForge_DataBind_is_within_root)
+    set(RulesForge_FOUND FALSE)
+    set(RulesForge_NOT_FOUND_MESSAGE
+        "DataBind_DIR is outside DATABIND_ROOT: ${DataBind_DIR}")
+    return()
+endif()
+
+if(NOT TARGET Salts::DataBind)
+    set(RulesForge_FOUND FALSE)
+    set(RulesForge_NOT_FOUND_MESSAGE
+        "DataBind package does not provide Salts::DataBind")
+    return()
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/RulesForgeTargets.cmake")
