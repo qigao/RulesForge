@@ -173,6 +173,7 @@ jobs:
           path: |
             ${{ runner.temp }}/sdk/salts-release
             ${{ runner.temp }}/sdk/salts-utils-release
+            ${{ runner.temp }}/sdk/databind-release
           key: rulesforge-dependency-sdk-${{ runner.os }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-${{ env.VCPKG_COMMIT }}
 
       - name: Validate cached dependency SDKs
