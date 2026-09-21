@@ -15,21 +15,19 @@ RulesForge participates in the [Salts](https://github.com/qigao/salts) ecosystem
 Its current build uses:
 
 - **Salts** for shared systems/runtime foundations and C-facing semantic infrastructure.
-- **SaltsUtils** for concrete parser and utility components used internally by the build.
-- **DataBind** as an independently resolved package for schema-defined external facts, native/dynamic values, parsing, and incremental ingestion.
+- **SaltsUtils** for DataBind, concrete parser components, and utilities. Its DataBind component provides schema-defined external facts, native/dynamic values, parsing, and incremental ingestion.
 
 The target ecosystem boundary is:
 
 ```text
 Salts
-  ├── salts-utils
-  ├── salts-net
-  └── DataBind (schema / compiler / binding)
+  ├── salts-utils (including DataBind schema / compiler / binding)
+  └── salts-net
         ↓
     RulesForge
 ```
 
-DataBind now has its own installed CMake package and is resolved through `DATABIND_ROOT`. Its sources may still be physically hosted with salts-utils during the staged repository extraction, but package ownership is already independent.
+DataBind is part of SaltsUtils. Its source, build, installation, and exported targets belong to SaltsUtils.
 
 ## What RulesForge owns
 
@@ -164,11 +162,10 @@ Requirements include:
 - C17 compiler support for the C boundary
 - C++20 compiler support for the engine implementation
 - an installed Salts SDK
-- an installed SaltsUtils SDK for parser/utility dependencies
-- an installed DataBind 3 SDK matching ABI 9
+- an installed SaltsUtils SDK with DataBind 3 matching ABI 9 and the required parser/utility components
 - OpenSSL through the configured dependency environment
 
-The top-level CMake configuration resolves three explicit ownership roots: Salts from `SALTS_ROOT`, parser/utilities from `SALTS_UTILS_ROOT`, and DataBind from `DATABIND_ROOT`. There is no DataBind fallback through SaltsUtils.
+The dependency ownership contract is Salts from `SALTS_ROOT` and SaltsUtils, including DataBind, from `SALTS_UTILS_ROOT`.
 
 ## Design principles
 
@@ -194,4 +191,4 @@ The top-level CMake configuration resolves three explicit ownership roots: Salts
 
 ---
 
-**Salts provides the systems foundation. DataBind provides typed external data. RulesForge provides deterministic rule execution.**
+**Salts provides the systems foundation. SaltsUtils DataBind provides typed external data. RulesForge provides deterministic rule execution.**
