@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: rulesforge-release-sdk-${{ github.ref }}
@@ -57,14 +58,15 @@ jobs:
           path: .ci/deps/salts-utils
           persist-credentials: false
 
-      - name: Checkout pinned vcpkg
-        uses: actions/checkout@v4
+
+      - name: Select RulesForge vcpkg L1 cache
+        shell: bash
+        run: echo "VCPKG_BINARY_CACHE=$HOME/.cache/vcpkg/archives" >> "$GITHUB_ENV"
+
+      - name: Configure shared vcpkg cache and canonical tool
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
         with:
-          repository: microsoft/vcpkg
-          ref: ${{ env.VCPKG_COMMIT }}
-          path: vcpkg
-          fetch-depth: 0
-          persist-credentials: false
+          mode: read
 
       - name: Cache vcpkg binary archives
         uses: actions/cache@v4
@@ -74,12 +76,6 @@ jobs:
           restore-keys: |
             rulesforge-vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-
 
-      - name: Restore bootstrapped vcpkg tool
-        id: vcpkg-tool-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: vcpkg/vcpkg
-          key: rulesforge-vcpkg-tool-${{ runner.os }}-${{ env.VCPKG_COMMIT }}
 
 
       - name: Restore pinned dependency SDKs
@@ -98,33 +94,14 @@ jobs:
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils autoconf automake libtool
-          if [[ ! -x ./vcpkg/vcpkg ]]; then
-            for attempt in 1 2 3 4 5; do
-              if ./vcpkg/bootstrap-vcpkg.sh -disableMetrics; then
-                break
-              fi
-              if [[ "$attempt" -eq 5 ]]; then
-                echo "vcpkg bootstrap failed after 5 attempts" >&2
-                exit 1
-              fi
-              sleep $((attempt * 10))
-            done
-          fi
-          chmod +x ./vcpkg/vcpkg
-          ./vcpkg/vcpkg version
+          test -x "$VCPKG_ROOT/vcpkg"
+          "$VCPKG_ROOT/vcpkg" version
           sudo mkdir -p /opt
-          sudo ln -sfn "$GITHUB_WORKSPACE/vcpkg" /opt/vcpkg
+          sudo ln -sfn "$VCPKG_ROOT" /opt/vcpkg
 
-      - name: Save bootstrapped vcpkg tool
-        if: steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: vcpkg/vcpkg
-          key: rulesforge-vcpkg-tool-${{ runner.os }}-${{ env.VCPKG_COMMIT }}
 
-      - name: Install pinned re2c 4.6 with Unicode tables
-        shell: bash
-        run: bash .ci/deps/salts-utils/cmake/ci/install-re2c.sh
+      - name: Restore shared re2c binary
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
 
       - name: Build standalone host Lemon
         if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
@@ -139,12 +116,11 @@ jobs:
         shell: bash
         env:
           PROJECT_ROOT: ${{ runner.temp }}/salts-project
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
         run: |
           set -euxo pipefail
           cmake -S .ci/deps/salts -B "$RUNNER_TEMP/build/salts-release" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdk/salts-release" \
-            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
           cmake --build "$RUNNER_TEMP/build/salts-release" --target install -j2
 
@@ -158,7 +134,7 @@ jobs:
           cmake -S .ci/deps/salts-utils -B "$RUNNER_TEMP/build/salts-utils-release" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$RUNNER_TEMP/host-lemon/lemon" \
-            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
           cmake --build "$RUNNER_TEMP/build/salts-utils-release" -j2
           cmake --install "$RUNNER_TEMP/build/salts-utils-release" \
@@ -199,7 +175,6 @@ jobs:
         shell: bash
         env:
           PKG_ROOT: /opt
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
           VCPKG_INSTALLED_DIR: ${{ github.workspace }}/vcpkg_installed
           SALTS_ROOT: ${{ runner.temp }}/sdk/salts-release
           SALTS_UTILS_ROOT: ${{ runner.temp }}/sdk/salts-utils-release
@@ -231,7 +206,7 @@ jobs:
           test -z "${SALTS_UTILS_ROOT:-}"
           cmake -S tests/package_consumer -B "$RUNNER_TEMP/build/rulesforge-consumer" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux
           cmake --build "$RUNNER_TEMP/build/rulesforge-consumer" -j2
           "$RUNNER_TEMP/build/rulesforge-consumer/rulesforge_package_consumer"
