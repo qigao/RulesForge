@@ -133,8 +133,7 @@
       "hidden": true,
       "environment": {
         "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/debug",
-        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/debug",
-        "DATABIND_ROOT": "$env{PKG_ROOT}/databind-android/debug"
+        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/debug"
       },
       "cacheVariables": {"CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/rules_forge-android/debug"}
     },
@@ -143,8 +142,7 @@
       "hidden": true,
       "environment": {
         "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/release",
-        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/release",
-        "DATABIND_ROOT": "$env{PKG_ROOT}/databind-android/release"
+        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/release"
       },
       "cacheVariables": {"CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/rules_forge-android/release"}
     },
