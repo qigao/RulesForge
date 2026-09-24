@@ -8,42 +8,47 @@ if(NOT DEFINED ENV{SALTS_ROOT} OR "$ENV{SALTS_ROOT}" STREQUAL "")
         "SALTS_ROOT must name the installed Salts profile")
     return()
 endif()
-if(NOT DEFINED ENV{DATABIND_ROOT} OR "$ENV{DATABIND_ROOT}" STREQUAL "")
+if(NOT DEFINED ENV{SALTS_UTILS_ROOT} OR "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
     set(RulesForge_FOUND FALSE)
     set(RulesForge_NOT_FOUND_MESSAGE
-        "DATABIND_ROOT must name the installed DataBind profile")
+        "SALTS_UTILS_ROOT must name the installed SaltsUtils profile")
     return()
 endif()
 
 find_dependency(Salts CONFIG REQUIRED
     PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
-find_dependency(DataBind 3 CONFIG REQUIRED
-    PATHS "$ENV{DATABIND_ROOT}" NO_DEFAULT_PATH)
+find_dependency(SaltsUtils CONFIG REQUIRED
+    PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
 
-file(REAL_PATH "$ENV{DATABIND_ROOT}" _RulesForge_DataBind_real_root)
-if(NOT DEFINED DataBind_DIR OR DataBind_DIR STREQUAL "")
+file(REAL_PATH "$ENV{SALTS_UTILS_ROOT}" _RulesForge_SaltsUtils_real_root)
+if(NOT DEFINED SaltsUtils_DIR OR SaltsUtils_DIR STREQUAL "")
     set(RulesForge_FOUND FALSE)
     set(RulesForge_NOT_FOUND_MESSAGE
-        "DataBind package root cannot be verified")
+        "SaltsUtils package root cannot be verified")
     return()
 endif()
-file(REAL_PATH "${DataBind_DIR}" _RulesForge_DataBind_real_dir)
-cmake_path(IS_PREFIX _RulesForge_DataBind_real_root
-           "${_RulesForge_DataBind_real_dir}" NORMALIZE
-           _RulesForge_DataBind_is_within_root)
-if(NOT _RulesForge_DataBind_is_within_root)
+file(REAL_PATH "${SaltsUtils_DIR}" _RulesForge_SaltsUtils_real_dir)
+cmake_path(IS_PREFIX _RulesForge_SaltsUtils_real_root
+           "${_RulesForge_SaltsUtils_real_dir}" NORMALIZE
+           _RulesForge_SaltsUtils_is_within_root)
+if(NOT _RulesForge_SaltsUtils_is_within_root)
     set(RulesForge_FOUND FALSE)
     set(RulesForge_NOT_FOUND_MESSAGE
-        "DataBind_DIR is outside DATABIND_ROOT: ${DataBind_DIR}")
+        "SaltsUtils_DIR is outside SALTS_UTILS_ROOT: ${SaltsUtils_DIR}")
     return()
 endif()
 
-if(NOT TARGET Salts::DataBind)
-    set(RulesForge_FOUND FALSE)
-    set(RulesForge_NOT_FOUND_MESSAGE
-        "DataBind package does not provide Salts::DataBind")
-    return()
-endif()
+foreach(_RulesForge_required_databind_target IN ITEMS
+        Salts::DataBind
+        Salts::TbeSchema)
+    if(NOT TARGET ${_RulesForge_required_databind_target})
+        set(RulesForge_FOUND FALSE)
+        set(RulesForge_NOT_FOUND_MESSAGE
+            "SaltsUtils package is missing required DataBind target: ${_RulesForge_required_databind_target}")
+        return()
+    endif()
+endforeach()
+unset(_RulesForge_required_databind_target)
 
 include("${CMAKE_CURRENT_LIST_DIR}/RulesForgeTargets.cmake")
 
