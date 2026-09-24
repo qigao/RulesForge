@@ -18,8 +18,8 @@ concurrency:
 env:
   EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
   VCPKG_COMMIT: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
-  SALTS_COMMIT: 801202e58c2d86b35202414d4812e79a2fd25bae
-  SALTS_UTILS_COMMIT: 47bdfdcfcbb64dc3dc25d6768dd2d3b74b7cc3f7
+  SALTS_REF: master
+  SALTS_UTILS_REF: master
 
 jobs:
   linux-release:
@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ${{ env.SALTS_COMMIT }}
+          ref: ${{ env.SALTS_REF }}
           path: .ci/deps/salts
           persist-credentials: false
 
@@ -54,10 +54,24 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: ${{ env.SALTS_UTILS_COMMIT }}
+          ref: ${{ env.SALTS_UTILS_REF }}
           path: .ci/deps/salts-utils
           persist-credentials: false
 
+
+      - name: Resolve dependency revisions
+        id: dependency-revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          salts_sha="$(git -C .ci/deps/salts rev-parse HEAD)"
+          salts_utils_sha="$(git -C .ci/deps/salts-utils rev-parse HEAD)"
+          test -n "$salts_sha"
+          test -n "$salts_utils_sha"
+          echo "salts_sha=$salts_sha" >> "$GITHUB_OUTPUT"
+          echo "salts_utils_sha=$salts_utils_sha" >> "$GITHUB_OUTPUT"
+          printf 'salts-ref=%s\nsalts=%s\nsalts-utils-ref=%s\nsalts-utils=%s\n' \
+            "$SALTS_REF" "$salts_sha" "$SALTS_UTILS_REF" "$salts_utils_sha"
 
       - name: Select RulesForge vcpkg L1 cache
         shell: bash
@@ -85,8 +99,7 @@ jobs:
           path: |
             ${{ runner.temp }}/sdk/salts-release
             ${{ runner.temp }}/sdk/salts-utils-release
-            ${{ runner.temp }}/sdk/databind-release
-          key: rulesforge-dependency-sdk-${{ runner.os }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-${{ env.VCPKG_COMMIT }}
+          key: rulesforge-dependency-sdk-${{ runner.os }}-${{ steps.dependency-revisions.outputs.salts_sha }}-${{ steps.dependency-revisions.outputs.salts_utils_sha }}-${{ env.VCPKG_COMMIT }}
 
       - name: Prepare Linux toolchain
         shell: bash
@@ -124,7 +137,7 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-linux -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
           cmake --build "$RUNNER_TEMP/build/salts-release" --target install -j2
 
-      - name: Build pinned SaltsUtils and DataBind Release SDKs
+      - name: Build SaltsUtils Release SDK with DataBind
         if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
@@ -138,9 +151,7 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-linux -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
           cmake --build "$RUNNER_TEMP/build/salts-utils-release" -j2
           cmake --install "$RUNNER_TEMP/build/salts-utils-release" \
-            --prefix "$RUNNER_TEMP/sdk/salts-utils-release" --component Unspecified
-          cmake --install "$RUNNER_TEMP/build/salts-utils-release" \
-            --prefix "$RUNNER_TEMP/sdk/databind-release" --component DataBind
+            --prefix "$RUNNER_TEMP/sdk/salts-utils-release"
 
       - name: Save pinned dependency SDKs
         if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
@@ -149,8 +160,7 @@ jobs:
           path: |
             ${{ runner.temp }}/sdk/salts-release
             ${{ runner.temp }}/sdk/salts-utils-release
-            ${{ runner.temp }}/sdk/databind-release
-          key: rulesforge-dependency-sdk-${{ runner.os }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-${{ env.VCPKG_COMMIT }}
+          key: rulesforge-dependency-sdk-${{ runner.os }}-${{ steps.dependency-revisions.outputs.salts_sha }}-${{ steps.dependency-revisions.outputs.salts_utils_sha }}-${{ env.VCPKG_COMMIT }}
 
       - name: Validate cached dependency SDKs
         shell: bash
@@ -159,17 +169,13 @@ jobs:
           test -d "$RUNNER_TEMP/sdk/salts-release/include"
           test -d "$RUNNER_TEMP/sdk/salts-utils-release/include"
           test -f "$RUNNER_TEMP/sdk/salts-utils-release/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test -f "$RUNNER_TEMP/sdk/salts-utils-release/include/data_bind.h"
+          test -x "$RUNNER_TEMP/sdk/salts-utils-release/bin/tbe_compiler"
+          test -d "$RUNNER_TEMP/sdk/salts-utils-release/bin/templates"
           test ! -e "$RUNNER_TEMP/sdk/salts-utils-release/lib/cmake/DataBind/DataBindConfig.cmake"
-          test -f "$RUNNER_TEMP/sdk/databind-release/lib/cmake/DataBind/DataBindConfig.cmake"
-          test ! -e "$RUNNER_TEMP/sdk/databind-release/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
-          test -f "$RUNNER_TEMP/sdk/databind-release/include/data_bind.h"
-          test -x "$RUNNER_TEMP/sdk/databind-release/bin/tbe_compiler"
-          test -d "$RUNNER_TEMP/sdk/databind-release/bin/templates"
-          test "$(realpath "$RUNNER_TEMP/sdk/salts-utils-release")" != "$(realpath "$RUNNER_TEMP/sdk/databind-release")"
-          sudo mkdir -p /opt/salts /opt/salts-utils /opt/databind
+          sudo mkdir -p /opt/salts /opt/salts-utils
           sudo ln -sfn "$RUNNER_TEMP/sdk/salts-release" /opt/salts/release
           sudo ln -sfn "$RUNNER_TEMP/sdk/salts-utils-release" /opt/salts-utils/release
-          sudo ln -sfn "$RUNNER_TEMP/sdk/databind-release" /opt/databind/release
 
       - name: Configure RulesForge Release
         shell: bash
@@ -178,7 +184,6 @@ jobs:
           VCPKG_INSTALLED_DIR: ${{ github.workspace }}/vcpkg_installed
           SALTS_ROOT: ${{ runner.temp }}/sdk/salts-release
           SALTS_UTILS_ROOT: ${{ runner.temp }}/sdk/salts-utils-release
-          DATABIND_ROOT: ${{ runner.temp }}/sdk/databind-release
         run: |
           set -euxo pipefail
           cmake --preset linux-release-user \
@@ -193,17 +198,17 @@ jobs:
           cmake --build build/linux-gcc-release --target install -j2 2>&1 | tee "$RUNNER_TEMP/rulesforge-release-install.log"
           test -d "$RUNNER_TEMP/sdk/rules-forge-release/include"
 
-      - name: Consume installed RulesForge without SaltsUtils root
+      - name: Consume installed RulesForge with canonical SaltsUtils root
         shell: bash
         env:
           RULES_FORGE_ROOT: ${{ runner.temp }}/sdk/rules-forge-release
           SALTS_ROOT: ${{ runner.temp }}/sdk/salts-release
-          DATABIND_ROOT: ${{ runner.temp }}/sdk/databind-release
+          SALTS_UTILS_ROOT: ${{ runner.temp }}/sdk/salts-utils-release
           CMAKE_PREFIX_PATH: ${{ github.workspace }}/vcpkg_installed/x64-linux
-          LD_LIBRARY_PATH: ${{ runner.temp }}/sdk/rules-forge-release/lib:${{ runner.temp }}/sdk/databind-release/lib:${{ runner.temp }}/sdk/salts-utils-release/lib:${{ runner.temp }}/sdk/salts-release/lib
+          LD_LIBRARY_PATH: ${{ runner.temp }}/sdk/rules-forge-release/lib:${{ runner.temp }}/sdk/salts-utils-release/lib:${{ runner.temp }}/sdk/salts-release/lib
         run: |
           set -euxo pipefail
-          test -z "${SALTS_UTILS_ROOT:-}"
+          test -f "$SALTS_UTILS_ROOT/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
           cmake -S tests/package_consumer -B "$RUNNER_TEMP/build/rulesforge-consumer" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
