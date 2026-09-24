@@ -42,7 +42,7 @@ jobs:
           git diff --check HEAD^ HEAD
           git diff --exit-code
 
-      - name: Checkout pinned Salts
+      - name: Checkout Salts master
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
@@ -50,7 +50,7 @@ jobs:
           path: .ci/deps/salts
           persist-credentials: false
 
-      - name: Checkout pinned SaltsUtils
+      - name: Checkout Salts masterUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
@@ -92,7 +92,7 @@ jobs:
 
 
 
-      - name: Restore pinned dependency SDKs
+      - name: Restore dependency SDKs
         id: dependency-sdk-cache
         uses: actions/cache/restore@v4
         with:
@@ -124,7 +124,7 @@ jobs:
           cmake -S .ci/deps/salts-utils/tools/lemon -B "$RUNNER_TEMP/host-lemon" -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build "$RUNNER_TEMP/host-lemon" --target lemon -j2
 
-      - name: Build pinned Salts Release SDK
+      - name: Build Salts Release SDK
         if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
@@ -153,7 +153,7 @@ jobs:
           cmake --install "$RUNNER_TEMP/build/salts-utils-release" \
             --prefix "$RUNNER_TEMP/sdk/salts-utils-release"
 
-      - name: Save pinned dependency SDKs
+      - name: Save dependency SDKs
         if: steps.dependency-sdk-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
@@ -215,6 +215,39 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-linux
           cmake --build "$RUNNER_TEMP/build/rulesforge-consumer" -j2
           "$RUNNER_TEMP/build/rulesforge-consumer/rulesforge_package_consumer"
+
+      - name: Reject installed consumer when SaltsUtils lacks DataBind targets
+        shell: bash
+        env:
+          RULES_FORGE_ROOT: ${{ runner.temp }}/sdk/rules-forge-release
+          SALTS_ROOT: ${{ runner.temp }}/sdk/salts-release
+        run: |
+          set -euxo pipefail
+          fake_root="$RUNNER_TEMP/sdk/salts-utils-without-databind"
+          source_dir="$RUNNER_TEMP/rulesforge-missing-databind-consumer"
+          build_dir="$RUNNER_TEMP/build/rulesforge-missing-databind-consumer"
+          rm -rf "$fake_root" "$source_dir" "$build_dir"
+          mkdir -p "$fake_root/lib/cmake/SaltsUtils" "$source_dir"
+          cat > "$fake_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake" <<'EOF'
+          set(SaltsUtils_FOUND TRUE)
+          EOF
+          cat > "$source_dir/CMakeLists.txt" <<'EOF'
+          cmake_minimum_required(VERSION 3.20)
+          project(RulesForgeMissingDataBind LANGUAGES C)
+          find_package(RulesForge 0.9 CONFIG REQUIRED
+            PATHS "$ENV{RULES_FORGE_ROOT}" NO_DEFAULT_PATH)
+          EOF
+          set +e
+          SALTS_UTILS_ROOT="$fake_root" cmake -S "$source_dir" -B "$build_dir" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            >"$RUNNER_TEMP/rulesforge-missing-databind.log" 2>&1
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -F "SaltsUtils package is missing required DataBind target: Salts::DataBind" \
+            "$RUNNER_TEMP/rulesforge-missing-databind.log"
 
       - name: Verify committed source remained untouched
         if: always()
