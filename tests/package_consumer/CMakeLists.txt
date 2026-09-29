@@ -12,12 +12,13 @@ find_package(RulesForge 0.9 CONFIG REQUIRED
 if(NOT TARGET RulesForge::RulesForge)
   message(FATAL_ERROR "RulesForge::RulesForge is missing")
 endif()
-if(NOT TARGET Salts::DataBind)
-  message(FATAL_ERROR "RulesForge package did not resolve Salts::DataBind")
-endif()
-if(DEFINED ENV{SALTS_UTILS_ROOT} AND NOT "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
+if(NOT DEFINED ENV{SALTS_UTILS_ROOT} OR "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
   message(FATAL_ERROR
-    "Installed RulesForge consumer must not require SALTS_UTILS_ROOT")
+    "Installed RulesForge consumer requires SALTS_UTILS_ROOT")
+endif()
+if(NOT TARGET Salts::DataBind)
+  message(FATAL_ERROR
+    "RulesForge package did not resolve Salts::DataBind from SaltsUtils")
 endif()
 
 add_executable(rulesforge_package_consumer main.c)
