@@ -35,18 +35,18 @@ include(ProjectOptions.cmake)
 find_package(OpenSSL REQUIRED)
 
 if(NOT DEFINED ENV{SALTS_ROOT} OR "$ENV{SALTS_ROOT}" STREQUAL "")
-    message(FATAL_ERROR "SALTS_ROOT must name the installed Salts 1.8.3 profile")
+    message(FATAL_ERROR "SALTS_ROOT must name the installed Salts profile")
 endif()
 if(NOT DEFINED ENV{SALTS_UTILS_ROOT} OR "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
     message(FATAL_ERROR
-            "SALTS_UTILS_ROOT must name the installed SaltsUtils 4.1.3 profile")
+            "SALTS_UTILS_ROOT must name the installed SaltsUtils profile")
 endif()
 file(TO_CMAKE_PATH "$ENV{SALTS_ROOT}" RULESFORGE_SALTS_ROOT)
 file(TO_CMAKE_PATH "$ENV{SALTS_UTILS_ROOT}" RULESFORGE_SALTS_UTILS_ROOT)
 
-find_package(Salts 1.8.3 EXACT CONFIG REQUIRED
+find_package(Salts CONFIG REQUIRED
              PATHS "${RULESFORGE_SALTS_ROOT}" NO_DEFAULT_PATH)
-find_package(SaltsUtils 4.1.3 EXACT CONFIG REQUIRED
+find_package(SaltsUtils CONFIG REQUIRED
              PATHS "${RULESFORGE_SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
 
 file(REAL_PATH "${RULESFORGE_SALTS_UTILS_ROOT}" RULESFORGE_SALTS_UTILS_REAL_ROOT)
@@ -64,7 +64,7 @@ endif()
 
 if(NOT TARGET Salts::DataBind)
     message(FATAL_ERROR
-            "SaltsUtils 4.1.3 package is missing required target Salts::DataBind")
+            "resolved SaltsUtils package is missing required target Salts::DataBind")
 endif()
 
 include(CheckCSourceCompiles)
