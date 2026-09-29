@@ -14,8 +14,8 @@ Each RID contains the installed RulesForge CMake package, public `rules_forge.h`
 
 Dependencies:
 
-- `Salts.Native 1.8.3`
-- `SaltsUtils.Native 4.1.3`
+- latest published stable `Salts.Native`
+- latest published stable `SaltsUtils.Native`
 
 DataBind is supplied only through SaltsUtils. There is no independent DataBind package or root.
 
@@ -24,7 +24,7 @@ The package intentionally contains only the installed RulesForge consumer surfac
 Typical CMake consumption restores the matching RID trees for RulesForge, Salts, and SaltsUtils, sets `SALTS_ROOT` and `SALTS_UTILS_ROOT`, then uses:
 
 ```cmake
-find_package(RulesForge 0.9 CONFIG REQUIRED
+find_package(RulesForge CONFIG REQUIRED
   PATHS "${RULES_FORGE_ROOT}"
   NO_DEFAULT_PATH)
 target_link_libraries(my_app PRIVATE RulesForge::RulesForge)

@@ -6,14 +6,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$saltsVersion = "1.8.3"
-$saltsUtilsVersion = "4.1.3"
-
 foreach ($name in @("GITHUB_TOKEN", "RUNNER_TEMP", "GITHUB_ENV", "GITHUB_PATH")) {
   $value = [Environment]::GetEnvironmentVariable($name)
-  if ([string]::IsNullOrWhiteSpace($value)) {
-    throw "$name is required"
-  }
+  if ([string]::IsNullOrWhiteSpace($value)) { throw "$name is required" }
 }
 
 $packages = if ($env:QIGAO_NUGET_PACKAGES) {
@@ -23,17 +18,15 @@ $packages = if ($env:QIGAO_NUGET_PACKAGES) {
 }
 $config = Join-Path $env:RUNNER_TEMP "rulesforge-native-sdk.config"
 $project = Join-Path $env:RUNNER_TEMP "rulesforge-native-sdk.csproj"
+$assetsPath = Join-Path $env:RUNNER_TEMP "obj/project.assets.json"
 
 @'
 <?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <packageSources><clear /></packageSources>
-</configuration>
+<configuration><packageSources><clear /></packageSources></configuration>
 '@ | Set-Content -LiteralPath $config -Encoding utf8NoBOM
 
 $sourceArgs = @(
-  "nuget", "add", "source",
-  "https://nuget.pkg.github.com/qigao/index.json",
+  "nuget", "add", "source", "https://nuget.pkg.github.com/qigao/index.json",
   "--name", "github",
   "--username", "qigao",
   "--password", $env:GITHUB_TOKEN,
@@ -41,31 +34,40 @@ $sourceArgs = @(
   "--configfile", $config
 )
 & dotnet @sourceArgs
-if ($LASTEXITCODE -ne 0) {
-  throw "failed to configure qigao GitHub Packages source"
-}
+if ($LASTEXITCODE -ne 0) { throw "failed to configure qigao GitHub Packages source" }
 
-@"
+@'
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+  </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Salts.Native" Version="[$saltsVersion]" />
-    <PackageReference Include="SaltsUtils.Native" Version="[$saltsUtilsVersion]" />
+    <PackageReference Include="Salts.Native" Version="*" />
+    <PackageReference Include="SaltsUtils.Native" Version="*" />
   </ItemGroup>
 </Project>
-"@ | Set-Content -LiteralPath $project -Encoding utf8NoBOM
+'@ | Set-Content -LiteralPath $project -Encoding utf8NoBOM
 
-$restoreArgs = @(
-  "restore", $project,
-  "--packages", $packages,
-  "--configfile", $config,
-  "--no-cache"
-)
-& dotnet @restoreArgs
-if ($LASTEXITCODE -ne 0) {
-  throw "failed to restore published RulesForge producer SDKs"
+& dotnet restore $project --packages $packages --configfile $config --no-cache --force-evaluate
+if ($LASTEXITCODE -ne 0) { throw "failed to restore latest published RulesForge producer SDKs" }
+if (-not (Test-Path -LiteralPath $assetsPath -PathType Leaf)) {
+  throw "NuGet restore did not produce $assetsPath"
 }
 
+$assets = Get-Content -LiteralPath $assetsPath -Raw | ConvertFrom-Json
+function Get-ResolvedPackageVersion([string]$PackageId) {
+  $prefix = "$PackageId/"
+  foreach ($property in $assets.libraries.PSObject.Properties) {
+    if ($property.Name.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+      return $property.Name.Substring($prefix.Length)
+    }
+  }
+  throw "NuGet restore did not resolve $PackageId"
+}
+
+$saltsVersion = Get-ResolvedPackageVersion "Salts.Native"
+$saltsUtilsVersion = Get-ResolvedPackageVersion "SaltsUtils.Native"
 $saltsRoot = Join-Path $packages "salts.native/$saltsVersion/sdk/$Rid"
 $saltsUtilsRoot = Join-Path $packages "saltsutils.native/$saltsUtilsVersion/sdk/$Rid"
 
@@ -88,31 +90,28 @@ $idlc = if ($Rid -eq "windows-x64") {
   Join-Path $saltsUtilsRoot "bin/salts-idlc"
 }
 if (-not (Test-Path -LiteralPath $idlc -PathType Leaf)) {
-  throw "SaltsUtils $saltsUtilsVersion is missing salts-idlc: $idlc"
+  throw "resolved SaltsUtils package is missing salts-idlc: $idlc"
 }
 
 $dataBindHeader = Get-Content -LiteralPath (Join-Path $saltsUtilsRoot "include/data_bind.h") -Raw
 if ($dataBindHeader -notmatch '#define\s+DATA_BIND_VERSION_MAJOR\s+3') {
-  throw "SaltsUtils $saltsUtilsVersion does not expose DataBind 3"
+  throw "resolved SaltsUtils package does not expose DataBind 3"
 }
 if ($dataBindHeader -notmatch '#define\s+DATA_BIND_ABI_VERSION\s+9') {
-  throw "SaltsUtils $saltsUtilsVersion does not expose DataBind ABI 9"
+  throw "resolved SaltsUtils package does not expose DataBind ABI 9"
 }
 
 "SALTS_ROOT=$saltsRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
 "SALTS_UTILS_ROOT=$saltsUtilsRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
 "QIGAO_NUGET_PACKAGES=$packages" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
-"SALTS_SDK_VERSION=$saltsVersion" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
-"SALTS_UTILS_SDK_VERSION=$saltsUtilsVersion" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+"SALTS_PACKAGE_VERSION=$saltsVersion" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+"SALTS_UTILS_PACKAGE_VERSION=$saltsUtilsVersion" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
 
 (Join-Path $saltsRoot "bin") | Add-Content -LiteralPath $env:GITHUB_PATH -Encoding utf8
 (Join-Path $saltsUtilsRoot "bin") | Add-Content -LiteralPath $env:GITHUB_PATH -Encoding utf8
 
 if ($Rid -eq "linux-x64") {
-  $entries = @(
-    (Join-Path $saltsRoot "lib"),
-    (Join-Path $saltsUtilsRoot "lib")
-  )
+  $entries = @((Join-Path $saltsRoot "lib"), (Join-Path $saltsUtilsRoot "lib"))
   if (-not [string]::IsNullOrWhiteSpace($env:LD_LIBRARY_PATH)) {
     $entries += $env:LD_LIBRARY_PATH
   }
@@ -120,6 +119,6 @@ if ($Rid -eq "linux-x64") {
     Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
 }
 
-Write-Host "Restored Salts.Native $saltsVersion -> $saltsRoot"
-Write-Host "Restored SaltsUtils.Native $saltsUtilsVersion -> $saltsUtilsRoot"
+Write-Host "Restored latest Salts.Native -> $saltsVersion -> $saltsRoot"
+Write-Host "Restored latest SaltsUtils.Native -> $saltsUtilsVersion -> $saltsUtilsRoot"
 Write-Host "Validated salts-idlc -> $idlc"

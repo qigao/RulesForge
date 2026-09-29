@@ -112,11 +112,11 @@ jobs:
         shell: pwsh
         run: choco install ninja -y --no-progress
 
-      - name: Restore Salts 1.8.3 + SaltsUtils 4.1.3
+      - name: Restore latest published native SDKs
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid ${{ matrix.rid }}
+        run: ./cmake/ci/restore-native-sdks.ps1 -Rid ${{ matrix.rid }}
 
       - name: Verify canonical dependency environment
         shell: pwsh
@@ -131,8 +131,8 @@ jobs:
           if ($env:VCPKG_NUGET_REPOSITORY -ne "https://github.com/qigao/vcpkg-cache") {
             throw "unexpected vcpkg cache repository: $env:VCPKG_NUGET_REPOSITORY"
           }
-          if ($env:SALTS_SDK_VERSION -ne "1.8.3") { throw "unexpected Salts SDK version" }
-          if ($env:SALTS_UTILS_SDK_VERSION -ne "4.1.3") { throw "unexpected SaltsUtils SDK version" }
+          if ([string]::IsNullOrWhiteSpace($env:SALTS_PACKAGE_VERSION)) { throw "resolved Salts package identity is unavailable" }
+          if ([string]::IsNullOrWhiteSpace($env:SALTS_UTILS_PACKAGE_VERSION)) { throw "resolved SaltsUtils package identity is unavailable" }
 
       - name: Configure, build, test and install on Linux
         if: runner.os == 'Linux'
