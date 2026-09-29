@@ -12,10 +12,12 @@ RulesForge is deliberately not an application server or hidden workflow runtime.
 
 RulesForge participates in the [Salts](https://github.com/qigao/salts) ecosystem rather than defining an independent type and data-binding stack.
 
-Its current build uses:
+Its current published dependency baseline is:
 
-- **Salts** for shared systems/runtime foundations and C-facing semantic infrastructure.
-- **SaltsUtils** for DataBind, concrete parser components, and utilities. Its DataBind component provides schema-defined external facts, native/dynamic values, parsing, and incremental ingestion.
+- **Salts 1.8.3** for shared systems/runtime foundations and C-facing semantic infrastructure.
+- **SaltsUtils 4.1.3** for DataBind, concrete parser components, IDL/schema tooling, and utilities. DataBind provides schema-defined external facts, native/dynamic values, parsing, and incremental ingestion.
+
+CI restores those producer SDKs from GitHub Packages and restores third-party dependencies only through the shared **qigao/vcpkg-cache** binary cache. RulesForge does not rebuild Salts/SaltsUtils from source and does not keep a source-build fallback path.
 
 The target ecosystem boundary is:
 
@@ -161,9 +163,9 @@ Requirements include:
 - CMake 3.20+
 - C17 compiler support for the C boundary
 - C++20 compiler support for the engine implementation
-- an installed Salts SDK
-- an installed SaltsUtils SDK with DataBind 3 matching ABI 9 and the required parser/utility components
-- OpenSSL through the configured dependency environment
+- **Salts.Native 1.8.3**
+- **SaltsUtils.Native 4.1.3** with DataBind 3 / ABI 9 and the required parser/utility components
+- OpenSSL-compatible crypto and other third-party dependencies through the configured vcpkg-cache environment
 
 The dependency ownership contract is Salts from `SALTS_ROOT` and SaltsUtils, including DataBind, from `SALTS_UTILS_ROOT`.
 
