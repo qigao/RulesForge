@@ -33,8 +33,9 @@ endif()
 include(ProjectOptions.cmake)
 
 find_package(OpenSSL REQUIRED)
-find_package(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
-find_package(SaltsUtils CONFIG REQUIRED
+find_package(Salts 1.8.3 EXACT CONFIG REQUIRED
+             PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
+find_package(SaltsUtils 4.1.3 EXACT CONFIG REQUIRED
              PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
 
 file(REAL_PATH "$ENV{SALTS_UTILS_ROOT}" RULESFORGE_SALTS_UTILS_REAL_ROOT)
@@ -50,46 +51,9 @@ if(NOT RULESFORGE_SALTS_UTILS_IS_WITHIN_ROOT)
             "SaltsUtils resolved outside SALTS_UTILS_ROOT: ${SaltsUtils_DIR}")
 endif()
 
-foreach(_RULESFORGE_STALE_DATABIND_TARGET IN ITEMS
-        Salts::DataBind
-        Salts::DataBindCore
-        Salts::DataBindCMeta
-        Salts::DataBindCFlow
-        Salts::TbeSchema)
-    if(TARGET ${_RULESFORGE_STALE_DATABIND_TARGET})
-        message(FATAL_ERROR
-                "SALTS_UTILS_ROOT still owns DataBind target: ${_RULESFORGE_STALE_DATABIND_TARGET}")
-    endif()
-endforeach()
-
-if(NOT DEFINED ENV{DATABIND_ROOT} OR "$ENV{DATABIND_ROOT}" STREQUAL "")
-    message(FATAL_ERROR "DATABIND_ROOT must name the installed DataBind profile")
-endif()
-if(NOT IS_DIRECTORY "$ENV{DATABIND_ROOT}")
+if(NOT TARGET Salts::DataBind)
     message(FATAL_ERROR
-            "DATABIND_ROOT is not a directory: $ENV{DATABIND_ROOT}")
-endif()
-file(REAL_PATH "$ENV{DATABIND_ROOT}" RULESFORGE_DATABIND_REAL_ROOT)
-if(RULESFORGE_DATABIND_REAL_ROOT STREQUAL RULESFORGE_SALTS_UTILS_REAL_ROOT)
-    message(FATAL_ERROR
-            "DATABIND_ROOT must be physically distinct from SALTS_UTILS_ROOT")
-endif()
-find_package(DataBind 3 CONFIG REQUIRED
-             PATHS "$ENV{DATABIND_ROOT}" NO_DEFAULT_PATH)
-if(NOT DEFINED DataBind_DIR OR DataBind_DIR STREQUAL "")
-    message(FATAL_ERROR "DataBind package root cannot be verified")
-endif()
-file(REAL_PATH "${DataBind_DIR}" RULESFORGE_DATABIND_REAL_DIR)
-cmake_path(IS_PREFIX RULESFORGE_DATABIND_REAL_ROOT
-           "${RULESFORGE_DATABIND_REAL_DIR}" NORMALIZE
-           RULESFORGE_DATABIND_IS_WITHIN_ROOT)
-if(NOT RULESFORGE_DATABIND_IS_WITHIN_ROOT)
-    message(FATAL_ERROR
-            "DataBind resolved outside DATABIND_ROOT: ${DataBind_DIR}")
-endif()
-if(NOT TARGET Salts::DataBind OR NOT TARGET Salts::TbeSchema)
-    message(FATAL_ERROR
-            "DATABIND_ROOT does not provide the canonical DataBind base targets")
+            "SaltsUtils 4.1.3 package is missing required target Salts::DataBind")
 endif()
 
 include(CheckCSourceCompiles)
