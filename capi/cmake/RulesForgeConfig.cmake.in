@@ -18,9 +18,9 @@ endif()
 file(TO_CMAKE_PATH "$ENV{SALTS_ROOT}" _RulesForge_Salts_root)
 file(TO_CMAKE_PATH "$ENV{SALTS_UTILS_ROOT}" _RulesForge_SaltsUtils_root)
 
-find_dependency(Salts 1.8.3 EXACT CONFIG REQUIRED
+find_dependency(Salts CONFIG REQUIRED
     PATHS "${_RulesForge_Salts_root}" NO_DEFAULT_PATH)
-find_dependency(SaltsUtils 4.1.3 EXACT CONFIG REQUIRED
+find_dependency(SaltsUtils CONFIG REQUIRED
     PATHS "${_RulesForge_SaltsUtils_root}" NO_DEFAULT_PATH)
 
 file(REAL_PATH "${_RulesForge_SaltsUtils_root}" _RulesForge_SaltsUtils_real_root)
