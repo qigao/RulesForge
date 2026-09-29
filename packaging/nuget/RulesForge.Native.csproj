@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <PackageId>RulesForge.Native</PackageId>
+    <PackageVersion Condition="'$(PackageVersion)' == ''">0.9.0</PackageVersion>
+    <Authors>qigao</Authors>
+    <Description>Prebuilt RulesForge C ABI SDK install trees for native consumers.</Description>
+    <PackageTags>rulesforge;rules;rete;native;c;cpp;cmake</PackageTags>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/qigao/RulesForge</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Salts.Native" Version="[1.8.3]" />
+    <PackageReference Include="SaltsUtils.Native" Version="[4.1.3]" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="$(PackageRoot)/sdk/**/*" Pack="true" PackagePath="sdk/" />
+  </ItemGroup>
+</Project>
