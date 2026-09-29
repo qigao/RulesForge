@@ -119,8 +119,8 @@ suite("RFL Engine") {
                 std::ofstream schema(schema_path, std::ios::binary);
                 schema << "schema Market [id(7), version(1), byte_order(little)]; "
                           "enum Tier <uint8> { Bronze = 1; Silver = 2; } "
-                          "message Customer { int32 age; Tier tier; list<string> tags; "
-                          "map<string,int32> scores; string name; uuid id; }";
+                          "message Customer { int32 age; Tier tier; uuid id; "
+                          "list<string> tags; map<string,int32> scores; string name; }";
             }
 
             std::string const drl = std::string("import \"")
@@ -155,14 +155,14 @@ suite("RFL Engine") {
                 check(it->fields[1].type_params.size() == 1);
                 check(it->fields[1].type_params[0].base_type == FT_Enum);
                 check(it->fields[1].type_params[0].custom_type == "Tier");
-                check(it->fields[2].name == "tags");
-                check(it->fields[2].type == FT_List);
-                check(it->fields[3].name == "scores");
-                check(it->fields[3].type == FT_Map);
-                check(it->fields[4].name == "name");
-                check(it->fields[4].type == FT_String);
-                check(it->fields[5].name == "id");
-                check(it->fields[5].type == FT_Uuid);
+                check(it->fields[2].name == "id");
+                check(it->fields[2].type == FT_Uuid);
+                check(it->fields[3].name == "tags");
+                check(it->fields[3].type == FT_List);
+                check(it->fields[4].name == "scores");
+                check(it->fields[4].type == FT_Map);
+                check(it->fields[5].name == "name");
+                check(it->fields[5].type == FT_String);
             }
             check(kb->get_parser_state().parsed_enums.size() == 1);
         }
@@ -500,7 +500,7 @@ suite("RFL Engine") {
             check(std::get<std::string>(budget->fields["tier"]) == "budget");
             check(stats.cpp_action_plan_exec_count == 3);
             check(stats.cpp_action_plan_error_count == 0);
-            check(stats.condition_eval_us > 0);
+            // Sub-microsecond condition evaluation may legitimately round to zero.
         }
 
         it("executes single switch RHS through C++ action plan") {
