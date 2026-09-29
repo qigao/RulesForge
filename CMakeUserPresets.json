@@ -1,8 +1,6 @@
 {
   "version": 6,
-  "include": [
-    "CMakePresets.json"
-  ],
+  "include": ["CMakePresets.json"],
   "configurePresets": [
     {
       "name": "win-toolchain",
@@ -26,14 +24,8 @@
         "VCPKG_TARGET_TRIPLET": "x64-windows",
         "VCPKG_MANIFEST_MODE": "ON"
       },
-      "architecture": {
-        "value": "x64",
-        "strategy": "external"
-      },
-      "toolset": {
-        "value": "host=x64",
-        "strategy": "external"
-      }
+      "architecture": {"value": "x64", "strategy": "external"},
+      "toolset": {"value": "host=x64", "strategy": "external"}
     },
     {
       "name": "linux-paths",
@@ -73,10 +65,7 @@
     },
     {
       "name": "win-dev-user",
-      "inherits": [
-        "base-win-dev-user",
-        "win-paths"
-      ],
+      "inherits": ["base-win-dev-user", "win-paths"],
       "environment": {
         "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
         "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
@@ -90,10 +79,7 @@
     },
     {
       "name": "win-release-user",
-      "inherits": [
-        "base-win-release-user",
-        "win-paths"
-      ],
+      "inherits": ["base-win-release-user", "win-paths"],
       "environment": {
         "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
         "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
@@ -106,10 +92,7 @@
     },
     {
       "name": "linux-dev-user",
-      "inherits": [
-        "base-linux-dev-user",
-        "linux-paths"
-      ],
+      "inherits": ["base-linux-dev-user", "linux-paths"],
       "environment": {
         "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
         "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
@@ -123,10 +106,7 @@
     },
     {
       "name": "linux-release-user",
-      "inherits": [
-        "release-linux-ninja",
-        "linux-paths"
-      ],
+      "inherits": ["release-linux-ninja", "linux-paths"],
       "environment": {
         "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
         "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
@@ -139,9 +119,7 @@
     },
     {
       "name": "linux-sdk-package",
-      "inherits": [
-        "linux-release-user"
-      ],
+      "inherits": ["linux-release-user"],
       "binaryDir": "${sourceDir}/build/linux-gcc-sdk-package",
       "cacheVariables": {
         "ENABLE_SANITIZER_ADDRESS": "OFF",
@@ -157,9 +135,7 @@
         "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/debug",
         "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/debug"
       },
-      "cacheVariables": {
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/rules_forge-android/debug"
-      }
+      "cacheVariables": {"CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/rules_forge-android/debug"}
     },
     {
       "name": "android-dependencies-release",
@@ -168,208 +144,43 @@
         "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/release",
         "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/release"
       },
-      "cacheVariables": {
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/rules_forge-android/release"
-      }
+      "cacheVariables": {"CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/rules_forge-android/release"}
     },
-    {
-      "name": "android-arm64-v8a-debug-win",
-      "inherits": [
-        "android-arm64-v8a-debug",
-        "android-dependencies-debug",
-        "android-win-paths",
-        "android-win-environment"
-      ]
-    },
-    {
-      "name": "android-arm64-v8a-release-win",
-      "inherits": [
-        "android-arm64-v8a-release",
-        "android-dependencies-release",
-        "android-win-paths",
-        "android-win-environment"
-      ]
-    },
-    {
-      "name": "android-x86_64-debug-win",
-      "inherits": [
-        "android-x86_64-debug",
-        "android-dependencies-debug",
-        "android-win-paths",
-        "android-win-environment"
-      ]
-    },
-    {
-      "name": "android-x86_64-release-win",
-      "inherits": [
-        "android-x86_64-release",
-        "android-dependencies-release",
-        "android-win-paths",
-        "android-win-environment"
-      ]
-    },
-    {
-      "name": "android-x86-debug-win",
-      "inherits": [
-        "android-x86-debug",
-        "android-dependencies-debug",
-        "android-win-paths",
-        "android-win-environment"
-      ]
-    },
-    {
-      "name": "android-x86-release-win",
-      "inherits": [
-        "android-x86-release",
-        "android-dependencies-release",
-        "android-win-paths",
-        "android-win-environment"
-      ]
-    }
+    {"name": "android-arm64-v8a-debug-win", "inherits": ["android-arm64-v8a-debug", "android-dependencies-debug", "android-win-paths", "android-win-environment"]},
+    {"name": "android-arm64-v8a-release-win", "inherits": ["android-arm64-v8a-release", "android-dependencies-release", "android-win-paths", "android-win-environment"]},
+    {"name": "android-x86_64-debug-win", "inherits": ["android-x86_64-debug", "android-dependencies-debug", "android-win-paths", "android-win-environment"]},
+    {"name": "android-x86_64-release-win", "inherits": ["android-x86_64-release", "android-dependencies-release", "android-win-paths", "android-win-environment"]},
+    {"name": "android-x86-debug-win", "inherits": ["android-x86-debug", "android-dependencies-debug", "android-win-paths", "android-win-environment"]},
+    {"name": "android-x86-release-win", "inherits": ["android-x86-release", "android-dependencies-release", "android-win-paths", "android-win-environment"]}
   ],
   "buildPresets": [
-    {
-      "name": "win-dev-user",
-      "configurePreset": "win-dev-user"
-    },
-    {
-      "name": "win-release-user",
-      "configurePreset": "win-release-user"
-    },
-    {
-      "name": "linux-dev-user",
-      "configurePreset": "linux-dev-user"
-    },
-    {
-      "name": "linux-release-user",
-      "configurePreset": "linux-release-user"
-    },
-    {
-      "name": "linux-sdk-package",
-      "configurePreset": "linux-sdk-package"
-    },
-    {
-      "name": "install-win-dev-user",
-      "configurePreset": "win-dev-user",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-win-release-user",
-      "configurePreset": "win-release-user",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-linux-dev-user",
-      "configurePreset": "linux-dev-user",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-linux-release-user",
-      "configurePreset": "linux-release-user",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-linux-sdk-package",
-      "configurePreset": "linux-sdk-package",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "android-arm64-v8a-debug-win",
-      "configurePreset": "android-arm64-v8a-debug-win"
-    },
-    {
-      "name": "android-arm64-v8a-release-win",
-      "configurePreset": "android-arm64-v8a-release-win"
-    },
-    {
-      "name": "android-x86_64-debug-win",
-      "configurePreset": "android-x86_64-debug-win"
-    },
-    {
-      "name": "android-x86_64-release-win",
-      "configurePreset": "android-x86_64-release-win"
-    },
-    {
-      "name": "android-x86-debug-win",
-      "configurePreset": "android-x86-debug-win"
-    },
-    {
-      "name": "android-x86-release-win",
-      "configurePreset": "android-x86-release-win"
-    },
-    {
-      "name": "install-android-arm64-v8a-debug-win",
-      "configurePreset": "android-arm64-v8a-debug-win",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-android-arm64-v8a-release-win",
-      "configurePreset": "android-arm64-v8a-release-win",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-android-x86_64-debug-win",
-      "configurePreset": "android-x86_64-debug-win",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-android-x86_64-release-win",
-      "configurePreset": "android-x86_64-release-win",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-android-x86-debug-win",
-      "configurePreset": "android-x86-debug-win",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-android-x86-release-win",
-      "configurePreset": "android-x86-release-win",
-      "targets": [
-        "install"
-      ]
-    }
+    {"name": "win-dev-user", "configurePreset": "win-dev-user"},
+    {"name": "win-release-user", "configurePreset": "win-release-user"},
+    {"name": "linux-dev-user", "configurePreset": "linux-dev-user"},
+    {"name": "linux-release-user", "configurePreset": "linux-release-user"},
+    {"name": "linux-sdk-package", "configurePreset": "linux-sdk-package"},
+    {"name": "install-win-dev-user", "configurePreset": "win-dev-user", "targets": ["install"]},
+    {"name": "install-win-release-user", "configurePreset": "win-release-user", "targets": ["install"]},
+    {"name": "install-linux-dev-user", "configurePreset": "linux-dev-user", "targets": ["install"]},
+    {"name": "install-linux-release-user", "configurePreset": "linux-release-user", "targets": ["install"]},
+    {"name": "install-linux-sdk-package", "configurePreset": "linux-sdk-package", "targets": ["install"]},
+    {"name": "android-arm64-v8a-debug-win", "configurePreset": "android-arm64-v8a-debug-win"},
+    {"name": "android-arm64-v8a-release-win", "configurePreset": "android-arm64-v8a-release-win"},
+    {"name": "android-x86_64-debug-win", "configurePreset": "android-x86_64-debug-win"},
+    {"name": "android-x86_64-release-win", "configurePreset": "android-x86_64-release-win"},
+    {"name": "android-x86-debug-win", "configurePreset": "android-x86-debug-win"},
+    {"name": "android-x86-release-win", "configurePreset": "android-x86-release-win"},
+    {"name": "install-android-arm64-v8a-debug-win", "configurePreset": "android-arm64-v8a-debug-win", "targets": ["install"]},
+    {"name": "install-android-arm64-v8a-release-win", "configurePreset": "android-arm64-v8a-release-win", "targets": ["install"]},
+    {"name": "install-android-x86_64-debug-win", "configurePreset": "android-x86_64-debug-win", "targets": ["install"]},
+    {"name": "install-android-x86_64-release-win", "configurePreset": "android-x86_64-release-win", "targets": ["install"]},
+    {"name": "install-android-x86-debug-win", "configurePreset": "android-x86-debug-win", "targets": ["install"]},
+    {"name": "install-android-x86-release-win", "configurePreset": "android-x86-release-win", "targets": ["install"]}
   ],
   "testPresets": [
-    {
-      "name": "win-dev-user",
-      "inherits": "base-test",
-      "configurePreset": "win-dev-user"
-    },
-    {
-      "name": "win-release-user",
-      "inherits": "base-test",
-      "configurePreset": "win-release-user"
-    },
-    {
-      "name": "linux-dev-user",
-      "inherits": "base-test",
-      "configurePreset": "linux-dev-user"
-    },
-    {
-      "name": "linux-release-user",
-      "inherits": "base-test",
-      "configurePreset": "linux-release-user"
-    }
+    {"name": "win-dev-user", "inherits": "base-test", "configurePreset": "win-dev-user"},
+    {"name": "win-release-user", "inherits": "base-test", "configurePreset": "win-release-user"},
+    {"name": "linux-dev-user", "inherits": "base-test", "configurePreset": "linux-dev-user"},
+    {"name": "linux-release-user", "inherits": "base-test", "configurePreset": "linux-release-user"}
   ]
 }
