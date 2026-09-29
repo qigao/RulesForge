@@ -15,12 +15,15 @@ if(NOT DEFINED ENV{SALTS_UTILS_ROOT} OR "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
     return()
 endif()
 
-find_dependency(Salts 1.8.3 EXACT CONFIG REQUIRED
-    PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
-find_dependency(SaltsUtils 4.1.3 EXACT CONFIG REQUIRED
-    PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
+file(TO_CMAKE_PATH "$ENV{SALTS_ROOT}" _RulesForge_Salts_root)
+file(TO_CMAKE_PATH "$ENV{SALTS_UTILS_ROOT}" _RulesForge_SaltsUtils_root)
 
-file(REAL_PATH "$ENV{SALTS_UTILS_ROOT}" _RulesForge_SaltsUtils_real_root)
+find_dependency(Salts 1.8.3 EXACT CONFIG REQUIRED
+    PATHS "${_RulesForge_Salts_root}" NO_DEFAULT_PATH)
+find_dependency(SaltsUtils 4.1.3 EXACT CONFIG REQUIRED
+    PATHS "${_RulesForge_SaltsUtils_root}" NO_DEFAULT_PATH)
+
+file(REAL_PATH "${_RulesForge_SaltsUtils_root}" _RulesForge_SaltsUtils_real_root)
 if(NOT DEFINED SaltsUtils_DIR OR SaltsUtils_DIR STREQUAL "")
     set(RulesForge_FOUND FALSE)
     set(RulesForge_NOT_FOUND_MESSAGE
