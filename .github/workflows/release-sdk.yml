@@ -178,8 +178,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
+          set "QIGAO_CANONICAL_VCPKG_ROOT=%VCPKG_ROOT%"
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
+          set "VCPKG_ROOT=%QIGAO_CANONICAL_VCPKG_ROOT%"
           cmake -S . -B build\published-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="%QIGAO_VCPKG_TOOLCHAIN_FILE%" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVCPKG_INSTALLED_DIR="%GITHUB_WORKSPACE%\vcpkg_installed" -DVCPKG_INSTALL_OPTIONS=--only-binarycaching -DENABLE_TESTS=ON -DBUILD_TESTING=ON -DCMAKE_INSTALL_PREFIX="%GITHUB_WORKSPACE%\stage\${{ matrix.rid }}"
           if errorlevel 1 exit /b 1
           cmake --build build\published-release --parallel 2
@@ -193,8 +195,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
+          set "QIGAO_CANONICAL_VCPKG_ROOT=%VCPKG_ROOT%"
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
+          set "VCPKG_ROOT=%QIGAO_CANONICAL_VCPKG_ROOT%"
           if not exist "%GITHUB_WORKSPACE%\stage\${{ matrix.rid }}\include\rules_forge.h" exit /b 1
           if not exist "%GITHUB_WORKSPACE%\stage\${{ matrix.rid }}\lib\cmake\RulesForge\RulesForgeConfig.cmake" exit /b 1
           if not exist "%GITHUB_WORKSPACE%\stage\${{ matrix.rid }}\bin\RulesForge.dll" exit /b 1
