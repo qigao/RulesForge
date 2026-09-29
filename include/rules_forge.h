@@ -11,8 +11,8 @@
 // --- Version Information ---
 #define RULEFORGE_VERSION_MAJOR 0
 #define RULEFORGE_VERSION_MINOR 9
-#define RULEFORGE_VERSION_PATCH 0
-#define RULEFORGE_VERSION_STRING "0.9.0"
+#define RULEFORGE_VERSION_PATCH 1
+#define RULEFORGE_VERSION_STRING "0.9.1"
 
 // --- Thread Safety ---
 // RulesForge thread safety guarantees:
