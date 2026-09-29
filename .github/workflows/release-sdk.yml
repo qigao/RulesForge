@@ -52,7 +52,14 @@ jobs:
           if ($actual -ne $env:EXPECTED_SHA) {
             throw "checked out $actual, expected $env:EXPECTED_SHA"
           }
-          git diff --check HEAD^ HEAD
+          if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_BASE_REF)) {
+            git fetch origin $env:GITHUB_BASE_REF --depth=1
+            if ($LASTEXITCODE -ne 0) { throw "failed to fetch PR base" }
+            $base = (git merge-base HEAD "origin/$env:GITHUB_BASE_REF").Trim()
+            git diff --check $base HEAD
+          } else {
+            git diff --check HEAD^ HEAD
+          }
           if ($LASTEXITCODE -ne 0) { throw "git diff --check failed" }
           git diff --exit-code
           if ($LASTEXITCODE -ne 0) { throw "working tree is dirty" }
