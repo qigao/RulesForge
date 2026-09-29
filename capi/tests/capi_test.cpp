@@ -54,10 +54,9 @@ suite("CAPI") {
         it("deep clones all DataBind value storage independently") {
             char const* schema =
                 "composite Header { uint32 seq; uint64 ts; } "
-                "message CloneFact { Header header; list<uint32> values; "
-                "set<string> tags; map<string,int32> attrs; bytes raw; uuid id; "
-                "datetime at; date d; time t; duration span; decimal price; "
-                "bigint count; money total; }";
+                "message CloneFact { Header header; uuid id; datetime at; date d; "
+                "time t; duration span; decimal price; bigint count; money total; "
+                "list<uint32> values; set<string> tags; map<string,int32> attrs; bytes raw; }";
             char const* json =
                 R"({"header":{"seq":7,"ts":99},"values":[3,4],)"
                 R"("tags":["alpha","beta"],"attrs":{"x":30,"y":40},"raw":"Az",)"
@@ -858,9 +857,9 @@ end
                 std::ofstream schema(schema_path, std::ios::binary);
                 schema << "schema Market [id(12), version(1), byte_order(little)]; "
                           "message ScalarFact { "
-                          "uuid id; uint64 counter; bytes raw; datetime observed_at; "
+                          "uuid id; uint64 counter; datetime observed_at; "
                           "date trade_date; time trade_time; duration latency; "
-                          "decimal price; bigint sequence; money total; bool active; "
+                          "decimal price; bigint sequence; money total; bool active; bytes raw; "
                           "}";
             }
 
@@ -1496,7 +1495,7 @@ end
             auto schema_path = write_temp_schema(
                 "rulesforge_capi_query_person.schema",
                 "schema QueryPerson [id(23), version(1), byte_order(little)]; "
-                "message Person { string name; int32 age; }");
+                "message Person { int32 age; string name; }");
             std::string query_drl = std::string(R"(
 import schema ")") + schema_path.generic_string() + R"("
 
@@ -1624,7 +1623,7 @@ end
             auto person_schema_path = write_temp_schema(
                 "rulesforge_capi_rollback_person.schema",
                 "schema RollbackPerson [id(24), version(1), byte_order(little)]; "
-                "message Person { string name; int32 age; }");
+                "message Person { int32 age; string name; }");
             std::string failing_drl = std::string(R"(
 import schema ")") + person_schema_path.generic_string() + R"("
 
@@ -1861,7 +1860,7 @@ end
             auto schema_path = write_temp_schema(
                 "rulesforge_capi_continuous_path_batch.schema",
                 "schema Events [id(36), version(1), byte_order(little)]; "
-                "message Event { string event_id; int64 event_time; int32 value; string region; }");
+                "message Event { int64 event_time; int32 value; string event_id; string region; }");
             std::string rfl = std::string("import \"") + schema_path.generic_string() + R"(";
 rule "Selected event" when
     Event(value >= 7) from entry-point "events"
