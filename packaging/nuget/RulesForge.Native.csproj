@@ -4,7 +4,7 @@
     <IsPackable>true</IsPackable>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <PackageId>RulesForge.Native</PackageId>
-    <PackageVersion Condition="'$(PackageVersion)' == ''">0.9.0</PackageVersion>
+    <PackageVersion Condition="'$(PackageVersion)' == ''">0.9.1</PackageVersion>
     <Authors>qigao</Authors>
     <Description>Prebuilt RulesForge C ABI SDK install trees for native consumers.</Description>
     <PackageTags>rulesforge;rules;rete;native;c;cpp;cmake</PackageTags>
