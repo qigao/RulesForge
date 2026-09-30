@@ -292,8 +292,10 @@ jobs:
           grep -Fx "sdk/windows-x64/include/rules_forge.h" "$RUNNER_TEMP/rulesforge-nupkg.txt"
           grep -Fx "sdk/windows-x64/bin/RulesForge.dll" "$RUNNER_TEMP/rulesforge-nupkg.txt"
           unzip -p "$nupkg" "RulesForge.Native.nuspec" > "$RUNNER_TEMP/rulesforge.nuspec"
-          grep -F 'id="Salts.Native"' "$RUNNER_TEMP/rulesforge.nuspec"
-          grep -F 'id="SaltsUtils.Native"' "$RUNNER_TEMP/rulesforge.nuspec"
+          if grep -E 'id="(Salts\.Native|SaltsUtils\.Native)"' "$RUNNER_TEMP/rulesforge.nuspec"; then
+            echo "RulesForge.Native must not embed GitHub package dependency metadata" >&2
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
