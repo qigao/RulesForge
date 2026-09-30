@@ -17,6 +17,8 @@ Dependencies:
 - latest published stable `Salts.Native`
 - latest published stable `SaltsUtils.Native`
 
+These GitHub packages are deliberately not encoded as NuGet transitive dependencies because `.nuspec` dependencies cannot float. Consumers must restore both explicitly with `Version="*"` (or equivalent latest resolution) before configuring RulesForge.
+
 DataBind is supplied only through SaltsUtils. There is no independent DataBind package or root.
 
 The package intentionally contains only the installed RulesForge consumer surface. Build trees, tests, generated intermediate parser files, and third-party vcpkg packages are not copied into the package.
