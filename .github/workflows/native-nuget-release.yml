@@ -282,7 +282,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dotnet restore packaging/nuget/RulesForge.Native.csproj             --configfile "$NUGET_CONFIG" --packages "$RUNNER_TEMP/pack-nuget"
+          dotnet restore packaging/nuget/RulesForge.Native.csproj             --configfile "$NUGET_CONFIG" --packages "$RUNNER_TEMP/pack-nuget" --no-cache --force-evaluate
           dotnet pack packaging/nuget/RulesForge.Native.csproj             --no-restore --configuration Release --output dist             -p:PackageVersion=${{ needs.metadata.outputs.version }}             -p:PackageRoot="$GITHUB_WORKSPACE/package"             -p:RestorePackagesPath="$RUNNER_TEMP/pack-nuget"             -p:RepositoryCommit="$GITHUB_SHA"
           nupkg="dist/RulesForge.Native.${{ needs.metadata.outputs.version }}.nupkg"
           test -f "$nupkg"
