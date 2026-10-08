@@ -7,8 +7,8 @@
 #include <type_traits>
 #include <unordered_set>
 
-static_assert(ConstraintValueMember<salts_uuid_t>);
-static_assert(ConstraintValueExtractable<salts_uuid_t>);
+static_assert(ConstraintValueMember<cmeta_uuid_t>);
+static_assert(ConstraintValueExtractable<cmeta_uuid_t>);
 static_assert(ConstraintValueMember<bool>);
 static_assert(ConstraintValueExtractable<bool>);
 static_assert(ConstraintValueMember<uint64_t>);
@@ -77,30 +77,30 @@ suite("ConstraintValue") {
         }
     }
 
-    group("salts_uuid_t") {
+    group("cmeta_uuid_t") {
         it("stores and copies UUID values without losing their type") {
-            salts_uuid_t uuid{};
+            cmeta_uuid_t uuid{};
             check_equal(
-                salts_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &uuid),
+                cmeta_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &uuid),
                 SALTS_OK);
 
             ConstraintValue value{uuid};
             ConstraintValue copy = value;
-            auto const* stored = std::get_if<salts_uuid_t>(&copy);
+            auto const* stored = std::get_if<cmeta_uuid_t>(&copy);
 
             check_not_null(stored);
-            check(salts_uuid_equal(stored, &uuid));
+            check(cmeta_uuid_equal(stored, &uuid));
             check(value == copy);
         }
 
         it("compares and hashes UUID values by their 16 bytes") {
-            salts_uuid_t lower{};
-            salts_uuid_t upper{};
+            cmeta_uuid_t lower{};
+            cmeta_uuid_t upper{};
             check_equal(
-                salts_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &lower),
+                cmeta_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &lower),
                 SALTS_OK);
             check_equal(
-                salts_uuid_parse("11890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &upper),
+                cmeta_uuid_parse("11890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &upper),
                 SALTS_OK);
 
             ConstraintValue lower_value{lower};
@@ -121,9 +121,9 @@ suite("ConstraintValue") {
         }
 
         it("formats UUID values as canonical text") {
-            salts_uuid_t uuid{};
+            cmeta_uuid_t uuid{};
             char const* canonical = "01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001";
-            check_equal(salts_uuid_parse(canonical, &uuid), SALTS_OK);
+            check_equal(cmeta_uuid_parse(canonical, &uuid), SALTS_OK);
 
             std::string text = to_string(ConstraintValue{uuid});
             check_equal(text.c_str(), canonical);
@@ -136,9 +136,9 @@ suite("ConstraintValue") {
             std::vector<ParsedDeclaration> declarations{declaration};
             SchemaValidator validator(declarations);
 
-            salts_uuid_t uuid{};
+            cmeta_uuid_t uuid{};
             check_equal(
-                salts_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &uuid),
+                cmeta_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &uuid),
                 SALTS_OK);
             Fact fact;
             fact.type = "Message";

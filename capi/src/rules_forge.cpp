@@ -331,7 +331,7 @@ static ConstraintValue data_bind_value_to_constraint(
     return map;
   }
   case DATA_BIND_VALUE_UUID: {
-    salts_uuid_t uuid{};
+    cmeta_uuid_t uuid{};
     require_data_bind_value(data_bind_value_get_uuid(value, uuid.bytes), "UUID");
     return uuid;
   }

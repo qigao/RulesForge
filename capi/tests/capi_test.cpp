@@ -920,14 +920,14 @@ end
             auto id_field = internal_fact->fields.find("id");
             check(id_field != internal_fact->fields.end());
             auto const* uuid = id_field != internal_fact->fields.end()
-                ? std::get_if<salts_uuid_t>(&id_field->second)
+                ? std::get_if<cmeta_uuid_t>(&id_field->second)
                 : nullptr;
             check_not_null(uuid);
-            salts_uuid_t expected_uuid{};
+            cmeta_uuid_t expected_uuid{};
             check_equal(
-                salts_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &expected_uuid),
+                cmeta_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &expected_uuid),
                 SALTS_OK);
-            check(uuid != nullptr && salts_uuid_equal(uuid, &expected_uuid));
+            check(uuid != nullptr && cmeta_uuid_equal(uuid, &expected_uuid));
 
             auto counter_field = internal_fact->fields.find("counter");
             check(counter_field != internal_fact->fields.end());
