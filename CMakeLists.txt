@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 # Set additional project information
 set(CMAKE_PROJECT_VERSION_MAJOR 0)
 set(CMAKE_PROJECT_VERSION_MINOR 9)
-set(CMAKE_PROJECT_VERSION_PATCH 1)
+set(CMAKE_PROJECT_VERSION_PATCH 2)
 
 set(PROJECT_VERSION
     ${CMAKE_PROJECT_VERSION_MAJOR}.${CMAKE_PROJECT_VERSION_MINOR}.${CMAKE_PROJECT_VERSION_PATCH}
@@ -69,7 +69,7 @@ endif()
 
 include(CheckCSourceCompiles)
 set(RULESFORGE_MINIMUM_DATABIND_VERSION 30000)
-set(RULESFORGE_REQUIRED_DATABIND_ABI 9)
+set(RULESFORGE_REQUIRED_DATABIND_ABI 10)
 set(_RULESFORGE_SAVED_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
 set(_RULESFORGE_SAVED_REQUIRED_DEFINITIONS "${CMAKE_REQUIRED_DEFINITIONS}")
 set(CMAKE_REQUIRED_LIBRARIES Salts::DataBind)
@@ -83,7 +83,7 @@ check_c_source_compiles([[
   #error "RulesForge requires DataBind 3.0.0 or newer"
   #endif
   #if DATA_BIND_ABI_VERSION != RULESFORGE_REQUIRED_DATABIND_ABI
-  #error "RulesForge requires DataBind ABI 9"
+  #error "RulesForge requires DataBind ABI 10"
   #endif
   int main() {
     DataBindStreamConfig config = DATA_BIND_STREAM_CONFIG_INIT;
@@ -102,7 +102,7 @@ unset(_RULESFORGE_SAVED_REQUIRED_LIBRARIES)
 unset(_RULESFORGE_SAVED_REQUIRED_DEFINITIONS)
 if(NOT RULESFORGE_HAS_DATABIND_3_0)
     message(FATAL_ERROR
-            "RulesForge requires DataBind 3.0.0 or newer with ABI 9")
+            "RulesForge requires DataBind 3.0.0 or newer with ABI 10")
 endif()
 
 # Output files directory
