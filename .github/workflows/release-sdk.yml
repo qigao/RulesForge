@@ -156,6 +156,21 @@ jobs:
           test -f "$prefix/lib/cmake/RulesForge/RulesForgeConfig.cmake"
           test -f "$prefix/lib/libRulesForge.so"
 
+      - name: Verify installed RulesForge ELF runtime closure
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$GITHUB_WORKSPACE/stage/${{ matrix.rid }}"
+          library="$prefix/lib/libRulesForge.so"
+          test -f "$library"
+          LD_LIBRARY_PATH="$prefix/lib:$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:${LD_LIBRARY_PATH:-}" \
+            ldd -r "$library" | tee "$RUNNER_TEMP/rulesforge-elf-closure.txt"
+          if grep -Eq '=> not found|undefined symbol:' "$RUNNER_TEMP/rulesforge-elf-closure.txt"; then
+            echo "Installed RulesForge SDK has unresolved dependent objects/symbols" >&2
+            exit 1
+          fi
+
       - name: Qualify installed consumer on Linux
         if: runner.os == 'Linux'
         shell: bash
