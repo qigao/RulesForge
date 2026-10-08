@@ -129,7 +129,7 @@ The current build requires:
 
 ```text
 DataBind >= 3.0.0
-DataBind ABI == 9
+DataBind ABI == 10
 ```
 
 Configuration fails if the required version/ABI contract is not available.
@@ -164,7 +164,7 @@ Requirements include:
 - C17 compiler support for the C boundary
 - C++20 compiler support for the engine implementation
 - latest published stable **Salts.Native**
-- latest published stable **SaltsUtils.Native** with DataBind 3 / ABI 9 and the required parser/utility components
+- latest published stable **SaltsUtils.Native** with DataBind 3 / ABI 10 and the required parser/utility components
 - OpenSSL-compatible crypto and other third-party dependencies through the configured vcpkg-cache environment
 
 The dependency ownership contract is Salts from `SALTS_ROOT` and SaltsUtils, including DataBind, from `SALTS_UTILS_ROOT`.

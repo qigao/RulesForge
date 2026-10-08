@@ -124,7 +124,7 @@ jobs:
             echo "rid=linux-x64"
             echo "salts=$SALTS_PACKAGE_VERSION"
             echo "saltsutils=$SALTS_UTILS_PACKAGE_VERSION"
-            echo "databind_abi=9"
+            echo "databind_abi=10"
             echo "profile=release"
             echo "source=$GITHUB_SHA"
           } > "$prefix/rulesforge-sdk-manifest.txt"
@@ -219,7 +219,7 @@ jobs:
             "rid=windows-x64",
             "salts=$env:SALTS_PACKAGE_VERSION",
             "saltsutils=$env:SALTS_UTILS_PACKAGE_VERSION",
-            "databind_abi=9",
+            "databind_abi=10",
             "profile=release",
             "source=$env:GITHUB_SHA"
           ) | Set-Content -LiteralPath (Join-Path $prefix "rulesforge-sdk-manifest.txt") -Encoding ascii
