@@ -124,10 +124,24 @@ jobs:
             echo "rid=linux-x64"
             echo "salts=$SALTS_PACKAGE_VERSION"
             echo "saltsutils=$SALTS_UTILS_PACKAGE_VERSION"
-            echo "databind_abi=9"
+            echo "databind_abi=10"
             echo "profile=release"
             echo "source=$GITHUB_SHA"
           } > "$prefix/rulesforge-sdk-manifest.txt"
+
+      - name: Verify native release ELF runtime closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$GITHUB_WORKSPACE/stage/sdk/linux-x64"
+          library="$prefix/lib/libRulesForge.so"
+          test -f "$library"
+          LD_LIBRARY_PATH="$prefix/lib:$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:${LD_LIBRARY_PATH:-}" \
+            ldd -r "$library" | tee "$RUNNER_TEMP/rulesforge-elf-closure.txt"
+          if grep -Eq '=> not found|undefined symbol:' "$RUNNER_TEMP/rulesforge-elf-closure.txt"; then
+            echo "Refusing to publish a native SDK with unresolved ELF dependencies" >&2
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
@@ -219,7 +233,7 @@ jobs:
             "rid=windows-x64",
             "salts=$env:SALTS_PACKAGE_VERSION",
             "saltsutils=$env:SALTS_UTILS_PACKAGE_VERSION",
-            "databind_abi=9",
+            "databind_abi=10",
             "profile=release",
             "source=$env:GITHUB_SHA"
           ) | Set-Content -LiteralPath (Join-Path $prefix "rulesforge-sdk-manifest.txt") -Encoding ascii

@@ -43,7 +43,7 @@ suite("CAPI") {
     group("Initialization and Cleanup") {
         it("initializes and cleans up") {
             check_greater_equal(DATA_BIND_VERSION, 30000);
-            check_equal(DATA_BIND_ABI_VERSION, 9);
+            check_equal(DATA_BIND_ABI_VERSION, 10);
             check_equal(data_bind_library_version(), DATA_BIND_VERSION);
             check_equal(data_bind_abi_version(), DATA_BIND_ABI_VERSION);
             check_not_null(data_bind_version_string());
@@ -920,14 +920,14 @@ end
             auto id_field = internal_fact->fields.find("id");
             check(id_field != internal_fact->fields.end());
             auto const* uuid = id_field != internal_fact->fields.end()
-                ? std::get_if<salts_uuid_t>(&id_field->second)
+                ? std::get_if<cmeta_uuid_t>(&id_field->second)
                 : nullptr;
             check_not_null(uuid);
-            salts_uuid_t expected_uuid{};
+            cmeta_uuid_t expected_uuid{};
             check_equal(
-                salts_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &expected_uuid),
+                cmeta_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &expected_uuid),
                 SALTS_OK);
-            check(uuid != nullptr && salts_uuid_equal(uuid, &expected_uuid));
+            check(uuid != nullptr && cmeta_uuid_equal(uuid, &expected_uuid));
 
             auto counter_field = internal_fact->fields.find("counter");
             check(counter_field != internal_fact->fields.end());

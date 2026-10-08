@@ -118,7 +118,7 @@ bool ConstraintValueCompare::operator()(ConstraintValue const& a, ConstraintValu
                              || std::is_same_v<T, BigIntValue>
                              || std::is_same_v<T, MoneyValue>) {
             return val_a < val_b;
-        } else if constexpr (std::is_same_v<T, salts_uuid_t>) {
+        } else if constexpr (std::is_same_v<T, cmeta_uuid_t>) {
             return std::lexicographical_compare(
                 val_a.bytes, val_a.bytes + SALTS_UUID_SIZE,
                 val_b.bytes, val_b.bytes + SALTS_UUID_SIZE);
@@ -308,10 +308,10 @@ std::string to_string(ConstraintValue const& val) {
                 return arg.digits;
             } else if constexpr (std::is_same_v<T, MoneyValue>) {
                 return arg.currency + " " + format_decimal(arg.amount);
-            } else if constexpr (std::is_same_v<T, salts_uuid_t>) {
+            } else if constexpr (std::is_same_v<T, cmeta_uuid_t>) {
                 char text[SALTS_UUID_STRING_SIZE];
-                if (salts_uuid_format(&arg, text, sizeof(text)) != SALTS_OK) {
-                    throw std::runtime_error("Failed to format salts_uuid_t");
+                if (cmeta_uuid_format(&arg, text, sizeof(text)) != SALTS_OK) {
+                    throw std::runtime_error("Failed to format cmeta_uuid_t");
                 }
                 return text;
             } else if constexpr (std::is_same_v<T, FactList>) {
@@ -414,7 +414,7 @@ std::size_t ConstraintValueHasher::operator()(ConstraintValue const& v) const {
                     h ^= fact_hash + 0x9e3779b9 + (h << 6) + (h >> 2);
                 }
                 return h;
-            } else if constexpr (std::is_same_v<T, salts_uuid_t>) {
+            } else if constexpr (std::is_same_v<T, cmeta_uuid_t>) {
                 return hash_bytes(arg.bytes, SALTS_UUID_SIZE, nullptr);
             } else if constexpr (std::is_same_v<T, BytesValue>) {
                 return hash_bytes(arg.bytes.data(), arg.bytes.size(), nullptr);

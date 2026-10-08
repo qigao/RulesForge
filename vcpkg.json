@@ -1,6 +1,6 @@
 {
     "name": "rulesforge",
-    "version-semver": "0.9.1",
+    "version-semver": "0.9.2",
     "dependencies": [
         {
             "name": "cxxopts",
