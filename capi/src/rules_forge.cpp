@@ -121,7 +121,7 @@ using DataBindObjectHandle = std::unique_ptr<DataBindObject, DataBindObjectDelet
 using DataBindStreamHandle = std::unique_ptr<data_bind_stream_t, DataBindStreamDeleter>;
 
 constexpr int kMinimumDataBindVersion = 30000;
-constexpr int kRequiredDataBindAbi = 9;
+constexpr int kRequiredDataBindAbi = 10;
 
 struct DataBindView {
   DataBind *value = nullptr;
@@ -556,7 +556,7 @@ ruleforge_status_t ruleforge_init() {
       || library_abi != kRequiredDataBindAbi
       || DATA_BIND_ABI_VERSION != kRequiredDataBindAbi) {
     fmt(last_error, sizeof(last_error),
-        "Incompatible DataBind library: need version >= 2.5.1 with ABI {}, got {} with ABI {}",
+        "Incompatible DataBind library: need version >= 3.0.0 with ABI {}, got {} with ABI {}",
         kRequiredDataBindAbi,
         data_bind_version_string() ? data_bind_version_string() : "<unknown>", library_abi);
     return RULES_FORGE_ERROR_GENERIC;
