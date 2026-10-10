@@ -34,4 +34,4 @@ find_package(RulesForge CONFIG REQUIRED
 target_link_libraries(my_app PRIVATE RulesForge::RulesForge)
 ```
 
-The 0.9.3-rc.1 qualification uses Salts 2.3.0-rc.5 and SaltsUtils 4.3.0-rc.2, with DataBind ABI 10. Each SDK manifest records the exact producer versions and source commit. CMake reports the numeric package version 0.9.3; the C API and NuGet package report the full prerelease version.
+The 0.9.3-rc.2 qualification uses Salts 2.3.0-rc.5 and SaltsUtils 4.3.0-rc.2, with DataBind ABI 10. Each SDK manifest records the exact producer versions and source commit. CMake reports the numeric package version 0.9.3; the C API and NuGet package report the full prerelease version.
