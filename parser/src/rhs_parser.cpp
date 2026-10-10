@@ -602,7 +602,6 @@ CompiledAction RhsParser::Parser::parse_for() {
 CompiledAction RhsParser::Parser::parse_while() {
   CompiledAction action;
   action.type = RhsActionType::WHILE;
-  action.max_iterations = 1000; // Safety limit
 
   advance(); // consume 'while'
 
@@ -1043,4 +1042,3 @@ std::vector<CompiledAction> RhsParser::parse(std::string const &rhs_code,
 }
 
 } // namespace rulesforge
-

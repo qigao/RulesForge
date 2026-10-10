@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      prepare_release:
+        description: Pack the tested native SDKs for release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -159,6 +164,35 @@ jobs:
           cmake --build --preset install-%CI_PRESET%
           if errorlevel 1 exit /b 1
 
+      - name: Record release SDK provenance
+        if: github.event_name == 'workflow_dispatch' && inputs.prepare_release
+        shell: pwsh
+        env:
+          CI_RID: ${{ matrix.rid }}
+          CI_PRESET: ${{ matrix.preset }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'version-semver'
+          @(
+            'package=RulesForge.Native',
+            "version=$version",
+            "rid=$env:CI_RID",
+            "salts=$env:SALTS_PACKAGE_VERSION",
+            "saltsutils=$env:SALTS_UTILS_PACKAGE_VERSION",
+            'databind_abi=10',
+            'profile=release',
+            "source=$env:GITHUB_SHA"
+          ) | Set-Content "stage/$env:CI_PRESET/rulesforge-sdk-manifest.txt" -Encoding utf8NoBOM
+
+      - name: Upload release SDK
+        if: github.event_name == 'workflow_dispatch' && inputs.prepare_release
+        uses: actions/upload-artifact@v4
+        with:
+          name: rulesforge-sdk-${{ matrix.rid }}
+          path: stage/${{ matrix.preset }}/
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Report compiler cache statistics
         if: always()
         shell: pwsh
@@ -182,3 +216,63 @@ jobs:
             build/${{ matrix.preset }}/vcpkg-manifest-install.log
             stage/${{ matrix.preset }}/
             ${{ runner.temp }}/ccache-stats.txt
+
+  pack:
+    name: Pack tested native SDKs
+    needs: native
+    if: github.event_name == 'workflow_dispatch' && inputs.prepare_release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rulesforge-sdk-*
+          path: artifacts
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Assemble NuGet payload and release identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'version-semver'
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw 'Invalid release version' }
+          $cmake = Get-Content CMakeLists.txt -Raw
+          $parts = foreach ($part in @('MAJOR', 'MINOR', 'PATCH')) {
+            if ($cmake -notmatch "set\(CMAKE_PROJECT_VERSION_$part (\d+)\)") { throw "Missing CMake version $part" }
+            $Matches[1]
+          }
+          if (($parts -join '.') -ne $version.Split('-')[0]) { throw 'CMake and package versions differ' }
+          $header = Get-Content include/rules_forge.h -Raw
+          if ($header -notmatch '#define RULEFORGE_VERSION_STRING "([^"]+)"' -or $Matches[1] -ne $version) {
+            throw 'C API and package versions differ'
+          }
+          New-Item -ItemType Directory -Path package/sdk -Force | Out-Null
+          foreach ($rid in @('linux-x64', 'linux-arm64', 'windows-x64', 'macos-arm64')) {
+            $source = "artifacts/rulesforge-sdk-$rid"
+            $manifest = Get-Content "$source/rulesforge-sdk-manifest.txt" -Raw | ConvertFrom-StringData
+            if ($manifest.source -ne $env:GITHUB_SHA -or $manifest.version -ne $version -or $manifest.rid -ne $rid) {
+              throw "Release SDK identity mismatch for $rid"
+            }
+            Move-Item -LiteralPath $source -Destination "package/sdk/$rid"
+          }
+          "PACKAGE_VERSION=$version" >> $env:GITHUB_ENV
+      - name: Pack without rebuilding native binaries
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dotnet restore packaging/nuget/RulesForge.Native.csproj --configfile cmake/vcpkg-cache.nuget.config --no-cache --force-evaluate
+          dotnet pack packaging/nuget/RulesForge.Native.csproj --no-restore --configuration Release --output dist \
+            -p:PackageVersion="$PACKAGE_VERSION" -p:PackageRoot="$GITHUB_WORKSPACE/package" -p:RepositoryCommit="$GITHUB_SHA"
+          cd dist
+          sha256sum "RulesForge.Native.$PACKAGE_VERSION.nupkg" > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rulesforge-native-nuget
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

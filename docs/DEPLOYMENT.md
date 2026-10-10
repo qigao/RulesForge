@@ -251,10 +251,19 @@ this matrix does not publish packages or modify tags. Cache writes stay in GitHu
 Actions storage. Fork PRs still require package access; missing access is a visible
 failure, not grounds to expose a PAT or use `pull_request_target` for untrusted code.
 
-The current branch predates the workflow on `master`; this version reuses its
-`release-sdk.yml` entry point. It qualifies this branch's existing formal tests,
-not newer installed-consumer tests available only on other branches. Merge and
-release decisions must consider that difference.
+The release branch incorporates the 0.9.2 baseline, including its WHILE-limit
+fixes, licenses, and package metadata. The matrix runs the existing formal CTest
+suite; the separate installed-package consumer project is not part of this graph.
+
+For an RC, dispatch `release-sdk.yml` on the release branch with
+`prepare_release=true`. The same build/test/install jobs produce four SDK
+artifacts and a `rulesforge-native-nuget` package artifact with SHA-256 checksums.
+After the whole run succeeds, create the version tag at that exact SHA and
+dispatch `native-nuget-release.yml` from the tag with `ci_run_id`, `release_sha`,
+and `tag`. The publisher accepts only a successful preparation from this
+repository and a release branch, verifies the exact SHA/tag and checksum, and
+uploads the accepted package unchanged. It does not rebuild or overwrite an
+existing package. RC releases do not replace the latest stable release.
 
 References: [ccache compiler support](https://ccache.dev/platform-compiler-language-support.html),
 [cache key and configuration semantics](https://ccache.dev/manual/latest.html),

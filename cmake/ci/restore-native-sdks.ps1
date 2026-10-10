@@ -34,8 +34,8 @@ $config = Join-Path $PSScriptRoot "../vcpkg-cache.nuget.config"
 if ($LASTEXITCODE -ne 0) { throw "Native SDK restoration failed" }
 $assets = Get-Content (Join-Path $restoreRoot "obj/project.assets.json") -Raw | ConvertFrom-Json
 foreach ($package in @(
-    @{ Id = "Salts.Native"; Root = "SALTS_ROOT"; Manifest = "salts-sdk-manifest.txt" },
-    @{ Id = "SaltsUtils.Native"; Root = "SALTS_UTILS_ROOT"; Manifest = "salts-utils-sdk-manifest.txt" }
+    @{ Id = "Salts.Native"; Root = "SALTS_ROOT"; Version = "SALTS_PACKAGE_VERSION"; Manifest = "salts-sdk-manifest.txt" },
+    @{ Id = "SaltsUtils.Native"; Root = "SALTS_UTILS_ROOT"; Version = "SALTS_UTILS_PACKAGE_VERSION"; Manifest = "salts-utils-sdk-manifest.txt" }
 )) {
     $identity = @($assets.libraries.PSObject.Properties.Name | Where-Object {
         $_.StartsWith("$($package.Id)/", [StringComparison]::OrdinalIgnoreCase)
@@ -45,6 +45,7 @@ foreach ($package in @(
     $manifest = Join-Path $root $package.Manifest
     if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw "Missing SDK manifest: $manifest" }
     "$($package.Root)=$root" >> $env:GITHUB_ENV
+    "$($package.Version)=$($identity[0].Split('/')[1])" >> $env:GITHUB_ENV
     Write-Host "Resolved $($identity[0]) for $Rid"
     Get-Content -LiteralPath $manifest
     if ($env:GITHUB_STEP_SUMMARY) {

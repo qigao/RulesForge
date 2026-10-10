@@ -1,0 +1,110 @@
+name: RulesForge native SDK release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: Successful native CI prepare_release run
+        required: true
+        type: string
+      release_sha:
+        description: Exact tested commit
+        required: true
+        type: string
+      tag:
+        description: Existing immutable release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: rulesforge-publish-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish tested package and RC release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CI_RUN_ID: ${{ inputs.ci_run_id }}
+      RELEASE_SHA: ${{ inputs.release_sha }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Admit the exact successful release preparation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]
+          test "$GITHUB_REF_TYPE" = tag
+          test "$GITHUB_REF_NAME" = "$RELEASE_TAG"
+          test "$GITHUB_SHA" = "$RELEASE_SHA"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/source-run.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          run = json.loads((Path(os.environ['RUNNER_TEMP']) / 'source-run.json').read_text())
+          expected = {
+              'status': 'completed', 'conclusion': 'success',
+              'event': 'workflow_dispatch', 'head_sha': os.environ['RELEASE_SHA'],
+              'path': '.github/workflows/release-sdk.yml',
+          }
+          for key, value in expected.items():
+              if run[key] != value:
+                  raise SystemExit(f'Release source {key} mismatch')
+          if run['head_repository']['full_name'] != os.environ['GITHUB_REPOSITORY']:
+              raise SystemExit('Release source repository mismatch')
+          if not run['head_branch'].startswith('release/'):
+              raise SystemExit('Release preparation must run from a release branch')
+          version = json.loads(Path('vcpkg.json').read_text())['version-semver']
+          if os.environ['RELEASE_TAG'] != 'v' + version:
+              raise SystemExit('Release version mismatch')
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write(f'PACKAGE_VERSION={version}\n')
+          PY
+          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)"
+          test "$tag_sha" = "$RELEASE_SHA"
+      - name: Download the accepted package unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$CI_RUN_ID" --repo "$GITHUB_REPOSITORY" --name rulesforge-native-nuget --dir dist
+          cd dist
+          test -f "RulesForge.Native.$PACKAGE_VERSION.nupkg"
+          sha256sum --check SHA256SUMS
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish NuGet package
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet nuget add source "https://nuget.pkg.github.com/qigao/index.json" \
+            --name github --username qigao --password "$GH_TOKEN" --store-password-in-clear-text
+          dotnet nuget push "dist/RulesForge.Native.$PACKAGE_VERSION.nupkg" \
+            --api-key "$GH_TOKEN" --source github
+      - name: Publish GitHub prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "docs/releases/$PACKAGE_VERSION.md" "$RUNNER_TEMP/release-notes.md"
+          {
+            printf '\nSource commit: `%s`\n' "$RELEASE_SHA"
+            printf '\nPreparation: https://github.com/%s/actions/runs/%s\n' "$GITHUB_REPOSITORY" "$CI_RUN_ID"
+          } >> "$RUNNER_TEMP/release-notes.md"
+          gh release create "$RELEASE_TAG" "dist/RulesForge.Native.$PACKAGE_VERSION.nupkg" dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease --latest=false \
+            --title "RulesForge $PACKAGE_VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"

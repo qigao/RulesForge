@@ -674,9 +674,11 @@ void RhsExecutor::execute_action(CompiledAction const& action) {
             if (!action.condition) {
                 throw std::runtime_error("RHS while action is missing a condition");
             }
-            int const max_iter = action.max_iterations > 0 ? action.max_iterations : 1000;
+            if (action.max_iterations <= 0) {
+                throw std::runtime_error("RHS while loop requires positive max iterations");
+            }
             int iterations = 0;
-            while (iterations < max_iter) {
+            while (true) {
                 auto t0 = std::chrono::steady_clock::now();
                 auto simple_value = evaluate_simple_rhs_condition(*action.condition);
                 if (!simple_value) {
@@ -693,6 +695,10 @@ void RhsExecutor::execute_action(CompiledAction const& action) {
                 if (!*simple_value) {
                     break;
                 }
+                if (iterations >= action.max_iterations) {
+                    throw std::runtime_error("RHS while loop hit max iterations");
+                }
+                ++iterations;
                 execute_actions(action.body_actions);
                 if (break_requested_) {
                     break_requested_ = false;
@@ -701,10 +707,6 @@ void RhsExecutor::execute_action(CompiledAction const& action) {
                 if (continue_requested_) {
                     continue_requested_ = false;
                 }
-                ++iterations;
-            }
-            if (iterations >= max_iter) {
-                throw std::runtime_error("RHS while loop hit max iterations");
             }
             break;
         }

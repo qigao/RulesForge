@@ -54,10 +54,9 @@ suite("CAPI") {
         it("deep clones all DataBind value storage independently") {
             char const* schema =
                 "composite Header { uint32 seq; uint64 ts; } "
-                "message CloneFact { Header header; list<uint32> values; "
-                "set<string> tags; map<string,int32> attrs; bytes raw; uuid id; "
-                "datetime at; date d; time t; duration span; decimal price; "
-                "bigint count; money total; }";
+                "message CloneFact { Header header; uuid id; datetime at; date d; "
+                "time t; duration span; decimal price; bigint count; money total; "
+                "list<uint32> values; set<string> tags; map<string,int32> attrs; bytes raw; }";
             char const* json =
                 R"({"header":{"seq":7,"ts":99},"values":[3,4],)"
                 R"("tags":["alpha","beta"],"attrs":{"x":30,"y":40},"raw":"Az",)"

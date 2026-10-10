@@ -136,6 +136,10 @@ bool CppRhsActionPlanBuilder::build(std::vector<CompiledAction> const& actions,
                     if (reason_out) *reason_out = "condition_missing";
                     return false;
                 }
+                if (action.max_iterations <= 0) {
+                    if (reason_out) *reason_out = "while_limit_invalid";
+                    return false;
+                }
                 CppRhsActionScript body_script_probe;
                 std::ostringstream body_probe;
                 if (!self(self, action.body_actions, body_probe, true, body_script_probe)) {

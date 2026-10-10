@@ -46,7 +46,7 @@ SaltsUtils 4.1.21，与新基线不匹配；新组合的 Debug/ASan 验证仍是
 - Consumes: `StatefulSession::fire_all_rules(int)`、`fire_all_rules_fail_fast(int)`、`reset()`、`addListener(shared_ptr<IEngineListener>)`。
 - Produces: 上述已有入口的执行期拒绝语义；无新增公开方法。
 
-- [ ] **Step 1: 添加同 session 重入的行为测试。**
+- [x] **Step 1: 添加同 session 重入的行为测试。**
 
 在测试文件中添加明确的 listener helper，避免嵌套导致无限递归；不读取生产私有状态：
 
@@ -81,7 +81,7 @@ check_equal(listener->rejected, true);
 check_equal(session->get_fact_count(), size_t{2});
 ```
 
-- [ ] **Step 2: 验证真实 RED。**
+- [x] **Step 2: 验证真实 RED。**
 
 ```text
 cmake --build --preset win-dev-user --target engine_session_test.RulesForge
@@ -91,7 +91,7 @@ ctest --preset win-dev-user -R ^engine_session_test\.RulesForge$ --output-on-fai
 预期构建成功、`rejected` 期望 true 实际 false；若不是此原因，先修正测试条件。
 保存完整日志，不以缺头/编译错误冒充行为 RED。
 
-- [ ] **Step 3: 实现最小 guard，并复测 GREEN。**
+- [x] **Step 3: 实现最小 guard，并复测 GREEN。**
 
 在 session 私有区添加 `bool execution_active_ = false;`。给两个 fire 声明和 reset
 补充同 session 不可重入、caller-serialized 与 `std::logic_error` 注释。
@@ -113,7 +113,7 @@ struct ExecutionScope final {
 
 同 Step 2 命令验证通过。标志只属于 session，不使用 global/thread_local。
 
-- [ ] **Step 4: 补齐独立边界测试，每项描述一个真实行为。**
+- [x] **Step 4: 补齐独立边界测试，每项描述一个真实行为。**
 
 1. 先添加 reset listener 在 before 回调里调用 reset，捕获 `logic_error`；拒绝后
    外层仍 fire 1，原 Person 与新 Adult 共 2 个 fact。如果 reset 没有被拒绝，listener
@@ -153,7 +153,7 @@ try {
 throw ResetWasAccepted{};
 ```
 
-- [ ] **Step 5: 执行相邻回归与双配置验证。**
+- [x] **Step 5: 执行相邻回归与双配置验证。**
 
 在 VS 环境依次运行：
 
@@ -169,7 +169,7 @@ ctest --preset win-release-user -R "^(engine_session_test\.RulesForge|rhs_contro
 共享 session 实现影响所有引擎消费者；合并前完整 build/CTest 两个 user preset，
 如发现无关基线失败，报告证据并区分，不跳过或放松测试。此阶段不运行 install。
 
-- [ ] **Step 6: 审查、提交并更新 #6，不关闭父任务。**
+- [x] **Step 6: 审查、提交并更新 #6，不关闭父任务。**
 
 ```text
 git diff --check

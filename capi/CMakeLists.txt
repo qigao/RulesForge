@@ -1,10 +1,5 @@
 include(GenerateExportHeader)
 
-# Version information (keep in sync with rules_forge.h).
-set(RULEFORGE_VERSION_MAJOR 0)
-set(RULEFORGE_VERSION_MINOR 9)
-set(RULEFORGE_VERSION_PATCH 0)
-
 # Define the target name for the shared library
 set(CAPI_TARGET_NAME RulesForge)
 
@@ -98,8 +93,7 @@ include(CMakePackageConfigHelpers)
 # Generate version file
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/RulesForgeConfigVersion.cmake"
-    VERSION
-        ${RULEFORGE_VERSION_MAJOR}.${RULEFORGE_VERSION_MINOR}.${RULEFORGE_VERSION_PATCH}
+    VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
 
