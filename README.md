@@ -165,7 +165,7 @@ Requirements include:
 - C++20 compiler support for the engine implementation
 - latest published (including prereleases) **Salts.Native**
 - latest published (including prereleases) **SaltsUtils.Native** with DataBind 3 / ABI 10 and the required parser/utility components
-- OpenSSL-compatible crypto and other third-party dependencies through the configured vcpkg-cache environment
+- `cxxopts` and `pkgconf` through the configured vcpkg-cache environment
 
 The dependency ownership contract is Salts from `SALTS_ROOT` and SaltsUtils, including DataBind, from `SALTS_UTILS_ROOT`.
 

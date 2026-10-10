@@ -32,7 +32,6 @@ endif()
 # Set the features of the project
 include(ProjectOptions.cmake)
 
-find_package(OpenSSL REQUIRED)
 foreach(_sdk_root IN ITEMS SALTS_ROOT SALTS_UTILS_ROOT)
     if(NOT DEFINED ENV{${_sdk_root}} OR NOT IS_DIRECTORY "$ENV{${_sdk_root}}")
         message(FATAL_ERROR "${_sdk_root} must name the matching restored Release or Debug SDK")
