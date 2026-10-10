@@ -1,16 +1,22 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-if(DEFINED ENV{SALTS_ROOT})
-    find_dependency(Salts CONFIG PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
-else()
-    find_dependency(Salts CONFIG)
-endif()
-if(DEFINED ENV{SALTS_UTILS_ROOT})
-    find_dependency(SaltsUtils CONFIG PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
-else()
-    find_dependency(SaltsUtils CONFIG)
-endif()
+foreach(_rulesforge_sdk_root IN ITEMS SALTS_ROOT SALTS_UTILS_ROOT)
+    if(NOT DEFINED ENV{${_rulesforge_sdk_root}} OR NOT IS_DIRECTORY "$ENV{${_rulesforge_sdk_root}}")
+        set(RulesForge_FOUND FALSE)
+        set(RulesForge_NOT_FOUND_MESSAGE "${_rulesforge_sdk_root} must name the matching restored SDK")
+        return()
+    endif()
+endforeach()
+unset(_rulesforge_sdk_root)
+unset(Salts_DIR CACHE)
+unset(Salts_DIR)
+unset(SaltsUtils_DIR CACHE)
+unset(SaltsUtils_DIR)
+find_dependency(Salts 2.3 CONFIG PATHS "$ENV{SALTS_ROOT}"
+                NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+find_dependency(SaltsUtils 4.3 CONFIG PATHS "$ENV{SALTS_UTILS_ROOT}"
+                NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 
 include("${CMAKE_CURRENT_LIST_DIR}/RulesForgeTargets.cmake")
 

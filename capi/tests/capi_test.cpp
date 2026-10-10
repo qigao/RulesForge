@@ -42,8 +42,8 @@ int reject_serialized_bytes(void const*, size_t, void*) {
 suite("CAPI") {
     group("Initialization and Cleanup") {
         it("initializes and cleans up") {
-            check_greater_equal(DATA_BIND_VERSION, 20501);
-            check_equal(DATA_BIND_ABI_VERSION, 8);
+            check_greater_equal(DATA_BIND_VERSION, 30000);
+            check_equal(DATA_BIND_ABI_VERSION, 10);
             check_equal(data_bind_library_version(), DATA_BIND_VERSION);
             check_equal(data_bind_abi_version(), DATA_BIND_ABI_VERSION);
             check_not_null(data_bind_version_string());
@@ -487,6 +487,16 @@ end
 )";
             check_equal(ruleforge_kb_load_drl(kb, invalid_drl), RULES_FORGE_ERROR_COMPILATION_FAILED);
 
+            // DataBind 3 rejects Binary declarations with fixed fields after variable data.
+            auto invalid_schema_path = write_temp_schema(
+                "rulesforge_capi_invalid_binary_order.schema",
+                "schema InvalidOrder [id(54), version(1), byte_order(little)]; "
+                "message InvalidFact { string name; int32 age; }");
+            std::string invalid_import = "import \"" + invalid_schema_path.generic_string() + "\";";
+            check_equal(ruleforge_kb_load_drl(kb, invalid_import.c_str()),
+                        RULES_FORGE_ERROR_COMPILATION_FAILED);
+            std::filesystem::remove(invalid_schema_path);
+
             // Should still be able to create session from the previously loaded valid KB.
             ruleforge_stateful_session_t session = nullptr;
             check_equal(ruleforge_session_create(kb, &session), RULES_FORGE_OK);
@@ -858,9 +868,9 @@ end
                 std::ofstream schema(schema_path, std::ios::binary);
                 schema << "schema Market [id(12), version(1), byte_order(little)]; "
                           "message ScalarFact { "
-                          "uuid id; uint64 counter; bytes raw; datetime observed_at; "
+                          "uuid id; uint64 counter; datetime observed_at; "
                           "date trade_date; time trade_time; duration latency; "
-                          "decimal price; bigint sequence; money total; bool active; "
+                          "decimal price; bigint sequence; money total; bool active; bytes raw; "
                           "}";
             }
 
@@ -921,14 +931,14 @@ end
             auto id_field = internal_fact->fields.find("id");
             check(id_field != internal_fact->fields.end());
             auto const* uuid = id_field != internal_fact->fields.end()
-                ? std::get_if<salts_uuid_t>(&id_field->second)
+                ? std::get_if<cmeta_uuid_t>(&id_field->second)
                 : nullptr;
             check_not_null(uuid);
-            salts_uuid_t expected_uuid{};
+            cmeta_uuid_t expected_uuid{};
             check_equal(
-                salts_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &expected_uuid),
+                cmeta_uuid_parse("01890f3e-5c5a-7cc2-9f2b-8b7f47f0c001", &expected_uuid),
                 SALTS_OK);
-            check(uuid != nullptr && salts_uuid_equal(uuid, &expected_uuid));
+            check(uuid != nullptr && cmeta_uuid_equal(uuid, &expected_uuid));
 
             auto counter_field = internal_fact->fields.find("counter");
             check(counter_field != internal_fact->fields.end());
@@ -1496,7 +1506,7 @@ end
             auto schema_path = write_temp_schema(
                 "rulesforge_capi_query_person.schema",
                 "schema QueryPerson [id(23), version(1), byte_order(little)]; "
-                "message Person { string name; int32 age; }");
+                "message Person { int32 age; string name; }");
             std::string query_drl = std::string(R"(
 import schema ")") + schema_path.generic_string() + R"("
 
@@ -1624,7 +1634,7 @@ end
             auto person_schema_path = write_temp_schema(
                 "rulesforge_capi_rollback_person.schema",
                 "schema RollbackPerson [id(24), version(1), byte_order(little)]; "
-                "message Person { string name; int32 age; }");
+                "message Person { int32 age; string name; }");
             std::string failing_drl = std::string(R"(
 import schema ")") + person_schema_path.generic_string() + R"("
 
@@ -1861,7 +1871,7 @@ end
             auto schema_path = write_temp_schema(
                 "rulesforge_capi_continuous_path_batch.schema",
                 "schema Events [id(36), version(1), byte_order(little)]; "
-                "message Event { string event_id; int64 event_time; int32 value; string region; }");
+                "message Event { int64 event_time; int32 value; string event_id; string region; }");
             std::string rfl = std::string("import \"") + schema_path.generic_string() + R"(";
 rule "Selected event" when
     Event(value >= 7) from entry-point "events"

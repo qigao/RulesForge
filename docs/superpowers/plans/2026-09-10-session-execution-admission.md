@@ -11,6 +11,19 @@
 **Spec:** [有界执行与 session 生命周期](../../architecture/bounded-execution.md)，第一阶段。
 跟踪：[RulesForge #7](https://github.com/qigao/RulesForge/issues/7)，父任务 #6。
 
+## 2026-10-10 集成记录
+
+当前工作区复用了独立分支 `fix/7-session-execution-admission` 中的
+`8576a5af4d71ed347c513933ceae7f67695eedeb`：仅接入 session 头、实现与正式测试，
+未合并其他工作树或提交现有脏改动。原分支的实现进度见 `74f678a`；下面的步骤保留
+原计划，不将历史 RED、双配置验证或 issue 更新记为本轮执行。
+
+本轮在 Salts 2.3.0-rc.4 / SaltsUtils 4.3.0-rc.2 Windows x64 Release 上重新构建，
+session/RHS/C API 正式回归 3/3 通过。完整 build/CTest 结果见
+[架构总览](../../architecture/overview.md#版本与事实源)。当前 Debug SDK 为 Salts 2.2.0 /
+SaltsUtils 4.1.21，与新基线不匹配；新组合的 Debug/ASan 验证仍是合并前门槛。
+本轮不重复旧实现的 RED，不进行 commit、远程 issue 更新或安装。
+
 ## Global Constraints
 
 - 本阶段只实现执行准入，不声明已支持步骤配额、取消、deadline、owner-thread 或在途 destroy。

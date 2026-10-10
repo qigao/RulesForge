@@ -69,6 +69,91 @@ struct SessionTestFixture {
     }
 };
 
+struct ReentrantFireListener final : IEngineListener {
+    StatefulSession& session;
+    bool fail_fast;
+    bool attempted = false;
+    bool rejected = false;
+
+    explicit ReentrantFireListener(StatefulSession& s, bool strict)
+        : session(s), fail_fast(strict) {}
+
+    void before_rule_fired(std::string const&) override {
+        if (attempted) return;
+        attempted = true;
+        try {
+            if (fail_fast) session.fire_all_rules_fail_fast();
+            else session.fire_all_rules();
+        } catch (std::logic_error const&) {
+            rejected = true;
+        }
+    }
+};
+
+struct ResetWasAccepted {};
+
+struct ResetDuringFireListener final : IEngineListener {
+    StatefulSession& session;
+    bool attempted = false;
+    bool rejected = false;
+
+    explicit ResetDuringFireListener(StatefulSession& s) : session(s) {}
+
+    void before_rule_fired(std::string const&) override {
+        if (attempted) return;
+        attempted = true;
+        try {
+            session.reset();
+        } catch (std::logic_error const&) {
+            rejected = true;
+            return;
+        }
+        throw ResetWasAccepted{};
+    }
+};
+
+struct ReentrantAfterFireListener final : IEngineListener {
+    StatefulSession& session;
+    bool attempted = false;
+    bool rejected = false;
+
+    explicit ReentrantAfterFireListener(StatefulSession& s) : session(s) {}
+
+    void after_rule_fired(std::string const&) override {
+        if (attempted) return;
+        attempted = true;
+        try {
+            session.fire_all_rules();
+        } catch (std::logic_error const&) {
+            rejected = true;
+        }
+    }
+};
+
+struct OtherSessionFireListener final : IEngineListener {
+    StatefulSession& session;
+    bool attempted = false;
+    int fired = -1;
+
+    explicit OtherSessionFireListener(StatefulSession& s) : session(s) {}
+
+    void before_rule_fired(std::string const&) override {
+        if (attempted) return;
+        attempted = true;
+        fired = session.fire_all_rules();
+    }
+};
+
+struct ThrowOnceBeforeFireListener final : IEngineListener {
+    bool attempted = false;
+
+    void before_rule_fired(std::string const&) override {
+        if (attempted) return;
+        attempted = true;
+        throw std::runtime_error("listener failure");
+    }
+};
+
 suite("Engine Session") {
     group("Simple Rule Fire") {
         it("fires rule and inserts fact") {
@@ -199,6 +284,137 @@ suite("Engine Session") {
             check(fired2 == 0);
             check(session1->get_fact_count() == 2);
             check(session2->get_fact_count() == 1);
+        }
+    }
+
+    group("Execution admission") {
+        it("rejects same-session nested rule execution") {
+            SessionTestFixture fixture;
+            auto kb = create_test_kb();
+            auto session = kb->create_session();
+            auto listener = std::make_shared<ReentrantFireListener>(*session, false);
+            session->addListener(listener);
+            session->add_fact(fixture.make_person("John", 30));
+
+            check_equal(session->fire_all_rules(), 1);
+            check_equal(listener->attempted, true);
+            check_equal(listener->rejected, true);
+            check_equal(session->get_fact_count(), size_t{2});
+        }
+
+        it("rejects same-session nested fail-fast rule execution") {
+            SessionTestFixture fixture;
+            auto kb = create_test_kb();
+            auto session = kb->create_session();
+            auto listener = std::make_shared<ReentrantFireListener>(*session, true);
+            session->addListener(listener);
+            session->add_fact(fixture.make_person("John", 30));
+
+            check_equal(session->fire_all_rules(), 1);
+            check_equal(listener->attempted, true);
+            check_equal(listener->rejected, true);
+            check_equal(session->get_fact_count(), size_t{2});
+        }
+
+        it("rejects reset during rule execution") {
+            SessionTestFixture fixture;
+            auto kb = create_test_kb();
+            auto session = kb->create_session();
+            auto listener = std::make_shared<ResetDuringFireListener>(*session);
+            session->addListener(listener);
+            session->add_fact(fixture.make_person("John", 30));
+
+            int fired = -1;
+            try {
+                fired = session->fire_all_rules();
+            } catch (ResetWasAccepted const&) {
+                // The sentinel safely stops the legacy path before the RHS can
+                // use data invalidated by an accepted reset.
+            }
+
+            check_equal(listener->attempted, true);
+            check_equal(listener->rejected, true);
+            check_equal(fired, 1);
+            check_equal(session->get_fact_count(), size_t{2});
+        }
+
+        it("rejects same-session nested execution from after notification") {
+            SessionTestFixture fixture;
+            auto kb = create_test_kb();
+            auto session = kb->create_session();
+            auto listener = std::make_shared<ReentrantAfterFireListener>(*session);
+            session->addListener(listener);
+            session->add_fact(fixture.make_person("John", 30));
+
+            check_equal(session->fire_all_rules(), 1);
+            check_equal(listener->attempted, true);
+            check_equal(listener->rejected, true);
+            check_equal(session->get_fact_count(), size_t{2});
+        }
+
+        it("allows nested execution on a different session") {
+            SessionTestFixture fixture;
+            auto kb = create_test_kb();
+            auto outer_session = kb->create_session();
+            auto inner_session = kb->create_session();
+            auto listener = std::make_shared<OtherSessionFireListener>(*inner_session);
+            outer_session->addListener(listener);
+            outer_session->add_fact(fixture.make_person("John", 30));
+            inner_session->add_fact(fixture.make_person("Jane", 31));
+
+            check_equal(outer_session->fire_all_rules(), 1);
+            check_equal(listener->attempted, true);
+            check_equal(listener->fired, 1);
+            check_equal(outer_session->get_fact_count(), size_t{2});
+            check_equal(inner_session->get_fact_count(), size_t{2});
+        }
+
+        it("allows reset and execution after normal return") {
+            SessionTestFixture fixture;
+            auto kb = create_test_kb();
+            auto session = kb->create_session();
+            session->add_fact(fixture.make_person("John", 30));
+            check_equal(session->fire_all_rules(), 1);
+
+            session->reset();
+            session->add_fact(fixture.make_person("Jane", 31));
+
+            check_equal(session->fire_all_rules(), 1);
+            check_equal(session->get_fact_count(), size_t{2});
+        }
+
+        it("releases execution admission after listener exception") {
+            SessionTestFixture fixture;
+            auto kb = create_test_kb();
+            auto session = kb->create_session();
+            auto listener = std::make_shared<ThrowOnceBeforeFireListener>();
+            session->addListener(listener);
+            session->add_fact(fixture.make_person("John", 30));
+
+            check_throws_as(session->fire_all_rules(), std::runtime_error);
+            session->removeListener(listener);
+            session->reset();
+            session->add_fact(fixture.make_person("Jane", 31));
+
+            check_equal(session->fire_all_rules(), 1);
+            check_equal(session->get_fact_count(), size_t{2});
+        }
+
+        it("releases fail-fast execution admission after listener exception") {
+            SessionTestFixture fixture;
+            auto kb = create_test_kb();
+            auto session = kb->create_session();
+            auto listener = std::make_shared<ThrowOnceBeforeFireListener>();
+            session->addListener(listener);
+            session->add_fact(fixture.make_person("John", 30));
+
+            check_throws_as(session->fire_all_rules_fail_fast(), std::runtime_error);
+            session->removeListener(listener);
+            session->reset();
+            session->add_fact(fixture.make_person("Jane", 31));
+
+            check_equal(session->fire_all_rules(), 1);
+            check_equal(session->get_fact_count(), size_t{2});
         }
     }
 
@@ -535,6 +751,8 @@ suite("Engine Session") {
             check(fire_threw);
             check(!fixture.session->is_consistent());
             check(fixture.session->get_fact_count() == 0);
+            check_equal(fixture.session->fire_all_rules(), 0);
+            check_equal(fixture.session->fire_all_rules_fail_fast(), 0);
 
             auto another = std::make_shared<Fact>();
             another->type = "Person";

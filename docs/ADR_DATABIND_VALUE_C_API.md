@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted.
+Accepted; retained in RulesForge 0.9.0. Dependency and ownership notes reconciled
+with the [2026-10-10 architecture baseline](./architecture/overview.md).
 
 ## Background
 
@@ -35,9 +36,25 @@ The existing `DataBindObject` and JSON insertion APIs remain unchanged.
 
 ## Compatibility And Rollback
 
-Existing source and binary callers do not change. Consumers using the new
-symbol require the RulesForge 0.8 library. Rollback consists of removing the
-new symbol and keeping the existing object or JSON insertion paths.
+The original 0.7-to-0.8 change was additive. Consumers using the new symbol need
+RulesForge 0.8 or later. The current build additionally requires DataBind 3.0.0
+or newer with ABI 10 and a matching Salts/SaltsUtils dependency set; the original
+source-compatibility decision is not a binary-compatibility promise across SDK
+ABI migrations.
+
+The source DataBind root remains caller-owned and must survive conversion.
+Accessor children and canonical type identity are borrowed; their presence does
+not transfer the root or grant permission to retain its storage. RulesForge
+copies into its existing fact representation rather than exposing DataBind or
+CMeta native layout as an internal `ConstraintValue` layout.
+
+TurboScript Host value views are a separate ABI and are not accepted as
+`DataBindValue` pointers. Any future host adapter must perform explicit,
+schema-aware conversion and preserve exact numeric and extended-type semantics.
+
+Rollback restores a matching consumer/library/SDK set. A consumer that calls
+the added symbol cannot keep running against a DLL with that symbol removed.
+Object or JSON paths are explicit caller choices, not automatic failure fallback.
 
 ## Verification
 

@@ -398,6 +398,9 @@ Query invocation pattern is supported using quoted query name:
 ## 5. RHS (`then`) Actions
 
 RHS is parsed by `RhsParser` and compiled into the supported RHS execution path.
+The current backend is RulesForge's C++ action plan. RFL does not execute through
+TurboScript Host ABI, MIR interpreter, or MIR JIT; upstream script features do
+not extend this language implicitly. See the [architecture](./architecture/overview.md).
 
 ### 5.1 Action Types
 

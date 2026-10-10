@@ -6,6 +6,18 @@ bound values into session-owned facts. The rule engine itself remains fact-only.
 Imported DataBind codecs are retained by the immutable Knowledge Base and reused
 by every session created from it; inserting a fact does not reload its schema.
 
+The current runtime contract is DataBind 3.0.0 or newer with ABI 10, linked
+through `Salts::DataBind` from the SaltsUtils 4.3 SDK family, paired with Salts 2.3. Configure and
+`ruleforge_init()` reject a different DataBind ABI. See
+[SDK alignment and migration](./DEPLOYMENT.md#sdk-alignment) before upgrading.
+
+The [architecture baseline](./architecture/overview.md#版本与事实源) uses
+SaltsUtils 4.3.0-rc.2, whose DataBind header still declares version 3.0.0 and
+ABI 10. Binary qualification is recorded separately in the deployment guide. RulesForge consumes
+the dynamic C API; native CMeta binding and generated Service BindingPlans in
+upstream DataBind do not replace the KB's imported schema or install a scripting
+backend in RulesForge.
+
 Input processing has two distinct filtering stages:
 
 ```text
@@ -140,9 +152,10 @@ or broker callback may call `feed` for each received chunk and call `finish`
 after end-of-message. RulesForge does not schedule callbacks, retain the
 caller's chunk buffer, or create worker threads.
 
-Keep the stream and its session on the same execution strand or thread. If an
+Keep the stream and its session on the same thread. If an
 async framework may resume callbacks on different workers, pin the operation or
-dispatch all stream calls to one serialized executor.
+dispatch all stream calls to an executor with a fixed owner thread; serialization
+alone does not establish thread affinity.
 
 ## Continuous Events
 
@@ -176,17 +189,28 @@ names the bound string field containing each event ID and the bound integer
 field containing each event timestamp. All selected records share one entry
 point and commit atomically through the continuous batch operation.
 
-DataBind 2.5.1 invokes a synchronous callback whenever a streamable JSON/YAML
-array item, CSV row, or XML path element has passed path selection and schema
-binding.
+DataBind invokes synchronous callbacks after path selection and schema binding.
+Streamable JSON, CSV, and XML records can be delivered during `feed`; YAML and
+non-streamable paths may retain input and bind at `finish`. Chunk acceptance
+does not guarantee that a bound record is already available.
 RulesForge immediately copies that borrowed value into an owned pending event.
 No event enters working memory during `feed`: `finish` atomically submits the
 pending records through the continuous batch operation. This preserves message
-transactionality while avoiding a second parse or finish-time list traversal.
+transactionality without requiring a format round-trip.
+
+The current wrapper uses DataBind's default retained output mode even when it
+also installs a record callback. Account for parser input, retained bound output,
+and pending copied events; callback delivery does not imply constant memory.
+DataBind stream byte/count and query limits are separate from
+`max_input_batch_size`, which RulesForge checks when submitting the event batch.
+The public RulesForge stream constructors do not expose all DataBind limit knobs.
+Hosts should cap input messages and queued chunks before feeding them.
 
 File, socket, HTTP, and broker adapters remain byte sources. They call `feed`
 only when the callback consumer is ready, which provides source-side
-backpressure without a hidden DataBind thread or event loop.
+backpressure without a hidden DataBind thread or event loop. This pauses the
+source between calls; DataBind's `DATA_BIND_RECORD_STOP` means no more callbacks,
+not a resumable pause. RulesForge does not expose a callback-resume protocol.
 
 ## Failure and Ownership
 

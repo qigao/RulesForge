@@ -49,4 +49,6 @@ endif()
 # Tests
 add_subdirectory(test)
 add_subdirectory(example)
-add_subdirectory(benchmark)
+if(ENABLE_BENCHMARKS)
+    add_subdirectory(benchmark)
+endif()

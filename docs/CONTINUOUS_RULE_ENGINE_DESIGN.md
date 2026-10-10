@@ -4,6 +4,11 @@ This document describes the implemented continuous-session contract in
 RulesForge 0.9.0. It is not a background service: the caller drives every event,
 watermark, drain, acknowledgement, and input chunk.
 
+Module and SDK boundaries are described in the
+[architecture overview](./architecture/overview.md). Proposed CPU-step,
+cancellation, and deadline guarantees are tracked separately in the
+[bounded execution design](./architecture/bounded-execution.md).
+
 ## When to Use It
 
 Use a continuous session when a rule result depends on one or more of:
@@ -46,7 +51,9 @@ config.event_retention_ms = 3600000;
 config.dedup_retention_ms = 7200000;
 ```
 
-Every growing structure is bounded. The default values are defined by
+The fields below bound specific retained counts. They do not impose a global
+allocator limit or bound all derived facts, agenda work, field sizes, temporary
+allocations, or caller-retained result handles. The default values are defined by
 `ContinuousSessionConfig` and copied by `ruleforge_continuous_config_init`.
 Applications should set limits from expected traffic and output volume rather
 than treating defaults as capacity planning.
@@ -82,8 +89,9 @@ both commit the selected records through the same atomic batch operation.
 Streams commit only when `finish` succeeds. See [Data ingestion](./DATA_INGESTION.md).
 
 Before mutation, the runtime validates the event ID, route, timestamp, duplicate
-state, lateness, future skew, and resource limits. A rejected event does not
-advance accepted-event state.
+state, lateness, future skew, and input-side capacity. Pending-output capacity is
+checked when publishing the result after execution; failure then uses replay
+recovery. A rejected event does not advance accepted-event state.
 
 ## Event Time and Watermarks
 
@@ -106,7 +114,10 @@ A successful step returns an immutable result handle containing:
 - a monotonically assigned batch ID;
 - rules fired and events expired;
 - the current watermark, when present;
-- snapshots of configured output fact types.
+- snapshots of newly created, still-live facts of configured output types.
+
+Output selection starts at the step's first new fact ID. It is not a complete
+working-memory snapshot or a change log of updates to previously existing facts.
 
 If the per-step rule budget is exhausted while activations remain, the result is
 `DRAIN_REQUIRED`. Call `ruleforge_continuous_drain` until a committed result is
@@ -115,6 +126,11 @@ returned before pushing more work.
 Result handles and acknowledgement are different operations. Destroying a
 result releases the caller's snapshot handle; acknowledging its batch ID
 releases the session's pending-output accounting. Acknowledge batches in order.
+An acknowledged result handle can still retain its snapshot until destroyed;
+the host must bound such retained handles separately. Batch IDs start at 1 for
+each session. Use a host-owned stable run/session identity together with the
+batch ID, or domain event IDs, for delivery deduplication across session rebuilds
+and process restarts.
 
 ```c
 ruleforge_continuous_result_t result = NULL;
@@ -152,6 +168,10 @@ inconsistent and rejects further work.
 Replay is in-memory recovery, not durable checkpointing. After process failure,
 the host must recreate the session and replay its authoritative event log.
 
+Acknowledgement does not compact the committed replay history. Reaching
+`max_replay_steps` rejects further operations that require another history
+entry; it does not silently discard history or create a durable checkpoint.
+
 ## Metrics
 
 `ruleforge_continuous_get_metrics` exposes accepted and expired events,
@@ -164,11 +184,14 @@ Metrics are observations, not a substitute for checking operation status.
 
 - Continuous input supports one explicit JSON/YAML event or a path-selected
   JSON/YAML/CSV/XML event batch.
-- DataBind emits streamable JSON/YAML/CSV/XML records through synchronous bound-value
-  callbacks during `feed`; RulesForge retains them and commits the batch at
-  `finish` to preserve atomic message semantics.
+- DataBind emits bound records synchronously during `feed` or `finish`, depending
+  on format and path. YAML and non-streamable paths can require finish-time
+  binding. RulesForge retains pending events and commits at `finish` to preserve
+  atomic message semantics; see [Data ingestion](./DATA_INGESTION.md) for buffering.
 - Checkpoint/restore and rule-pack hot migration are not implemented.
 - Broker consumption, retries, persistence, and outbox delivery belong to the
   host application.
 - Rules cannot perform external I/O. Publish result snapshots after commit and
-  make downstream delivery idempotent using the result batch ID.
+  use the session-qualified batch identity or stable domain identity for retries.
+- `max_rules_per_step` and `DRAIN_REQUIRED` limit rule firing progress; they do
+  not interrupt a long native match/RHS or inherit TurboScript execution budgets.

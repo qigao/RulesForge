@@ -17,6 +17,10 @@ batch, or explicitly managed stateful evaluation. It is not thread-safe.
 retention, output batches, and bounded replay recovery. It is explicitly driven
 by the caller and does not create a thread or event loop.
 
+See the [architecture overview](./architecture/overview.md) for module ownership,
+dependency versions, and the distinction between implemented behavior and
+proposed integration.
+
 ## Supported Integration Boundary
 
 RulesForge is a filtering and inference library:
@@ -29,6 +33,11 @@ RulesForge is a filtering and inference library:
 RFL cannot load dynamic function tables or invoke arbitrary external calls.
 Rule conditions use the built-in expression and typed predicate set only.
 External service calls and other side effects remain the host's responsibility.
+
+TurboScript is not a RulesForge runtime dependency or an RFL execution backend.
+A host that also embeds TurboScript must use its public Host ABI and explicitly
+convert supported values. Script budgets, cancellation, and plugin leases do
+not automatically cover RulesForge matching or RHS execution.
 
 ## Load Rules
 
@@ -100,7 +109,7 @@ callbacks; it does not own an async runtime. See
 
 ## Fire and Query
 
-After inserting facts into a stateful session, fire rules with a finite budget
+After inserting facts into a stateful session, fire rules with a finite rule count
 unless the rule pack is known to terminate:
 
 ```c
@@ -110,6 +119,11 @@ if (ruleforge_session_fire_all_rules(session, 10000, &fired)
   fprintf(stderr, "%s\n", ruleforge_get_last_error_message());
 }
 ```
+
+This limit counts activations; it is not a CPU-step, memory, cancellation, or
+deadline guarantee. Matching can run before the count is checked, and one RHS
+can perform substantial work. See the proposed
+[bounded execution contract](./architecture/bounded-execution.md).
 
 Named RFL queries return a result handle. Facts borrowed from that result remain
 valid only while their owner remains alive; follow the ownership comments in
