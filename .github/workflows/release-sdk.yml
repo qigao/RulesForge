@@ -57,12 +57,12 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ninja-build ccache pkg-config
+          sudo apt-get install -y --no-install-recommends ninja-build ccache pkg-config nasm
 
       - name: Install macOS build tools
         if: runner.os == 'macOS'
         shell: bash
-        run: brew install ninja ccache pkgconf
+        run: brew install ninja ccache pkgconf nasm
 
       - name: Install Windows build tools
         if: runner.os == 'Windows'
@@ -179,5 +179,6 @@ jobs:
             build/${{ matrix.preset }}/ctest.xml
             build/${{ matrix.preset }}/Testing/Temporary/
             build/${{ matrix.preset }}/CMakeFiles/CMakeConfigureLog.yaml
+            build/${{ matrix.preset }}/vcpkg-manifest-install.log
             stage/${{ matrix.preset }}/
             ${{ runner.temp }}/ccache-stats.txt

@@ -448,7 +448,8 @@ suite("RFL Engine") {
             check(std::get<int64_t>(person->fields["processed"]) == 1);
             check(stats.cpp_action_plan_exec_count == 1);
             check(stats.cpp_action_plan_error_count == 0);
-            check(stats.condition_eval_us > 0);
+            // Sub-microsecond evaluations legitimately round to zero in the timer.
+            check_equal(stats.expression_exec_count, uint64_t{1});
         }
 
         it("executes else-if branches through C++ action plan") {
@@ -500,7 +501,7 @@ suite("RFL Engine") {
             check(std::get<std::string>(budget->fields["tier"]) == "budget");
             check(stats.cpp_action_plan_exec_count == 3);
             check(stats.cpp_action_plan_error_count == 0);
-            check(stats.condition_eval_us > 0);
+            check_equal(stats.expression_exec_count, uint64_t{5});
         }
 
         it("executes single switch RHS through C++ action plan") {
