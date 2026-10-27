@@ -32,7 +32,7 @@ function Restore-VerifiedNativePackage([string]$Name) {
   $versionFile = Join-Path $root "$Name.version"
   # Original NuGet PackageReference Version="*" selects the latest stable
   # published package. Preserve that exact selector, but fetch via curl.
-  & python $client latest $Name $archive $versionFile
+  & python $client latest $Name $archive $versionFile | Out-Host
   if ($LASTEXITCODE -ne 0) { throw "curl GitHub Packages failed for $Name" }
   if (-not (Test-Path -LiteralPath $versionFile -PathType Leaf)) {
     throw "No resolved GitHub Packages version for $Name"
@@ -46,7 +46,7 @@ function Restore-VerifiedNativePackage([string]$Name) {
   if (Test-Path -LiteralPath $destination) {
     Remove-Item -LiteralPath $destination -Recurse -Force
   }
-  & python $client extract $archive $destination
+  & python $client extract $archive $destination | Out-Host
   if ($LASTEXITCODE -ne 0) { throw "verified GitHub Package failed extraction: $Name" }
   return @{ Version = $version; Root = (Join-Path $destination "sdk/$Rid") }
 }
