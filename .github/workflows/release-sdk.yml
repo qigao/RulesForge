@@ -75,17 +75,23 @@ jobs:
           New-Item -ItemType Directory -Force -Path $cache | Out-Null
           "VCPKG_BINARY_CACHE=$cache" >> $env:GITHUB_ENV
 
-      - name: Configure shared vcpkg binary cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+      - name: Checkout immutable native curl GitHub Packages client
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/vcpkg-cache
+          ref: dd6fedeae82cb10c039ef2bb2852c286df45bd21
+          path: build/vcpkg-cache-contract
+          persist-credentials: false
+      - name: Configure canonical curl-only vcpkg binary cache
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@dd6fedeae82cb10c039ef2bb2852c286df45bd21
         with:
           mode: read
+          triplet: ${{ matrix.triplet }}
+          host-triplet: ${{ matrix.triplet }}
 
       - name: Restore canonical re2c host tool
-        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@dd6fedeae82cb10c039ef2bb2852c286df45bd21
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
 
       - name: Install Linux build tools
         if: runner.os == 'Linux'
@@ -125,8 +131,8 @@ jobs:
           if (-not (Test-Path -LiteralPath $env:QIGAO_VCPKG_TOOLCHAIN_FILE -PathType Leaf)) {
             throw "qigao/vcpkg-cache toolchain is unavailable"
           }
-          if ($env:VCPKG_BINARY_SOURCES -notmatch "nugetconfig") {
-            throw "shared GitHub Packages vcpkg cache is not configured"
+          if ($env:VCPKG_BINARY_SOURCES -ne "clear;files,$env:VCPKG_BINARY_CACHE,readwrite") {
+            throw "vcpkg must use the local curl-restored files cache, never NuGet provider"
           }
           if ($env:VCPKG_NUGET_REPOSITORY -ne "https://github.com/qigao/vcpkg-cache") {
             throw "unexpected vcpkg cache repository: $env:VCPKG_NUGET_REPOSITORY"
