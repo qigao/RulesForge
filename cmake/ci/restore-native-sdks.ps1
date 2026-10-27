@@ -4,121 +4,89 @@ param(
   [string]$Rid
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-
-foreach ($name in @("GITHUB_TOKEN", "RUNNER_TEMP", "GITHUB_ENV", "GITHUB_PATH")) {
-  $value = [Environment]::GetEnvironmentVariable($name)
-  if ([string]::IsNullOrWhiteSpace($value)) { throw "$name is required" }
-}
-
-$packages = if ($env:QIGAO_NUGET_PACKAGES) {
-  $env:QIGAO_NUGET_PACKAGES
-} else {
-  Join-Path $env:RUNNER_TEMP "qigao-nuget"
-}
-$config = Join-Path $env:RUNNER_TEMP "rulesforge-native-sdk.config"
-$project = Join-Path $env:RUNNER_TEMP "rulesforge-native-sdk.csproj"
-$assetsPath = Join-Path $env:RUNNER_TEMP "obj/project.assets.json"
-
-@'
-<?xml version="1.0" encoding="utf-8"?>
-<configuration><packageSources><clear /></packageSources></configuration>
-'@ | Set-Content -LiteralPath $config -Encoding utf8NoBOM
-
-$sourceArgs = @(
-  "nuget", "add", "source", "https://nuget.pkg.github.com/qigao/index.json",
-  "--name", "github",
-  "--username", "qigao",
-  "--password", $env:GITHUB_TOKEN,
-  "--store-password-in-clear-text",
-  "--configfile", $config
-)
-& dotnet @sourceArgs
-if ($LASTEXITCODE -ne 0) { throw "failed to configure qigao GitHub Packages source" }
-
-@'
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
-  </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="Salts.Native" Version="*" />
-    <PackageReference Include="SaltsUtils.Native" Version="*" />
-  </ItemGroup>
-</Project>
-'@ | Set-Content -LiteralPath $project -Encoding utf8NoBOM
-
-& dotnet restore $project --packages $packages --configfile $config --no-cache --force-evaluate
-if ($LASTEXITCODE -ne 0) { throw "failed to restore latest published RulesForge producer SDKs" }
-if (-not (Test-Path -LiteralPath $assetsPath -PathType Leaf)) {
-  throw "NuGet restore did not produce $assetsPath"
-}
-
-$assets = Get-Content -LiteralPath $assetsPath -Raw | ConvertFrom-Json
-function Get-ResolvedPackageVersion([string]$PackageId) {
-  $prefix = "$PackageId/"
-  foreach ($property in $assets.libraries.PSObject.Properties) {
-    if ($property.Name.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-      return $property.Name.Substring($prefix.Length)
-    }
+foreach ($name in @("RUNNER_TEMP", "GITHUB_ENV", "GITHUB_PATH")) {
+  if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+    throw "$name is required for curl-only SDK restoration"
   }
-  throw "NuGet restore did not resolve $PackageId"
 }
+$token = if ($env:GH_TOKEN) { $env:GH_TOKEN } else { $env:GITHUB_TOKEN }
+if ([string]::IsNullOrWhiteSpace($token)) {
+  throw "GitHub Packages read token is required"
+}
+$env:GH_TOKEN = $token
 
-$saltsVersion = Get-ResolvedPackageVersion "Salts.Native"
-$saltsUtilsVersion = Get-ResolvedPackageVersion "SaltsUtils.Native"
-$saltsRoot = Join-Path $packages "salts.native/$saltsVersion/sdk/$Rid"
-$saltsUtilsRoot = Join-Path $packages "saltsutils.native/$saltsUtilsVersion/sdk/$Rid"
+$repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../.."))
+$client = Join-Path $repositoryRoot "build/vcpkg-cache-contract/scripts/github-packages.py"
+if (-not (Test-Path -LiteralPath $client -PathType Leaf)) {
+  throw "The immutable curl GitHub Packages client checkout is missing: $client"
+}
+$root = Join-Path $env:RUNNER_TEMP "rulesforge-curl-native-sdk"
+New-Item -ItemType Directory -Force -Path $root | Out-Null
+$packages = Join-Path $root "packages"
+New-Item -ItemType Directory -Force -Path $packages | Out-Null
 
-$required = @(
+function Restore-VerifiedNativePackage([string]$Name) {
+  $archive = Join-Path $root "$Name.nupkg"
+  $versionFile = Join-Path $root "$Name.version"
+  # Original NuGet PackageReference Version="*" selects the latest stable
+  # published package. Preserve that exact selector, but fetch via curl.
+  & python $client latest $Name $archive $versionFile | Out-Host
+  if ($LASTEXITCODE -ne 0) { throw "curl GitHub Packages failed for $Name" }
+  if (-not (Test-Path -LiteralPath $versionFile -PathType Leaf)) {
+    throw "No resolved GitHub Packages version for $Name"
+  }
+  $version = (Get-Content -LiteralPath $versionFile -Raw).Trim()
+  if ($version -notmatch '^[0-9]+([.][0-9]+){2,3}$') {
+    throw "Nonstable or malformed resolved version for $Name : $version"
+  }
+  $id = $Name.ToLowerInvariant()
+  $destination = Join-Path $packages "$id/$version"
+  if (Test-Path -LiteralPath $destination) {
+    Remove-Item -LiteralPath $destination -Recurse -Force
+  }
+  & python $client extract $archive $destination | Out-Host
+  if ($LASTEXITCODE -ne 0) { throw "verified GitHub Package failed extraction: $Name" }
+  return @{ Version = $version; Root = (Join-Path $destination "sdk/$Rid") }
+}
+$salts = Restore-VerifiedNativePackage "Salts.Native"
+$utils = Restore-VerifiedNativePackage "SaltsUtils.Native"
+$saltsRoot = $salts.Root
+$saltsUtilsRoot = $utils.Root
+
+foreach ($path in @(
   (Join-Path $saltsRoot "lib/cmake/Salts/SaltsConfig.cmake"),
   (Join-Path $saltsRoot "include/cmeta/interface.h"),
   (Join-Path $saltsUtilsRoot "lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"),
   (Join-Path $saltsUtilsRoot "include/data_bind.h"),
   (Join-Path $saltsUtilsRoot "include/data_bind_binding_plan.h")
-)
-foreach ($path in $required) {
+)) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-    throw "published SDK is incomplete: $path"
+    throw "Downloaded published SDK is missing file: $path"
   }
 }
-
-$idlc = if ($Rid -eq "windows-x64") {
-  Join-Path $saltsUtilsRoot "bin/salts-idlc.exe"
-} else {
-  Join-Path $saltsUtilsRoot "bin/salts-idlc"
-}
+$idlc = Join-Path $saltsUtilsRoot $(if ($Rid -eq "windows-x64") { "bin/salts-idlc.exe" } else { "bin/salts-idlc" })
 if (-not (Test-Path -LiteralPath $idlc -PathType Leaf)) {
-  throw "resolved SaltsUtils package is missing salts-idlc: $idlc"
+  throw "Published SaltsUtils SDK is missing salts-idlc"
 }
-
 $dataBindHeader = Get-Content -LiteralPath (Join-Path $saltsUtilsRoot "include/data_bind.h") -Raw
-if ($dataBindHeader -notmatch '#define\s+DATA_BIND_VERSION_MAJOR\s+3') {
-  throw "resolved SaltsUtils package does not expose DataBind 3"
-}
-if ($dataBindHeader -notmatch '#define\s+DATA_BIND_ABI_VERSION\s+10') {
-  throw "resolved SaltsUtils package does not expose DataBind ABI 10"
+if ($dataBindHeader -notmatch '#define\s+DATA_BIND_VERSION_MAJOR\s+3' -or
+    $dataBindHeader -notmatch '#define\s+DATA_BIND_ABI_VERSION\s+10') {
+  throw "Verified SaltsUtils GitHub package lacks DataBind 3 / ABI 10"
 }
 
-"SALTS_ROOT=$saltsRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
-"SALTS_UTILS_ROOT=$saltsUtilsRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
-"QIGAO_NUGET_PACKAGES=$packages" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
-"SALTS_PACKAGE_VERSION=$saltsVersion" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
-"SALTS_UTILS_PACKAGE_VERSION=$saltsUtilsVersion" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
-
-(Join-Path $saltsRoot "bin") | Add-Content -LiteralPath $env:GITHUB_PATH -Encoding utf8
-(Join-Path $saltsUtilsRoot "bin") | Add-Content -LiteralPath $env:GITHUB_PATH -Encoding utf8
-
+"SALTS_ROOT=$saltsRoot" >> $env:GITHUB_ENV
+"SALTS_UTILS_ROOT=$saltsUtilsRoot" >> $env:GITHUB_ENV
+"SALTS_PACKAGE_VERSION=$($salts.Version)" >> $env:GITHUB_ENV
+"SALTS_UTILS_PACKAGE_VERSION=$($utils.Version)" >> $env:GITHUB_ENV
+(Join-Path $saltsRoot "bin") >> $env:GITHUB_PATH
+(Join-Path $saltsUtilsRoot "bin") >> $env:GITHUB_PATH
 if ($Rid -eq "linux-x64") {
-  $entries = @((Join-Path $saltsRoot "lib"), (Join-Path $saltsUtilsRoot "lib"))
-  if (-not [string]::IsNullOrWhiteSpace($env:LD_LIBRARY_PATH)) {
-    $entries += $env:LD_LIBRARY_PATH
-  }
-  "LD_LIBRARY_PATH=$($entries -join ':')" |
-    Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+  $lib = @((Join-Path $saltsRoot "lib"), (Join-Path $saltsUtilsRoot "lib"))
+  if ($env:LD_LIBRARY_PATH) { $lib += $env:LD_LIBRARY_PATH }
+  "LD_LIBRARY_PATH=$($lib -join ':')" >> $env:GITHUB_ENV
 }
-
-Write-Host "Restored latest Salts.Native -> $saltsVersion -> $saltsRoot"
-Write-Host "Restored latest SaltsUtils.Native -> $saltsUtilsVersion -> $saltsUtilsRoot"
-Write-Host "Validated salts-idlc -> $idlc"
+Write-Host "curl restored latest stable Salts.Native -> $($salts.Version) for $Rid"
+Write-Host "curl restored latest stable SaltsUtils.Native -> $($utils.Version) for $Rid"
+Write-Host "Verified DataBind ABI 10 and salts-idlc: $idlc"

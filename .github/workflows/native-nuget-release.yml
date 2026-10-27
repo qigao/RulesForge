@@ -77,17 +77,23 @@ jobs:
           mkdir -p "$cache"
           echo "VCPKG_BINARY_CACHE=$cache" >> "$GITHUB_ENV"
 
-      - name: Configure shared vcpkg binary cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+      - name: Checkout immutable native curl GitHub Packages client
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/vcpkg-cache
+          ref: b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
+          path: build/vcpkg-cache-contract
+          persist-credentials: false
+      - name: Configure canonical curl-only vcpkg binary cache
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
         with:
           mode: read
+          triplet: x64-linux
+          host-triplet: x64-linux
 
       - name: Restore canonical re2c host tool
-        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
 
       - name: Install build tools
         shell: bash
@@ -168,17 +174,23 @@ jobs:
           New-Item -ItemType Directory -Force -Path $cache | Out-Null
           "VCPKG_BINARY_CACHE=$cache" >> $env:GITHUB_ENV
 
-      - name: Configure shared vcpkg binary cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+      - name: Checkout immutable native curl GitHub Packages client
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/vcpkg-cache
+          ref: b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
+          path: build/vcpkg-cache-contract
+          persist-credentials: false
+      - name: Configure canonical curl-only vcpkg binary cache
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
         with:
           mode: read
+          triplet: x64-windows
+          host-triplet: x64-windows
 
       - name: Restore canonical re2c host tool
-        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
 
       - name: Locate MSVC
         shell: pwsh
