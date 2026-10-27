@@ -79,18 +79,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/vcpkg-cache
-          ref: 4d0c635920aa061a41be6c5bc184d7023f5cb834
+          ref: b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
           path: build/vcpkg-cache-contract
           persist-credentials: false
       - name: Configure canonical curl-only vcpkg binary cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@4d0c635920aa061a41be6c5bc184d7023f5cb834
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
         with:
           mode: read
           triplet: ${{ matrix.triplet }}
           host-triplet: ${{ matrix.triplet }}
 
       - name: Restore canonical re2c host tool
-        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@4d0c635920aa061a41be6c5bc184d7023f5cb834
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
 
 
       - name: Install Linux build tools
