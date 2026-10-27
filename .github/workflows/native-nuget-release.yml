@@ -81,18 +81,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/vcpkg-cache
-          ref: dd6fedeae82cb10c039ef2bb2852c286df45bd21
+          ref: 4d0c635920aa061a41be6c5bc184d7023f5cb834
           path: build/vcpkg-cache-contract
           persist-credentials: false
       - name: Configure canonical curl-only vcpkg binary cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@dd6fedeae82cb10c039ef2bb2852c286df45bd21
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@4d0c635920aa061a41be6c5bc184d7023f5cb834
         with:
           mode: read
           triplet: x64-linux
           host-triplet: x64-linux
 
       - name: Restore canonical re2c host tool
-        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@dd6fedeae82cb10c039ef2bb2852c286df45bd21
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@4d0c635920aa061a41be6c5bc184d7023f5cb834
 
 
       - name: Install build tools
@@ -178,18 +178,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/vcpkg-cache
-          ref: dd6fedeae82cb10c039ef2bb2852c286df45bd21
+          ref: 4d0c635920aa061a41be6c5bc184d7023f5cb834
           path: build/vcpkg-cache-contract
           persist-credentials: false
       - name: Configure canonical curl-only vcpkg binary cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@dd6fedeae82cb10c039ef2bb2852c286df45bd21
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@4d0c635920aa061a41be6c5bc184d7023f5cb834
         with:
           mode: read
           triplet: x64-windows
           host-triplet: x64-windows
 
       - name: Restore canonical re2c host tool
-        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@dd6fedeae82cb10c039ef2bb2852c286df45bd21
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@4d0c635920aa061a41be6c5bc184d7023f5cb834
 
 
       - name: Locate MSVC
