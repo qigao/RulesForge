@@ -32,7 +32,8 @@ endif()
 # Set the features of the project
 include(ProjectOptions.cmake)
 
-find_package(OpenSSL REQUIRED)
+# No OpenSSL/BoringSSL dependency: RulesForge sources do not consume it.
+# Cryptographic transport functionality belongs to the installed Salts SDK.
 
 if(NOT DEFINED ENV{SALTS_ROOT} OR "$ENV{SALTS_ROOT}" STREQUAL "")
     message(FATAL_ERROR "SALTS_ROOT must name the installed Salts profile")
