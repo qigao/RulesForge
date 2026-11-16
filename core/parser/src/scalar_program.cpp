@@ -295,7 +295,7 @@ int64_t truth(Frame* frame, int64_t index) noexcept {
     auto const& slot = frame->slots[index];
     if (slot.kind == Integer || slot.kind == Unsigned || slot.kind == Boolean)
         return slot.integer != 0;
-    if (slot.kind == Number) return slot.number != 0;
+    if (slot.kind == Number) return std::fpclassify(slot.number) != FP_ZERO;
     return Descriptor::truthy(*slot.original);
 }
 bool ordered(Lexeme operation, int order) {
@@ -671,7 +671,7 @@ bool ExpressionDescriptor::truthy(ConstraintValue const& value) {
     if (auto v = std::get_if<bool>(&value)) return *v;
     if (auto v = std::get_if<int64_t>(&value)) return *v != 0;
     if (auto v = std::get_if<uint64_t>(&value)) return *v != 0;
-    if (auto v = std::get_if<double>(&value)) return *v != 0;
+    if (auto v = std::get_if<double>(&value)) return std::fpclassify(*v) != FP_ZERO;
     if (auto v = std::get_if<DurationValue>(&value)) return v->milliseconds != 0;
     if (auto v = std::get_if<std::string>(&value)) return !v->empty() && *v != "false" && *v != "0";
     return !std::holds_alternative<NilValue>(value);

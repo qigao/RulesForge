@@ -4,6 +4,8 @@
 #include "diagnostics/exceptions.hpp"
 #include "test_helpers.hpp"
 #include "tinytest.hpp"
+#include <set>
+#include <utility>
 
 struct TestFixture {
     std::unique_ptr<StatefulSession> session;
@@ -155,6 +157,51 @@ struct ThrowOnceBeforeFireListener final : IEngineListener {
 };
 
 suite("Engine Session") {
+    it("keeps independent rule matches across cancellation new facts and reset") {
+        constexpr int rule_count = 32;
+        constexpr int fact_count = 32;
+        std::string source = "declare Input key: int end declare Output ordinal: int, key: int end\n";
+        for (int rule = 0; rule < rule_count; ++rule)
+            source += "rule \"Independent " + std::to_string(rule) +
+                      "\" when $input: Input() then insert Output { ordinal = " +
+                      std::to_string(rule) + ", key = $input.key } end\n";
+        source += "query \"Outputs\" $output: Output() end";
+        TestFixture fixture;
+        fixture.build_session(source);
+        auto &session = *fixture.session;
+        auto canceled = std::make_shared<Fact>();
+        canceled->type = "Input";
+        canceled->fields["key"] = int64_t{-1};
+        session.add_fact(canceled);
+        check_equal(session.fire_all_rules(1), 1);
+        session.retract_fact(canceled.get());
+        check_equal(session.fire_all_rules(), 0);
+
+        std::vector<std::shared_ptr<Fact>> facts;
+        for (int key = 0; key < fact_count; ++key) {
+            auto fact = std::make_shared<Fact>();
+            fact->type = "Input";
+            fact->fields["key"] = int64_t{key};
+            session.add_fact(fact);
+            facts.push_back(std::move(fact));
+        }
+        check_equal(session.fire_all_rules(), rule_count * fact_count);
+        auto outputs = session.execute_query("Outputs");
+        check_equal(outputs.size(), size_t{rule_count * fact_count + 1});
+        std::set<std::pair<int64_t, int64_t>> matches;
+        for (auto const row : outputs)
+            matches.emplace(*row.getFieldAs<int64_t>("$output", "ordinal"),
+                            *row.getFieldAs<int64_t>("$output", "key"));
+        check_equal(matches.size(), outputs.size());
+        for (int rule = 0; rule < rule_count; ++rule)
+            for (int key = 0; key < fact_count; ++key)
+                check_true(matches.contains({rule, key}));
+        session.reset();
+        check_equal(session.execute_query("Outputs").size(), size_t{0});
+        session.add_fact(canceled);
+        check_equal(session.fire_all_rules(), rule_count);
+        check_equal(session.execute_query("Outputs").size(), size_t{rule_count});
+    }
     group("Simple Rule Fire") {
         it("fires rule and inserts fact") {
             TestFixture fixture;

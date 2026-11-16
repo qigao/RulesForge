@@ -47,7 +47,7 @@ std::from_chars_result parse_scalar_double(std::string_view text, double &value)
     if (!consumed) return {text.data(), std::errc::invalid_argument};
     // A representable subnormal may set ERANGE. Only zero underflow or
     // non-finite overflow is outside double range, matching from_chars.
-    if (status == ERANGE && (parsed == 0 || !std::isfinite(parsed)))
+    if (status == ERANGE && (std::fpclassify(parsed) == FP_ZERO || !std::isfinite(parsed)))
         return {text.data() + consumed, std::errc::result_out_of_range};
     value = parsed;
     return {text.data() + consumed, {}};

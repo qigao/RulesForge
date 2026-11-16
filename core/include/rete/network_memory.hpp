@@ -132,7 +132,8 @@ struct NetworkMemory {
 
   // --- TerminalNode state ---
   struct TerminalMem {
-    std::unordered_set<TokenWME const *> memory;
+    // The token owns one session-issued identity until its RETRACT.
+    std::unordered_map<TokenWME const *, size_t> memory;
   };
 
   // --- QueryTerminalNode state ---

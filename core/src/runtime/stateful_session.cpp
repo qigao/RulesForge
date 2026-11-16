@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cctype>
 #include <exception>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 
@@ -112,7 +113,7 @@ void StatefulSession::prime_network_state() {
         if (!rule.enabled) continue;
         if (rule.condition_groups.empty() || (rule.condition_groups.size() == 1 && rule.condition_groups[0].empty())) {
             Token dummy_token{get_dummy_wme(), PropagationType::ASSERT};
-            size_t hash = std::hash<TokenWME const*>{}(dummy_token.wme) ^ reinterpret_cast<uintptr_t>(&rule);
+            size_t hash = allocate_activation_id();
             add_activation(Activation{&rule, dummy_token, hash, nullptr});
         }
     }
@@ -838,6 +839,12 @@ void StatefulSession::addListener(std::shared_ptr<IEngineListener> listener) {
 void StatefulSession::removeListener(std::shared_ptr<IEngineListener> const& listener) {
     ensure_consistent_for_mutation("removing listeners");
     std::erase(listeners_, listener);
+}
+
+size_t StatefulSession::allocate_activation_id() {
+    if (last_activation_id_ == std::numeric_limits<size_t>::max())
+        throw std::overflow_error("Session activation identity exhausted");
+    return ++last_activation_id_;
 }
 
 void StatefulSession::add_activation(Activation const& activation) {

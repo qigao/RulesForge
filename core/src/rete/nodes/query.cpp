@@ -42,18 +42,19 @@ void TerminalNode::left_activate(StatefulSession& session, Token const& token) {
     }
 
     if (token.type == PropagationType::RETRACT) {
-        if (mem.memory.erase(wme_ptr) > 0) {
-            size_t hash = std::hash<TokenWME const*>{}(wme_ptr) ^ reinterpret_cast<uintptr_t>(rule);
-            session.remove_activation(hash);
+        if (auto entry = mem.memory.find(wme_ptr); entry != mem.memory.end()) {
+            session.remove_activation(entry->second);
+            mem.memory.erase(entry);
             for (auto& listener : session.get_listeners()) {
                 listener->on_activation_retracted(rule->name, token.get_facts());
             }
         }
         session.logical_retract(wme_ptr);
     } else if (token.type == PropagationType::ASSERT) {
-        auto [it, inserted] = mem.memory.insert(wme_ptr);
+        auto [it, inserted] = mem.memory.try_emplace(wme_ptr, 0);
         if (inserted) {
-            size_t hash = std::hash<TokenWME const*>{}(wme_ptr) ^ reinterpret_cast<uintptr_t>(rule);
+            size_t hash = session.allocate_activation_id();
+            it->second = hash;
             Activation activation{rule, token, hash, &this->binding_to_token_idx};
             session.add_activation(activation);
             // Notify listeners about creation
@@ -94,9 +95,9 @@ void TerminalNode::left_activate_batch(StatefulSession& session, std::vector<Tok
         auto wme_ptr = token.wme;
 
         if (token.type == PropagationType::RETRACT) {
-            if (mem.memory.erase(wme_ptr) > 0) {
-                size_t hash = std::hash<TokenWME const*>{}(wme_ptr) ^ reinterpret_cast<uintptr_t>(rule);
-                session.remove_activation(hash);
+            if (auto entry = mem.memory.find(wme_ptr); entry != mem.memory.end()) {
+                session.remove_activation(entry->second);
+                mem.memory.erase(entry);
                 if (has_listeners) {
                     for (auto& listener : listeners) {
                         listener->on_activation_retracted(rule->name, token.get_facts());
@@ -105,9 +106,10 @@ void TerminalNode::left_activate_batch(StatefulSession& session, std::vector<Tok
             }
             session.logical_retract(wme_ptr);
         } else if (token.type == PropagationType::ASSERT) {
-            auto [it, inserted] = mem.memory.insert(wme_ptr);
+            auto [it, inserted] = mem.memory.try_emplace(wme_ptr, 0);
             if (inserted) {
-                size_t hash = std::hash<TokenWME const*>{}(wme_ptr) ^ reinterpret_cast<uintptr_t>(rule);
+                size_t hash = session.allocate_activation_id();
+                it->second = hash;
                 batch_activations.push_back(Activation{rule, token, hash, &this->binding_to_token_idx});
                 if (has_listeners) {
                     for (auto& listener : listeners) {

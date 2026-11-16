@@ -623,3 +623,18 @@
   科学计数、最小 subnormal、零下溢和不支持的 C 转换扩展。日志
   build/release-portability-{build,focused-ctest}.log。发布仍由完整平台 CI、
   原生 CTest、Android ELF 对齐和最终 pack/publish gate 决定。
+- 后续完整构建／CTest **79/79** 已通过（747d734，Windows LLVM-MinGW）。首次
+  本地完整构建期间提前并行启动 CTest，导致链接同名 exe 时 Permission denied；
+  该轮提前测试不能证明新二进制。停止并行后重新完整构建再运行 CTest，成功日志
+  build/release-portability-build-final.log、release-portability-full-ctest.log。
+- **HIGH／事实**：Linux CI 43814765064 暴露 7 项行为失败；源码确认 terminal 用
+  rule/token 地址 XOR 的结果直接充当 agenda 唯一身份，没有原始键相等性判断。
+  改为 session 分配单调 ID，terminal 保存 token → ID，撤销按保存值取消；
+  ASSERT 去重、RETRACT、重新 ASSERT 和 reset 的生命周期见
+  docs/architecture/core-ownership-and-dispatch.md。计数溢出失败，不能换一个
+  更复杂哈希函数来冒充无碰撞身份。正式 engine_session 测试覆盖 32×32 独立
+  匹配、部分 firing 后撤销、后续新事实与 reset。
+- 同轮 macOS 的 libc++ 没有 jthread；两个并发测试用显式 launch::async 和
+  future::get 等待，保留独立 owner、错误收集及异常时等待工作者结束的语义。
+  Android 的既有 -Werror=float-equal 要求零值判定使用 fpclassify；保留正负零、
+  subnormal 和非有限值行为，没有关闭告警、测试或切换工具链。

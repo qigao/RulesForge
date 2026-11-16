@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cmath>
 #include <exception>
+#include <future>
 #include <limits>
 #include <map>
 #include <thread>
@@ -166,9 +167,9 @@ suite("MIR scalar programs") {
         auto program = Program::compile_required("$x * 3 + 7");
         std::array<std::exception_ptr, 4> errors{};
         std::array<int64_t, 4> totals{};
-        std::array<std::jthread, 4> workers;
+        std::array<std::future<void>, 4> workers;
         for (size_t lane = 0; lane < workers.size(); ++lane)
-            workers[lane] = std::jthread([&, lane] {
+            workers[lane] = std::async(std::launch::async, [&, lane] {
                 try {
                     Input input;
                     for (int64_t i = 0; i < 1000; ++i) {
@@ -179,7 +180,7 @@ suite("MIR scalar programs") {
                     }
                 } catch (...) { errors[lane] = std::current_exception(); }
             });
-        for (auto& worker : workers) worker.join();
+        for (auto& worker : workers) worker.get();
         for (size_t lane = 0; lane < workers.size(); ++lane) {
             check_false(bool(errors[lane]));
             check_equal(totals[lane], int64_t{1505500});

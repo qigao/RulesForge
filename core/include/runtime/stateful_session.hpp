@@ -275,6 +275,7 @@ public:
   }
 
   void add_activation(Activation const &activation);
+  size_t allocate_activation_id();
   void add_activations_batch(std::vector<Activation> &activations); // PHREAK: batch agenda insert
   void remove_activation(size_t activation_hash);
   void logical_retract(TokenWME const *wme);
@@ -329,6 +330,7 @@ private:
   std::unordered_map<int64_t, std::shared_ptr<Fact>> retained_shared_facts_;
   Activation const *current_activation_ = nullptr;
   Agenda agenda_;
+  size_t last_activation_id_ = 0;
   std::vector<std::shared_ptr<IEngineListener>> listeners_;
   bool halt_requested_ = false;
   bool execution_active_ = false;

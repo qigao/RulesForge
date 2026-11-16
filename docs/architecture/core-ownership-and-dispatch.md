@@ -62,8 +62,36 @@ InternedKeyMap 的有序连续存储保留：F 个字段的查找 O(log F)、插
 字段槽位时，应先定义不可变 type layout 与失效协议；当前 API 允许字段集变化，
 不能直接缓存可移动的 vector 下标。没有为消除分支引入新的全局服务定位器。
 
-ExpressionDescriptor 删除无人读取的 sanitized 表达式/名称副本；数值文本使用
-from_chars，区分非数值、越界和非有限值。整数越界直接失败，不再重试为 double。
+ExpressionDescriptor 删除无人读取的 sanitized 表达式/名称副本；整数文本使用
+from_chars，浮点文本通过独立 C numeric locale 的 strtod_l／_strtod_l 转换，
+临时终止文本由 OwnedText/tstr 持有。区分非数值、越界和非有限值，不改变宿主
+全局 locale；整数越界直接失败，不再重试为 double。
+
+## Agenda 身份与生命周期
+
+**HIGH／事实**：旧 TerminalNode 将规则地址和 token 地址 XOR 后直接作为 agenda
+map 的唯一键。不同对象对可以得到相同值，map 赋值和 remove 会影响另一条待执行
+项；更换哈希函数只能降低碰撞概率，不能证明身份唯一。
+
+选择 session 持有的单调 activation ID。terminal 内存保存 token → ID，首次
+ASSERT 分配并入队，重复 ASSERT 保持原 ID；RETRACT 使用保存的 ID 取消再删除
+映射。已触发 token 的映射仍保留至 RETRACT，重新 ASSERT 获取新 ID，旧队列项
+不能命中新激活。无条件规则也由同一 session 分配器取号。
+
+session 的单一 owner 线程负责网络传播、取号、入队、触发与撤销；不会新增跨线程
+写方或全局分配器。agenda 复制 Activation，规则由不可变 KB 拥有，token 和事实
+继续遵守既有 session/pool 借用契约。队列保持 salience 优先；相同 salience 按新
+ID 的 recency 排序，业务选择应使用明确 salience 和规则中的 rank 约束，不能依赖
+内存地址。内部历史字段 hash_value 保存 ID，对外 C ABI 不变。
+
+ID 上限为 size_t 最大值，到达上限抛出 overflow_error，不环绕或重用；失败由现有
+网络一致性／RHS 事务边界传播。reset 先清理 agenda、网络内存和 TMS，再重新
+priming；计数不回退，事务失败也不回收已使用 ID。销毁要求 owner 已静默。terminal
+entry 数与原有 token 集合相同，每项增加一个 size_t；本次不改变现有 queue 容量
+或引入性能收益声明。回滚必须整体回退该网络内存布局及匹配二进制。
+
+回归验证覆盖多规则／多事实的精确触发集合、部分执行后撤销、后续新事实及 reset，
+并保留 fraud、tracing、boiler-room 和 mock 决策重放的现有完整行为验证。
 
 ## 失败与池状态
 

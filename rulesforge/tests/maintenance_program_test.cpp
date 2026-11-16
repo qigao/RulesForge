@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <thread>
 
 using namespace maintenance_example;
@@ -244,9 +245,9 @@ suite("Windowed predictive maintenance with Toad") {
   it("keeps window and script results independent in two concurrent owner sessions") {
     Program program(RF_MAINTENANCE_BUNDLE);
     std::array<std::string, 2> actions, errors;
-    std::array<std::jthread, 2> owners;
+    std::array<std::future<void>, 2> owners;
     for (size_t index = 0; index < owners.size(); ++index) {
-      owners[index] = std::jthread([&, index] {
+      owners[index] = std::async(std::launch::async, [&, index] {
         try {
           Session session(program);
           session.configure();
@@ -257,7 +258,7 @@ suite("Windowed predictive maintenance with Toad") {
         } catch (std::exception const &error) { errors[index] = error.what(); }
       });
     }
-    for (auto &owner : owners) owner.join();
+    for (auto &owner : owners) owner.get();
     check_equal(errors[0], std::string{});
     check_equal(errors[1], std::string{});
     check_equal(actions[0], std::string("MONITOR"));

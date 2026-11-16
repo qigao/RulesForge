@@ -52,6 +52,7 @@ struct Token {
 struct Activation {
   ParsedRule const *rule;
   Token token;
+  // Historical field name: a collision-free session identity, never a hash.
   size_t hash_value;
   std::map<std::string, int> const *bindings;
   bool operator<(Activation const &other) const;
