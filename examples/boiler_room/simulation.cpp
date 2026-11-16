@@ -411,7 +411,7 @@ public:
         in.supply = water->values[0];
         in.return_temp = water->values[1];
         in.flow = water->values[2];
-        in.fault = water->values[4] != 0;
+        in.fault = std::fpclassify(water->values[4]) != FP_ZERO;
       }
       if (gas)
         in.gas_flow = gas->values[b + 2];
@@ -444,7 +444,7 @@ public:
         in.current = vfd->values[p * 5 + 1];
         in.pressure = vfd->values[p * 5 + 2];
         in.flow = vfd->values[p * 5 + 3];
-        in.running = vfd->values[p * 5 + 4] != 0;
+        in.running = std::fpclassify(vfd->values[p * 5 + 4]) != FP_ZERO;
       }
       auto out = runtime_.pump(p, in);
       f.risk[p] = out.risk;
