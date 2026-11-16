@@ -1,0 +1,8 @@
+schema ProductionRouting [id(34), version(1), byte_order(little)];
+message Operation { double hours; bool complete; string id; string predecessor; string skill; }
+message Material { bool ready; string operation; }
+message Worker { double hourlyCost; int64 rank; bool available; string id; string skill; }
+message Machine { double speed; double hourlyCost; int64 rank; bool available; string id; string skill; }
+message PlanRequest { bool done; string id; string operation; }
+message Completion { bool processed; string operation; }
+message Estimate { double hours; double cost; }

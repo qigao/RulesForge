@@ -1,0 +1,7 @@
+schema ServiceEntitlements [id(37), version(1), byte_order(little)];
+message Customer { bool active; string id; string region; }
+message Usage { int64 units; bool checked; string customer; string period; }
+message Plan { int64 baseCents; int64 includedUnits; int64 unitCents; int64 creditCents; int64 rank; bool offered; string id; string region; }
+message QuoteRequest { string id; string customer; string period; }
+message UsageCheck { int64 units; }
+message Price { double amountCents; }

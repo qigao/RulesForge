@@ -4,11 +4,27 @@ RulesForge embeds compiled RFL rules in a C or C++ application. The host owns
 input, scheduling, persistence, and external side effects. The engine owns rule
 matching, session facts, agenda execution, queries, and event-time state.
 
+For an application walkthrough using the RulesForge DLL, a complete client,
+business schema, RFL, Toad modules and native extensions, start with the
+[development guide](DEVELOPMENT_GUIDE.md). This document describes runtime usage
+and ownership at the public C boundary.
+
 ## Runtime Objects
+
+`Program` binds trusted Toad scripts to RHS CALL commands and publishes complete
+ACE generations. Program sessions stay on their creating thread and retain
+their original generation across reload. See [Script Programs](SCRIPT_PROGRAM.md)
+for deployment, typed values, error handling and close/drain ownership.
 
 `KnowledgeBase` contains compiled rules and imported type declarations. Load
 and configure it before creating sessions. A configured knowledge base may be
 shared by multiple sessions without further mutation.
+
+Core scalar expressions compile to MIR native programs while rules are loaded.
+RETE matching, aggregate expressions and RHS calculations use these programs;
+they do not reparse scalar expression strings per fact. Typed Toad CALL exports
+remain a separate computation boundary. A Program bundle's `mode` selects Toad
+interpreter or JIT execution and does not select the core scalar backend.
 
 `StatefulSession` contains mutable facts and agenda state. Use it for request,
 batch, or explicitly managed stateful evaluation. It is not thread-safe.
@@ -73,6 +89,13 @@ Do not emulate continuous processing by keeping an unbounded stateful session.
 That omits duplicate detection, lateness checks, retention limits, result
 backpressure, and recovery semantics.
 
+For concrete application patterns, see the [seven runnable scenarios](SCENARIOS.md).
+They use stateful Programs with typed Toad CALL results. Their explicit
+interpreter/JIT bundle mode selects script execution. Their mock APIs demonstrate
+input and output ownership; production transports and durable storage belong to
+the embedding application. The cold-chain scenario is an arrival-ordered length
+window, not a continuous event-time or lateness example.
+
 ## Insert External Data
 
 External JSON, YAML, CSV, XML, and binary values must be described by a DataBind
@@ -113,7 +136,7 @@ if (ruleforge_session_fire_all_rules(session, 10000, &fired)
 
 Named RFL queries return a result handle. Facts borrowed from that result remain
 valid only while their owner remains alive; follow the ownership comments in
-[`rules_forge.h`](../include/rules_forge.h).
+[`rules_forge.h`](../rulesforge/include/rules_forge.h).
 
 ## Error Handling
 
@@ -124,6 +147,21 @@ the next RulesForge call on that thread.
 Malformed payloads, unknown schema types, invalid entry points, decreasing
 watermarks, resource-limit violations, and invalid handle state fail explicitly.
 A failed DataBind stream cannot be reused; destroy it.
+
+Unsupported scalar syntax/functions and expression limits fail loading. During
+execution, signed integer overflow, division by zero, non-finite arithmetic and
+present nonnumeric arithmetic operands fail explicitly; a missing LHS field
+retains its non-match semantics.
+
+For stateful sessions, RHS failure rolls back the current rule transaction;
+previously committed rules remain committed. A successful rollback leaves the
+session usable. Failed rollback or an error after nontransactional network
+mutation begins marks the session inconsistent. Further firing, querying or fact
+mutation is rejected.
+Check `ruleforge_session_reset` before using an explicitly reset session, or
+destroy it and rebuild from authoritative input. Reset clears facts and derived
+state; it does not recover the prior application state. Capture the original
+diagnostic before reset or cleanup changes the thread-local last error.
 
 ## Threading and Ownership
 
@@ -136,8 +174,11 @@ A failed DataBind stream cannot be reused; destroy it.
 
 ## Next Steps
 
-- [C API example](../capi/examples/readme.md)
+- [RulesForge + Toad DLL client development](DEVELOPMENT_GUIDE.md)
+- [Runnable scenarios, mock APIs and optimization](SCENARIOS.md)
+- [C API example](../examples/README.md)
 - [Data ingestion](./DATA_INGESTION.md)
 - [Continuous engine](./CONTINUOUS_RULE_ENGINE_DESIGN.md)
 - [DSL reference](./dsl.md)
 - [Deployment](./DEPLOYMENT.md)
+- [Benchmark protocol and snapshot](./architecture/core-ownership-and-dispatch.md#benchmark-snapshot)

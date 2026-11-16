@@ -1,0 +1,91 @@
+#include "text/rfl_strings.hpp"
+
+#include "tinytest.hpp"
+
+#include <array>
+#include <string_view>
+#include <thread>
+#include <vector>
+
+using namespace rulesforge;
+
+suite("RFL Strings") {
+    it("owns binary-safe Base text and preserves storage across an ownership move") {
+        OwnedText original(std::string_view("a\0b", 3));
+        auto borrowed = original.view();
+        OwnedText moved(std::move(original));
+        check_equal(moved.view(), std::string_view("a\0b", 3));
+        check_equal(static_cast<void const*>(borrowed.data()),
+                    static_cast<void const*>(moved.view().data()));
+        moved.append("tail");
+        check_equal(moved.view(), std::string_view("a\0btail", 7));
+    }
+    it("keeps interned tstr views valid after source destruction and dictionary rehash") {
+        std::string_view saved;
+        {
+            std::string source(100, 'x');
+            saved = StringInterner::instance().intern(source);
+        }
+        for (int i = 0; i < 2048; ++i)
+            StringInterner::instance().intern("rehash-field-" + std::to_string(i));
+        std::array<char, 100> expected;
+        expected.fill('x');
+        check_equal(saved, std::string_view(expected.data(), expected.size()));
+        check_equal(static_cast<void const*>(saved.data()),
+                    static_cast<void const*>(StringInterner::instance().intern(saved).data()));
+    }
+    group("StringInterner") {
+        it("returns one stable view for equal strings") {
+            auto first = StringInterner::instance().intern("shared-field");
+            auto second = StringInterner::instance().intern(std::string_view("shared-field"));
+
+            check_equal(static_cast<void const*>(first.data()),
+                        static_cast<void const*>(second.data()));
+            check_equal(first.data(), second.data());
+        }
+
+        it("supports concurrent interning") {
+            constexpr size_t kThreadCount = 4;
+            constexpr size_t kIterations = 1000;
+            std::array<std::string_view, kThreadCount> results{};
+            std::vector<std::thread> threads;
+            threads.reserve(kThreadCount);
+
+            for (size_t thread_index = 0; thread_index < kThreadCount; ++thread_index) {
+                threads.emplace_back([thread_index, &results] {
+                    for (size_t iteration = 0; iteration < kIterations; ++iteration) {
+                        results[thread_index] =
+                            StringInterner::instance().intern("concurrent-field");
+                    }
+                });
+            }
+            for (auto& thread : threads) {
+                thread.join();
+            }
+
+            for (size_t index = 1; index < results.size(); ++index) {
+                check_equal(static_cast<void const*>(results[index].data()),
+                            static_cast<void const*>(results[0].data()));
+            }
+        }
+    }
+
+    group("InternedKeyMap") {
+        it("keeps fields sorted and updates existing values") {
+            InternedKeyMap<int> fields;
+            fields.reserve(3);
+            fields["zeta"] = 1;
+            fields["alpha"] = 2;
+            fields["middle"] = 3;
+            fields["alpha"] = 4;
+
+            check_equal(fields.size(), 3);
+            check_equal(fields.find("alpha")->second, 4);
+
+            auto it = fields.begin();
+            check_equal(it++->first.data(), "alpha");
+            check_equal(it++->first.data(), "middle");
+            check_equal(it->first.data(), "zeta");
+        }
+    }
+}

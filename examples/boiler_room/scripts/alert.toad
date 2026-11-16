@@ -1,0 +1,47 @@
+// Record state plus checked conversion retains integer identity at ABI boundaries.
+// Physical state and operator acknowledgement are independent.
+func advance_alert(tick, valid, bad, recovered, phase, since, occurrence, revision, acknowledged, raiseMs, clearMs) {
+    state = map {phase:phase, since:since, occurrence:occurrence, revision:revision,
+        acknowledged:acknowledged, notify:0};
+    if (!valid) {
+        if (state.phase == 1) { state.phase = 0; };
+        if (state.phase == 3) { state.phase = 2; };
+    } else if (state.phase == 0 || state.phase == 4) {
+        if (bad) {
+            state.since = tick;
+            if (raiseMs == 0) { state.phase = 2; state.occurrence = boiler_state_integer(state.occurrence + 1); state.acknowledged = false; state.notify = 1; }
+            else { state.phase = 1; };
+        };
+    } else if (state.phase == 1) {
+        if (!bad) { state.phase = 0; }
+        else if (tick - state.since >= raiseMs) {
+            state.phase = 2; state.occurrence = boiler_state_integer(state.occurrence + 1); state.acknowledged = false; state.notify = 1;
+        };
+    } else if (state.phase == 2) {
+        if (recovered) {
+            state.since = tick;
+            if (clearMs == 0) { state.phase = 4; state.notify = 2; }
+            else { state.phase = 3; };
+        };
+    } else if (state.phase == 3) {
+        if (!recovered) { state.phase = 2; }
+        else if (tick - state.since >= clearMs) { state.phase = 4; state.notify = 2; };
+    };
+    if (state.phase != phase) { state.revision = boiler_state_integer(state.revision + 1); };
+    if (state.revision < 0 || state.occurrence < 0) { throw "alert counter out of range"; };
+    return state;
+};
+export("advance_alert");
+
+func acknowledge(phase, occurrence, revision, acknowledged, expectedOccurrence, expectedRevision) {
+    state = map {accepted:false, acknowledged:acknowledged, revision:revision, notify:0};
+    if (occurrence == expectedOccurrence && revision == expectedRevision && (phase == 2 || phase == 3)) {
+        state.accepted = true;
+    };
+    if (state.accepted && !acknowledged) {
+        state.acknowledged = true; state.revision = boiler_state_integer(state.revision + 1); state.notify = 3;
+        if (state.revision < 0) { throw "alert revision out of range"; };
+    };
+    return state;
+};
+export("acknowledge");

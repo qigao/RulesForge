@@ -1,0 +1,8 @@
+schema ReleaseGate [id(35), version(1), byte_order(little)];
+message Review { bool assessed; string id; string build; string environment; }
+message TestReport { double coverage; bool passed; string build; }
+message SecurityReport { int64 critical; int64 high; string build; }
+message Change { double size; double rollbackMinutes; string build; }
+message Approval { bool approved; string build; string environment; }
+message Environment { double minCoverage; double maxRisk; int64 maxHigh; bool frozen; string id; }
+message Risk { double value; }

@@ -1,0 +1,8 @@
+func compare(value, scale, offset, external, tolerance) {
+    if (scale <= 0 || tolerance < 0) { throw "invalid reconciliation unit model"; };
+    normalized = value * scale + offset;
+    difference = normalized - external;
+    if (difference < 0) { difference = -difference; };
+    return map {normalized:normalized, absolute:difference};
+};
+export("compare");

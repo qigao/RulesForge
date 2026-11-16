@@ -1,0 +1,24 @@
+func analyze(waveform, model) {
+    if (model.baseline <= 0) { throw "baseline must be positive"; };
+    count = 0.0; total = 0.0; roughness = 0.0; previous = 0.0;
+    for (value in waveform.values) {
+        if (count > 0) { difference = value - previous; roughness = roughness + difference * difference; };
+        previous = value;
+        total = total + value;
+        count = count + 1.0;
+    };
+    if (count < 4) { throw "at least four waveform samples required"; };
+    mean = total / count;
+    second = 0.0; fourth = 0.0;
+    for (value in waveform.values) {
+        delta = value - mean; square = delta * delta;
+        second = second + square; fourth = fourth + square * square;
+    };
+    variance = second / count;
+    kurtosis = 0.0;
+    if (variance > 0) { kurtosis = (fourth / count) / (variance * variance); };
+    roughness = roughness / (count - 1.0);
+    risk = maintenance_risk_score(mean, variance, roughness, model.baseline);
+    return map {mean:mean, variance:variance, roughness:roughness, kurtosis:kurtosis, risk:risk};
+};
+export("analyze");

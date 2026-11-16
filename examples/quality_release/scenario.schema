@@ -1,0 +1,7 @@
+schema QualityRelease [id(31), version(1), byte_order(little)];
+composite Samples { double[6] values; }
+composite Specification { double lower; double upper; double maxDispersion; }
+message Batch { Samples samples; bool assessed; string id; string machine; }
+message ProductSpec { Specification limits; string batch; }
+message Calibration { bool valid; string machine; }
+message Statistics { double mean; double dispersion; bool inSpec; }

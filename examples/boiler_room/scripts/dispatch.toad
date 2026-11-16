@@ -1,0 +1,54 @@
+// Counterfactual, read-only proposals: the rule engine owns admission and ranking.
+func assess_plan(thermal, model, nominalKw, flow, risk, fluid, window, lookahead) {
+    if (!window.ready) { throw "dispatch requires a complete risk window"; };
+    if (thermal.demand < 0.0 || thermal.reserve < 0.0 || thermal.availableHeat < 0.0 ||
+        thermal.otherHeat < 0.0 || thermal.energyPrice < 0.0 || thermal.horizonHours <= 0.0 ||
+        thermal.failureCost < 0.0 || thermal.otherPumpKw < 0.0 ||
+        model.riskFactor < 0.0 || model.riskFactor > 1.0 || model.fixedCost < 0.0 ||
+        risk < 0.0 || risk > 100.0) { throw "invalid dispatch cost model"; };
+    contribution = boiler_heat_kw(flow * model.speed, thermal.supply, thermal.returnTemp, fluid.rho, fluid.cp);
+    if (contribution > thermal.availableHeat) { contribution = thermal.availableHeat; };
+    capacity = thermal.otherHeat + contribution;
+    energy = (boiler_pump_power_kw(nominalKw, model.speed) + thermal.otherPumpKw) * thermal.horizonHours;
+    assessed = risk;
+    if (window.mean > assessed) { assessed = window.mean; };
+    if (window.trendReady && window.trendPerSecond > 0.0) {
+        forecast = window.recentMean + lookahead * window.trendPerSecond;
+        if (forecast > assessed) { assessed = forecast; };
+    };
+    if (assessed > 100.0) { assessed = 100.0; };
+    residual = assessed * model.riskFactor;
+    energyCost = energy * thermal.energyPrice;
+    // Demonstration loss model, not a calibrated failure probability.
+    riskCost = residual / 100.0 * thermal.failureCost * thermal.horizonHours;
+    return map {capacityKw:capacity, marginKw:capacity - thermal.demand - thermal.reserve,
+        energyKwh:energy, residualRisk:residual, energyCost:energyCost, riskCost:riskCost,
+        score:energyCost + riskCost + model.fixedCost};
+};
+export("assess_plan");
+
+// Aggregation/expiry belongs to RETE. Only derived arithmetic is performed here.
+func summarize_window(tick, validFrames, highFrames, recentFrames, priorFrames,
+    meanRisk, peakRisk, recentMean, priorMean, lastBreak, oldestTick, lastValidTick, currentValid, model) {
+    coverage = 100.0 * validFrames * model.frameMs / model.spanMs;
+    ready = false; trendReady = false; continuous = 0.0; delta = 0.0; slope = 0.0;
+    if (currentValid && validFrames >= model.minSamples && tick - lastValidTick <= model.freshMs) {
+        ready = true;
+    };
+    if (currentValid && validFrames > 0) {
+        start = lastBreak + model.frameMs;
+        if (oldestTick > start) { start = oldestTick; };
+        if (tick > start) { continuous = (tick - start) / 1000.0; };
+    };
+    if (ready && recentFrames >= model.minHalf && priorFrames >= model.minHalf) {
+        trendReady = true;
+        delta = recentMean - priorMean;
+        slope = delta / (model.halfMs / 1000.0);
+    };
+    return map {tick:tick, samples:validFrames, elevated:highFrames,
+        recentSamples:recentFrames, priorSamples:priorFrames, mean:meanRisk, peak:peakRisk,
+        recentMean:recentMean, priorMean:priorMean, coveragePct:coverage,
+        continuousSeconds:continuous, trendDelta:delta, trendPerSecond:slope,
+        ready:ready, trendReady:trendReady};
+};
+export("summarize_window");

@@ -1,0 +1,45 @@
+import schema "scenario.schema"
+declare CheckedUsage customer: String, period: String, units: int end
+declare Quote request: String, plan: String, rank: int, cents: double end
+declare Decision id: String, action: String, reason: String, target: String, metric: double end
+rule "Validate all usage before evaluating eligibility"
+salience 200
+when
+    $usage: Usage(checked == false)
+then
+    call "tariff.validate_usage"($usage.units) into $checked
+    insert CheckedUsage { customer = $usage.customer, period = $usage.period, units = $checked.units }
+    update $usage { checked = true }
+end
+rule "Price only enabled regional plans for active customers"
+salience 100
+when
+    $request: QuoteRequest()
+    $customer: Customer(id == $request.customer, active == true)
+    $usage: CheckedUsage(customer == $customer.id, period == $request.period)
+    $plan: Plan(region == $customer.region, offered == true)
+    not Quote(request == $request.id, plan == $plan.id)
+then
+    call "tariff.price"($usage.units, $plan.baseCents, $plan.includedUnits, $plan.unitCents, $plan.creditCents) into $price
+    insert Quote { request = $request.id, plan = $plan.id, rank = $plan.rank, cents = $price.amountCents }
+end
+rule "Select the least expensive eligible plan"
+when
+    $request: QuoteRequest()
+    $best: Quote(request == $request.id)
+    not Quote(request == $request.id, cents < $best.cents)
+    not Quote(request == $request.id, cents == $best.cents, rank < $best.rank)
+then
+    insert Decision { id = $request.id, action = "SELECT_PLAN", reason = "minimum-eligible-price", target = $best.plan, metric = $best.cents }
+end
+rule "Explain an ineligible account or plan set"
+salience -10
+when
+    $request: QuoteRequest()
+    Customer(id == $request.customer)
+    CheckedUsage(customer == $request.customer, period == $request.period)
+    not Quote(request == $request.id)
+then
+    insert Decision { id = $request.id, action = "DENY", reason = "no-eligible-plan", target = $request.customer, metric = 0.0 }
+end
+query "Decisions" $row: Decision() end

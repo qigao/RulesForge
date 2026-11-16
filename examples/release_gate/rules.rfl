@@ -1,0 +1,121 @@
+import schema "scenario.schema"
+declare Assessment review: String, risk: double end
+declare Decision id: String, action: String, reason: String, target: String, metric: double end
+rule "Compute risk from explicit release evidence"
+salience 200
+when
+    $review: Review(assessed == false)
+    $tests: TestReport(build == $review.build)
+    $security: SecurityReport(build == $review.build)
+    $change: Change(build == $review.build)
+then
+    call "release.risk"($tests.coverage, $security.high, $change.size, $change.rollbackMinutes) into $risk
+    insert Assessment { review = $review.id, risk = $risk.value }
+    update $review { assessed = true }
+end
+
+rule "Block critical vulnerabilities"
+salience 100
+when
+    $review: Review(assessed == true)
+    $assessment: Assessment(review == $review.id)
+    SecurityReport(build == $review.build, critical > 0)
+    not Decision(id == $review.id)
+then
+    insert Decision { id = $review.id, action = "BLOCK", reason = "critical-vulnerability", target = $review.environment, metric = $assessment.risk }
+end
+
+rule "Block excessive high vulnerabilities"
+salience 90
+when
+    $review: Review(assessed == true)
+    $assessment: Assessment(review == $review.id)
+    $env: Environment(id == $review.environment)
+    SecurityReport(build == $review.build, high > $env.maxHigh)
+    not Decision(id == $review.id)
+then
+    insert Decision { id = $review.id, action = "BLOCK", reason = "high-vulnerability-budget", target = $review.environment, metric = $assessment.risk }
+end
+
+rule "Block failed tests"
+salience 80
+when
+    $review: Review(assessed == true)
+    $assessment: Assessment(review == $review.id)
+    TestReport(build == $review.build, passed == false)
+    not Decision(id == $review.id)
+then
+    insert Decision { id = $review.id, action = "BLOCK", reason = "tests-failed", target = $review.environment, metric = $assessment.risk }
+end
+
+rule "Block insufficient coverage"
+salience 70
+when
+    $review: Review(assessed == true)
+    $assessment: Assessment(review == $review.id)
+    $env: Environment(id == $review.environment)
+    TestReport(build == $review.build, coverage < $env.minCoverage)
+    not Decision(id == $review.id)
+then
+    insert Decision { id = $review.id, action = "BLOCK", reason = "coverage-below-policy", target = $review.environment, metric = $assessment.risk }
+end
+
+rule "Defer during a freeze"
+salience 60
+when
+    $review: Review(assessed == true)
+    $assessment: Assessment(review == $review.id)
+    Environment(id == $review.environment, frozen == true)
+    not Decision(id == $review.id)
+then
+    insert Decision { id = $review.id, action = "DEFER", reason = "deployment-freeze", target = $review.environment, metric = $assessment.risk }
+end
+
+rule "Require review of excessive risk"
+salience 50
+when
+    $review: Review(assessed == true)
+    $assessment: Assessment(review == $review.id)
+    $env: Environment(id == $review.environment)
+    eval($assessment.risk > $env.maxRisk)
+    not Decision(id == $review.id)
+then
+    insert Decision { id = $review.id, action = "REVIEW", reason = "risk-above-policy", target = $review.environment, metric = $assessment.risk }
+end
+
+rule "Wait for approval"
+salience 40
+when
+    $review: Review(assessed == true)
+    $assessment: Assessment(review == $review.id)
+    Approval(build == $review.build, environment == $review.environment, approved == false)
+    not Decision(id == $review.id)
+then
+    insert Decision { id = $review.id, action = "WAIT", reason = "approval-pending", target = $review.environment, metric = $assessment.risk }
+end
+
+rule "Wait for missing approval"
+salience 30
+when
+    $review: Review(assessed == true)
+    $assessment: Assessment(review == $review.id)
+    not Approval(build == $review.build, environment == $review.environment)
+    not Decision(id == $review.id)
+then
+    insert Decision { id = $review.id, action = "WAIT", reason = "approval-missing", target = $review.environment, metric = $assessment.risk }
+end
+
+rule "Approve a qualified release"
+when
+    $review: Review(assessed == true)
+    $assessment: Assessment(review == $review.id)
+    $env: Environment(id == $review.environment, frozen == false)
+    TestReport(build == $review.build, passed == true, coverage >= $env.minCoverage)
+    SecurityReport(build == $review.build, critical == 0, high <= $env.maxHigh)
+    Approval(build == $review.build, environment == $review.environment, approved == true)
+    eval($assessment.risk <= $env.maxRisk)
+    not Decision(id == $review.id)
+then
+    insert Decision { id = $review.id, action = "APPROVE", reason = "release-policy-passed", target = $review.environment, metric = $assessment.risk }
+end
+query "Decisions" $row: Decision() end

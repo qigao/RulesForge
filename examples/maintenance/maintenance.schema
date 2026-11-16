@@ -1,0 +1,30 @@
+schema Maintenance [id(11), version(1), byte_order(little)];
+
+composite Waveform { double[4] values; }
+composite Model {
+    double baseline;
+    double criticality;
+    double inspectionCost;
+    double stopCost;
+    double failureCost;
+}
+message Reading { bool processed; Waveform waveform; string cell; string ticket; }
+message Asset { Model model; string cell; }
+message MaintenancePlan {
+    double meanRisk;
+    double peakRisk;
+    double expectedCost;
+    bool pending;
+    string cell;
+    string action;
+}
+message InspectionPermit { bool available; string cell; }
+message ReviewRequest { bool done; string cell; string ticket; }
+message SignalMetrics {
+    double mean;
+    double variance;
+    double roughness;
+    double kurtosis;
+    double risk;
+}
+message Recommendation { double expectedCost; string action; }

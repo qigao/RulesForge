@@ -1,0 +1,6 @@
+cmake_add_source(support_tests DIRS ${CMAKE_CURRENT_SOURCE_DIR} PATTERNS "*.cpp" "*.hpp")
+add_executable(scenario_support_test ${support_tests})
+target_link_libraries(scenario_support_test PRIVATE rulesforge_example_support Salts::TinyTest)
+cmake_configure_target(scenario_support_test FOLDER examples/support/tests)
+add_test(NAME scenario_support_test COMMAND scenario_support_test)
+set_tests_properties(scenario_support_test PROPERTIES LABELS scenario)

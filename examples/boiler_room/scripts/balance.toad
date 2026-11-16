@@ -1,0 +1,14 @@
+func calculate(sample) {
+    gap = 0.0; deficit = 0.0; demand = 0.0;
+    if (sample.heatValid) {
+        gap = boiler_balance_pct(sample.heatA + sample.heatB, sample.headerKw);
+    };
+    if (sample.demandValid) {
+        demand = 740.0 - 15.0 * sample.outsideTemp;
+        if (demand > 0.0) {
+            deficit = 100.0 * (demand - sample.headerKw) / demand;
+        };
+    };
+    return map {gapPct:gap, deficitPct:deficit, demandKw:demand, heatValid:sample.heatValid, demandValid:sample.demandValid};
+};
+export("calculate");

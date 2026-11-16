@@ -1,0 +1,2 @@
+func calculate(amount) { return amount * 2; };
+export("calculate");

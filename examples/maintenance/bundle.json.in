@@ -1,0 +1,15 @@
+{
+  "provider":"$<TARGET_FILE_NAME:rulesforge_toad>",
+  "rules":"maintenance.rfl", "signatures":"maintenance.schema", "mode":"interpreter",
+  "native_modules":[{"path":"$<TARGET_FILE_NAME:maintenance_math>"}],
+  "modules":[{"name":"signal","path":"signal.toad"},{"name":"decision","path":"decision.toad"}],
+  "bindings":[
+    {"name":"signal.analyze","module":"signal","function":"analyze","parameters":["Waveform","Model"],"result":"SignalMetrics"},
+    {"name":"decision.decide","module":"decision","function":"@MAINTENANCE_DECISION_EXPORT@","parameters":["double","double","int64","Model","bool"],"result":"Recommendation"}
+  ],
+  "limits":{
+    "source_bytes":4194304,"value_bytes":4194304,"value_nodes":65536,"value_depth":64,
+    "steps":100000,"loops":10000,"recursion":100,"retained_bytes":134217728,
+    "stack_bytes":1048576,"max_sessions":8
+  }
+}

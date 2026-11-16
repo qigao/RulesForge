@@ -1,0 +1,6 @@
+schema Reconciliation [id(36), version(1), byte_order(little)];
+message SourceRecord { double value; string key; string event; string device; }
+message ExternalRecord { double value; string key; }
+message UnitModel { double scale; double offset; double tolerance; string device; }
+message CheckRequest { string id; string key; }
+message Difference { double normalized; double absolute; }

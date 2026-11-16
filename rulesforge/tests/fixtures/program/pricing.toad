@@ -1,0 +1,2 @@
+func calculate(amount) { return map {total: amount + 5}; };
+export("calculate");

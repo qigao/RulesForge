@@ -1,0 +1,7 @@
+func risk(coverage, high, size, rollbackMinutes) {
+    if (coverage < 0 || coverage > 100 || high < 0 || size < 0 || rollbackMinutes < 0) {
+        throw "invalid release evidence";
+    };
+    return map {value:100.0 - coverage + high * 5.0 + size * 0.01 + rollbackMinutes * 0.5};
+};
+export("risk");

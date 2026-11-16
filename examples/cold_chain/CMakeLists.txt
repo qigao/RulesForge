@@ -1,0 +1,1 @@
+rulesforge_add_scenario(cold_chain)

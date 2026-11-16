@@ -19,14 +19,14 @@ RHS 事务回滚。`break` 和 `continue` 保留控制语义，`continue` 仍计
 
 事实基线：`809048ae11e54eb7a10952af19f3639d3d135d20`。
 
-- `include/rules_forge.h:550` 的 `ruleforge_session_fire_all_rules` 只有
+- `capi/include/rules_forge.h:550` 的 `ruleforge_session_fire_all_rules` 只有
   `max_rules`，没有原生步骤计费、取消或 deadline 参数。
-- `rulesforge/src/engine/stateful_session.cpp:426` 在执行前 flush 匹配；
+- `core/src/runtime/stateful_session.cpp` 在执行前 flush 匹配；
   `:456`、`:482` 在 activation 外检查规则数，`:516` 调用 RHS。
   限制触发数不能证明匹配或单个 RHS 的工作量有界。
 - `stateful_session.cpp:544`、`:609` 调用 listener；`:1210` 的 reset
   清空 agenda、facts、网络内存。当前入口没有执行期重入保护。
-- `rulesforge/src/engine/rhs_executor.cpp:494-533` 已有事务异常回滚路径；
+- `core/src/execution/rhs_executor.cpp` 已有事务异常回滚路径；
   `stateful_session.cpp:949-1015` 判断回滚是否成功，失败标记 session 不一致。
 - `capi/src/rules_forge.cpp:803` 的 wrapper 只有 session 和 active stream
   计数；destroy 的 stream 检查不等于在途执行或 owner-thread 检查。
@@ -90,7 +90,7 @@ deadline、执行错误。终态只提交一次；fired count 计已完成的规
 
 ## 验证与迁移
 
-第一阶段测试使用真实 parser、KB、session、listener：同 session 两种 fire 入口
+第一阶段测试使用真实 rulesforge/parser、KB、session、listener：同 session 两种 fire 入口
 均拒绝嵌套；reset 不清空外层输入；不同 session 仍能嵌套；正常与异常退出后能再次
 执行，且输出 fact 数量正确。异常恢复测试不应假设原先已弹出的 activation 自动
 重入队列，应 reset 并重新插入独立输入验证 guard 已释放。

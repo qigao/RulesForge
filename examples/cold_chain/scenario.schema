@@ -1,0 +1,5 @@
+schema ColdChain [id(32), version(1), byte_order(little)];
+message Shipment { double upper; double budget; string id; }
+message Reading { double temperature; double minutes; bool processed; string id; string shipment; }
+message Review { bool done; string id; string shipment; }
+message Dose { double exposure; }

@@ -1,52 +1,68 @@
+
+# Version information (keep in sync with rules_forge.h).
+
+# Define the target name for the shared library
 set(TARGET_NAME RulesForge)
 
-# Collect the internal C++ engine sources (excluding the separate parser).
-file(GLOB_RECURSE SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h*
-     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c*
+cmake_add_source(toad_provider_sources DIRS ${CMAKE_CURRENT_SOURCE_DIR}/toad)
+add_library(rulesforge_toad MODULE ${toad_provider_sources})
+target_include_directories(rulesforge_toad PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
+target_link_libraries(rulesforge_toad PRIVATE Toad::Script Salts::DataBind CMeta::Provider CMeta::PluginABI)
+cmake_configure_target(rulesforge_toad FOLDER rulesforge/toad)
+if(WIN32)
+    add_custom_command(TARGET rulesforge_toad POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:rulesforge_toad>
+                $<TARGET_FILE_DIR:rulesforge_toad>
+        COMMAND_EXPAND_LISTS)
+endif()
+install(TARGETS rulesforge_toad LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# Add the shared library target
+add_library(
+    ${TARGET_NAME} SHARED src/rules_forge.cpp rfl_value_bridge.cpp
+
 )
 
-# Compile the engine once for the shared C ABI and the in-tree C++ tests without
-# producing a standalone C++ static library.
-add_library(${RULESFORGE_ENGINE_TARGET} OBJECT ${SOURCES})
+target_compile_definitions(${TARGET_NAME} PRIVATE RULES_FORGE_BUILD)
 
-
-# Link dependencies
+target_include_directories(
+    ${TARGET_NAME}
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+           $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+           $<INSTALL_INTERFACE:include>
+)
+# PRIVATE: Internal implementation headers - not exposed to consumers
+target_include_directories(
+    ${TARGET_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/core/include
+)
 
 target_link_libraries(
-    ${RULESFORGE_ENGINE_TARGET}
-    PUBLIC Salts::Core Threads::Threads
-    PRIVATE Salts::CSTL Salts::DataBind
+    ${TARGET_NAME}
+    PRIVATE rfl_parser engine
+    PUBLIC Salts::Core Salts::DataBind
 )
-target_include_directories(
-    ${RULESFORGE_ENGINE_TARGET}
-    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-           $<INSTALL_INTERFACE:include/rulesforge>
-    PRIVATE ${CMAKE_SOURCE_DIR}/parser/include
+set_target_properties(${TARGET_NAME} PROPERTIES FOLDER capi/)
 
-)
-if(MSVC)
-    target_compile_options(${RULESFORGE_ENGINE_TARGET} PUBLIC /bigobj)
-endif()
-# Disable debug/info logging in release builds for performance
-target_compile_definitions(
-    ${RULESFORGE_ENGINE_TARGET}
-    PUBLIC $<$<CONFIG:Release>:RULEFORGE_ACTIVE_LOG_LEVEL=2>
-           $<$<CONFIG:RelWithDebInfo>:RULEFORGE_ACTIVE_LOG_LEVEL=2>
-           $<$<CONFIG:MinSizeRel>:RULEFORGE_ACTIVE_LOG_LEVEL=2>
-)
-
-set_target_properties(
-    ${RULESFORGE_ENGINE_TARGET}
-    PROPERTIES FOLDER "${TARGET_NAME}" LINKER_LANGUAGE CXX
-)
-# Windows: disable min/max macros that conflict with std::min/std::max
 if(WIN32)
-    target_compile_definitions(
-        ${RULESFORGE_ENGINE_TARGET} PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN
+    add_custom_command(
+        TARGET ${TARGET_NAME}
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:${TARGET_NAME}>
+                $<TARGET_FILE_DIR:${TARGET_NAME}>
+        COMMAND_EXPAND_LISTS
     )
 endif()
 
-# Tests
-add_subdirectory(test)
-add_subdirectory(example)
-add_subdirectory(benchmark)
+
+if(BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
+# Set output directory for the shared library
+set_target_properties(
+    ${TARGET_NAME}
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+               LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+               ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+)

@@ -1,12 +1,5 @@
 set(CMAKE_COLOR_DIAGNOSTICS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-
-# building the tests
-option(ENABLE_TESTS "Enable the tests" OFF)
-
-option(ENABLE_GIT_INFO "List git status" OFF)
-option(ENABLE_CROSS_COMPILING "Detect cross compiler and setup toolchain" ON)
-option(ENABLE_SAMPLES "Enable sample projects" ON)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
-
-find_package(Threads REQUIRED)
+option(BUILD_TESTS "Build the formal test suites" ON)
+option(BUILD_BENCHMARK "Build the benchmarks" OFF)

@@ -1,0 +1,74 @@
+import schema "scenario.schema"
+declare Comparison request: String, difference: double, tolerance: double end
+declare Decision id: String, action: String, reason: String, target: String, metric: double end
+rule "Reject conflicting source records"
+salience 100
+when
+    $request: CheckRequest()
+    $first: SourceRecord(key == $request.key)
+    SourceRecord(key == $request.key, value != $first.value)
+    not Decision(id == $request.id)
+then
+    insert Decision { id = $request.id, action = "CONFLICT", reason = "conflicting-source-values", target = $request.key, metric = 0.0 }
+end
+rule "Reject conflicting external records"
+salience 100
+when
+    $request: CheckRequest()
+    $first: ExternalRecord(key == $request.key)
+    ExternalRecord(key == $request.key, value != $first.value)
+    not Decision(id == $request.id)
+then
+    insert Decision { id = $request.id, action = "CONFLICT", reason = "conflicting-external-values", target = $request.key, metric = 0.0 }
+end
+rule "Normalize units before comparing"
+salience 50
+when
+    $request: CheckRequest()
+    $source: SourceRecord(key == $request.key)
+    $external: ExternalRecord(key == $request.key)
+    $model: UnitModel(device == $source.device)
+    not Decision(id == $request.id)
+    not Comparison(request == $request.id)
+then
+    call "reconcile.compare"($source.value, $model.scale, $model.offset, $external.value, $model.tolerance) into $difference
+    insert Comparison { request = $request.id, difference = $difference.absolute, tolerance = $model.tolerance }
+end
+rule "Explain a missing counterpart"
+salience 20
+when
+    $request: CheckRequest()
+    SourceRecord(key == $request.key)
+    not ExternalRecord(key == $request.key)
+    not Decision(id == $request.id)
+then
+    insert Decision { id = $request.id, action = "MISSING", reason = "external-record-missing", target = $request.key, metric = 0.0 }
+end
+rule "Explain a missing source"
+salience 20
+when
+    $request: CheckRequest()
+    not SourceRecord(key == $request.key)
+    not Decision(id == $request.id)
+then
+    insert Decision { id = $request.id, action = "MISSING", reason = "source-record-missing", target = $request.key, metric = 0.0 }
+end
+rule "Accept a normalized match"
+when
+    $request: CheckRequest()
+    $comparison: Comparison(request == $request.id)
+    eval($comparison.difference <= $comparison.tolerance)
+    not Decision(id == $request.id)
+then
+    insert Decision { id = $request.id, action = "MATCH", reason = "within-explicit-tolerance", target = $request.key, metric = $comparison.difference }
+end
+rule "Report a normalized mismatch"
+when
+    $request: CheckRequest()
+    $comparison: Comparison(request == $request.id)
+    eval($comparison.difference > $comparison.tolerance)
+    not Decision(id == $request.id)
+then
+    insert Decision { id = $request.id, action = "MISMATCH", reason = "outside-explicit-tolerance", target = $request.key, metric = $comparison.difference }
+end
+query "Decisions" $row: Decision() end

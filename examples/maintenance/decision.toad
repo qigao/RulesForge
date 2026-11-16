@@ -1,0 +1,24 @@
+func decide(meanRisk, peakRisk, count, model, permit) {
+    if (count < 3) { throw "window is not ready"; };
+    if (model.criticality <= 0 || model.inspectionCost < 0 || model.stopCost < 0 || model.failureCost < 0) {
+        throw "invalid maintenance cost model";
+    };
+    // A peak safety constraint takes precedence over the economic objective.
+    if (peakRisk >= 90.0) { return map {action:"STOP", expectedCost:model.stopCost}; };
+    monitor = maintenance_expected_loss(meanRisk, model.failureCost, model.criticality);
+    action = "MONITOR"; cost = monitor;
+    if (permit) {
+        inspect = model.inspectionCost + monitor * 0.25;
+        if (inspect < cost) { action = "INSPECT"; cost = inspect; };
+    };
+    if (model.stopCost < cost) { action = "STOP"; cost = model.stopCost; };
+    return map {action:action, expectedCost:cost};
+};
+export("decide");
+
+// A second deployment can select a more conservative strategy without changing
+// the binding name, argument schema, or the windows retained by existing sessions.
+func decide_conservative(meanRisk, peakRisk, count, model, permit) {
+    return decide(meanRisk * 5.0, peakRisk, count, model, permit);
+};
+export("decide_conservative");

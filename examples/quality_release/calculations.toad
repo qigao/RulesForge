@@ -1,0 +1,13 @@
+func assess(samples, spec) {
+    if (spec.upper <= spec.lower || spec.maxDispersion < 0) { throw "invalid quality specification"; };
+    total = 0.0; count = 0.0; inSpec = true;
+    for (value in samples.values) {
+        total = total + value; count = count + 1.0;
+        if (value < spec.lower || value > spec.upper) { inSpec = false; };
+    };
+    mean = total / count; variance = 0.0;
+    for (value in samples.values) { delta = value - mean; variance = variance + delta * delta; };
+    width = spec.upper - spec.lower;
+    return map {mean:mean, dispersion:variance / count / (width * width), inSpec:inSpec};
+};
+export("assess");

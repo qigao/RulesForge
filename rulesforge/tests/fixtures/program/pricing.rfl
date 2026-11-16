@@ -1,0 +1,9 @@
+import schema "order.schema"
+rule "Price"
+when
+    $order: Order(done == false)
+then
+    call "pricing.calculate"($order.amount) into $price
+    call "tax.calculate"($price.total) into $total
+    update $order { total = $total, done = true }
+end

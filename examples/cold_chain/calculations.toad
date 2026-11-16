@@ -1,0 +1,7 @@
+func exposure(temperature, minutes, upper) {
+    if (minutes <= 0) { throw "interval duration must be positive"; };
+    deviation = temperature - upper;
+    if (deviation < 0) { deviation = 0.0; };
+    return map {exposure:deviation * minutes};
+};
+export("exposure");

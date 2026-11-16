@@ -1,14 +1,33 @@
 # RulesForge DSL (RFL) - Implementation-Aligned Guide
 
-This document describes the DSL supported by the current parser and runtime.
+This document describes the DSL supported by the current rulesforge/parser and runtime.
 If this doc conflicts with code, code wins.
 
+
+## Toad RHS CALL
+
+Programs bind static names to explicitly admitted Toad exports. Ordinary KB
+loading rejects CALL without a Program binding. For example:
+
+```rfl
+call "pricing.calculate"($order.amount) into $price
+update $order { total = $price.total }
+```
+
+Arguments are typed references or literals; whole Facts and implicit IDs are
+not accepted. Results are read-only local values, with lexical branch/loop
+scopes, and cannot be UPDATE/RETRACT targets. Missing bindings, arity and known
+literal-type errors fail loading. Runtime type/field/quota errors roll back the
+current RHS. There is no implicit numeric coercion or ambient script I/O.
+Deployment, API ownership and supported value shapes are documented in
+[Script Programs](SCRIPT_PROGRAM.md).
+
 Primary references:
-- `parser/parser/rfl_grammar_lemon.y`
-- `parser/src/rhs_parser.cpp`
-- `parser/src/semantic_analyzer.cpp`
-- `parser/src/expression_descriptor.cpp`
-- parser tests under `parser/tests/`
+- `core/parser/parser/rfl_grammar_lemon.y`
+- `core/parser/src/rhs_parser.cpp`
+- `core/parser/src/semantic_analyzer.cpp`
+- `core/parser/src/expression_descriptor.cpp`
+- rulesforge/parser tests under `core/parser/tests/`
 
 ## 1. File Structure
 
@@ -50,7 +69,7 @@ end
 
 Notes:
 - Qualified names used by `package`, `import`, globals, and type references may contain segments such as `time`, `length`, and `window`.
-- Duration literals supported by the parser are `ms`, `s`, `m`, and `h`.
+- Duration literals supported by the rulesforge/parser are `ms`, `s`, `m`, and `h`.
 
 ## 1.1 Import Forms
 
@@ -455,31 +474,36 @@ Supported assignment values:
 - numeric/expression value
 - registered expression function call, e.g. `max($o.total, 0)`
 
-Expression syntax in RHS supports:
-- arithmetic: `+ - * / % ^`
-- comparison: `== != > < >= <=`
-- logic: `&& || !` and keywords `and or not xor`
-- ternary: `cond ? a : b`
-- function call style: `fn(arg1, arg2)`
-- constants: `pi`, `e`, `inf`, `epsilon`
+Numeric RHS assignment literals must fit their representation: integers use
+signed 64-bit values and floating literals must be finite doubles. Overflow fails
+parsing; it is never retried as an approximate expression.
 
-Built-in expression functions (current runtime support):
-- basic/math: `abs ceil floor round trunc sgn frac sqrt pow root exp log log2 log10`
-- trig/hyperbolic: `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh`
-- comparison/range: `min max clamp inrange`
-- aggregate: `avg sum mul`
-- special: `erf erfc ncdf hypot mod fmod expm1 log1p logn`
-- conditional: `if(cond, a, b)`
-- string: `strlen substr trim replace indexOf contains upper lower toUpper toLower`
+The native scalar executor provides arithmetic `+ - * /`, scalar comparisons
+`== != > < >= <=`, and the `pi` constant. Its shared numeric function vocabulary is:
 
-RHS parser compatibility aliases:
-- `concat(a, b, c)` is supported and rewritten to string concatenation: `(a + b + c)`
-- `to_upper(x)` is normalized to `upper(x)`
-- `to_lower(x)` is normalized to `lower(x)`
+- unary: `floor ceil abs round sqrt sin cos tan acos asin atan log exp`
+- binary: `min max pow fmod`
 
-Practical note:
-- document only functions that the current parser accepts and the current runtime actually registers
-- do not assume the entire upstream ExprTk function surface is available unless it is wired here
+Core scalar expressions compile to MIR native code during loading. They support
+short-circuit `&& ||` and unary `!` at the scalar compiler boundary, with the
+existing RFL/RHS grammar determining how those forms enter a rule. Binary
+arithmetic is left-associative and respects precedence. Signed integer `+ - *`
+is exact and checked for overflow; division and numeric functions return doubles.
+Non-finite arithmetic and division by zero fail execution and roll back the RHS.
+Unsupported functions, including historical `concat`, `to_upper` and `to_lower`,
+and wrong argument counts fail loading. There is no alternate evaluator after
+failure. Use typed Toad `CALL` bindings for complex application computation.
+
+Each scalar program admits at most 16 KiB of source, 256 operations, 64 variables
+and 64 levels of nesting. Field paths are parsed once, values are read only on
+executed branches, and repeated variables are cached for that invocation.
+Missing LHS fields retain their non-match semantics; present nonnumeric
+arithmetic operands fail rather than silently suppressing a match.
+
+An expression failure during nontransactional RETE propagation marks the session
+inconsistent. Firing, querying or mutating that session fails until an explicit
+reset succeeds; the failed mutation does not promise rollback. RHS expression
+failures continue through the existing transaction rollback contract.
 
 ### 5.4 Predicate Boundary
 
@@ -495,7 +519,7 @@ RulesForge engine sessions accept already constructed facts. External files and 
 ### Internal C++ engine behavior
 
 ```cpp
-#include "engine/data_source.hpp"
+#include "runtime/data_source.hpp"
 
 // Add fact object
 session->add_data(fact);
@@ -537,13 +561,13 @@ Query params are typed and bound as variables in query body.
 ## 7. Important Runtime Notes
 
 1. `update` triggers immediate rete propagation/re-evaluation.
-2. `while` has a safety cap (`max_iterations = 1000` in parser output).
+2. `while` has a safety cap (`max_iterations = 1000` in rulesforge/parser output).
 3. Semantic analyzer enforces:
    - undeclared bindings are errors
    - undeclared types/fields are errors
    - duplicate bindings are errors
    - `extends` target must exist
-4. `function` declarations are parsed into parser state; keep expectations aligned with actual runtime usage in your version.
+4. `function` declarations are parsed into rulesforge/parser state; keep expectations aligned with actual runtime usage in your version.
 
 ## 8. Minimal End-to-End Example
 

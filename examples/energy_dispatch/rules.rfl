@@ -1,0 +1,44 @@
+import schema "scenario.schema"
+declare Scored id: String, rank: int, cost: double, minSoc: double, maxSoc: double, finalSoc: double, minGrid: double, peakGrid: double end
+declare Feasible id: String, rank: int, cost: double end
+declare Decision id: String, action: String, reason: String, target: String, metric: double end
+rule "Evaluate every discrete dispatch candidate"
+salience 100
+when
+    $candidate: Candidate(assessed == false)
+    $site: Site(id == "site-1")
+then
+    call "energy.score"($candidate.plan, $site.model) into $cost
+    insert Scored { id = $candidate.id, rank = $candidate.rank, cost = $cost.total,
+        minSoc = $cost.minSoc, maxSoc = $cost.maxSoc, finalSoc = $cost.finalSoc,
+        minGrid = $cost.minGrid, peakGrid = $cost.peakGrid }
+    update $candidate { assessed = true }
+end
+rule "Admit only physically feasible dispatch plans"
+salience 50
+when
+    $site: Site(id == "site-1")
+    $plan: Scored(minSoc >= $site.model.reserveKwh, maxSoc <= $site.model.capacityKwh,
+        finalSoc >= $site.model.finalKwh, minGrid >= 0.0, peakGrid <= $site.model.maxGridKw)
+then
+    insert Feasible { id = $plan.id, rank = $plan.rank, cost = $plan.cost }
+end
+rule "Select minimum cost with a deterministic rank tie break"
+when
+    $request: DispatchRequest()
+    $best: Feasible()
+    not Feasible(cost < $best.cost)
+    not Feasible(cost == $best.cost, rank < $best.rank)
+then
+    insert Decision { id = $request.id, action = "PROPOSE", reason = "minimum-feasible-cost", target = $best.id, metric = $best.cost }
+end
+rule "Explain an infeasible dispatch request"
+salience -10
+when
+    $request: DispatchRequest()
+    not Feasible()
+then
+    insert Decision { id = $request.id, action = "NO_PLAN", reason = "no-candidate-satisfies-constraints", target = "site-1", metric = 0.0 }
+end
+query "Decisions" $row: Decision() end
+query "FeasiblePlans" $row: Feasible() end

@@ -1,0 +1,18 @@
+func validate_usage(units) {
+    if (units < 0 || units > 1000000) { throw "usage outside bounded tariff model"; };
+    return map {units:units};
+};
+export("validate_usage");
+
+func price(units, baseCents, includedUnits, unitCents, creditCents) {
+    // Integral cents only: these bounds keep every product below 2^53.
+    if (units < 0 || units > 1000000 || baseCents < 0 || baseCents > 1000000 ||
+        includedUnits < 0 || includedUnits > 1000000 || unitCents < 0 || unitCents > 1000000 ||
+        creditCents < 0 || creditCents > 1000000) { throw "tariff outside exact integer model"; };
+    excess = units - includedUnits;
+    if (excess < 0) { excess = 0; };
+    amount = baseCents + excess * unitCents - creditCents;
+    if (amount < 0) { amount = 0; };
+    return map {amountCents:amount};
+};
+export("price");

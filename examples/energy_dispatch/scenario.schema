@@ -1,0 +1,24 @@
+schema EnergyDispatch [id(33), version(1), byte_order(little)];
+composite EnergyModel {
+    double[3] demand;
+    double[3] renewable;
+    double[3] price;
+    double initialKwh;
+    double capacityKwh;
+    double reserveKwh;
+    double finalKwh;
+    double maxGridKw;
+    double wearPerKwh;
+}
+composite Schedule { double[3] battery; }
+message Site { EnergyModel model; string id; }
+message Candidate { Schedule plan; int64 rank; bool assessed; string id; }
+message DispatchRequest { string id; }
+message Cost {
+    double total;
+    double minSoc;
+    double maxSoc;
+    double finalSoc;
+    double minGrid;
+    double peakGrid;
+}

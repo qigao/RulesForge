@@ -1,0 +1,556 @@
+package com.insurance.auto
+
+// ============================================================================
+// AUTO INSURANCE PRICING RULES
+// A comprehensive underwriting system for risk assessment and premium calculation.
+// ============================================================================
+
+// --- Type Declarations ---
+
+declare InsuranceApplication
+    applicationId: String
+    applicantName: String
+    age: int
+    licenseYears: int
+    accidentCount: int
+    violationCount: int
+    dui: boolean
+    vehicleYear: int
+    vehicleMake: String
+    vehicleModel: String
+    vehicleType: String
+    antiTheft: boolean
+    airbags: boolean
+    absSystem: boolean
+    zipCode: String
+    annualMileage: int
+    garageParked: boolean
+    multiPolicy: boolean
+    existingCustomer: boolean
+end
+
+declare DriverRiskProfile
+    applicationId: String
+    ageCategory: String
+    experienceLevel: String
+    drivingRecord: String
+    riskScore: int
+end
+
+declare VehicleRiskProfile
+    applicationId: String
+    vehicleCategory: String
+    safetyRating: String
+    vehicleAge: int
+end
+
+declare PremiumCalculation
+    applicationId: String
+    basePremium: double
+    driverMultiplier: double
+    vehicleMultiplier: double
+    locationMultiplier: double
+    discountPercent: double
+    finalPremium: double
+end
+
+declare PolicyDecision
+    applicationId: String
+    approved: boolean
+    annualPremium: double
+    monthlyPayment: double
+    coverageLevel: String
+    reason: String
+end
+
+declare DeclineReason
+    applicationId: String
+    reason: String
+    code: String
+end
+
+// ============================================================================
+// PHASE 1: DRIVER RISK PROFILING (salience 100)
+// ============================================================================
+
+rule "Driver Profile - Young Driver Clean Record"
+    salience 100
+    when
+        $app: InsuranceApplication(age < 25, $id: applicationId, dui == false, accidentCount == 0, violationCount < 2, licenseYears >= 3)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId = $app.applicationId,
+            ageCategory = "Young",
+            experienceLevel = "Moderate",
+            drivingRecord = "Clean",
+            riskScore = 60
+        }
+end
+
+rule "Driver Profile - Young Driver Minor Issues"
+    salience 100
+    when
+        $app: InsuranceApplication(age < 25, $id: applicationId, dui == false, accidentCount < 2, violationCount >= 2, violationCount < 4)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId = $app.applicationId,
+            ageCategory = "Young",
+            experienceLevel = "New",
+            drivingRecord = "Minor Issues",
+            riskScore = 70
+        }
+end
+
+rule "Driver Profile - Young Driver Major Issues"
+    salience 100
+    when
+        $app: InsuranceApplication(age < 25, $id: applicationId, dui == false)
+        eval($app.accidentCount >= 2 || $app.violationCount >= 4)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId = $app.applicationId,
+            ageCategory = "Young",
+            experienceLevel = "New",
+            drivingRecord = "Major Issues",
+            riskScore = 85
+        }
+end
+
+rule "Driver Profile - Adult Clean Record"
+    salience 100
+    when
+        $app: InsuranceApplication(age >= 25, age <= 65, $id: applicationId, dui == false, accidentCount == 0, violationCount == 0)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId = $app.applicationId,
+            ageCategory = "Adult",
+            experienceLevel = "Experienced",
+            drivingRecord = "Clean",
+            riskScore = 30
+        }
+end
+
+rule "Driver Profile - Adult Minor Issues"
+    salience 99
+    when
+        $app: InsuranceApplication(age >= 25, age <= 65, $id: applicationId, dui == false)
+        eval($app.accidentCount >= 1 || $app.violationCount >= 1)
+        eval($app.accidentCount < 2 && $app.violationCount < 4)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId = $app.applicationId,
+            ageCategory = "Adult",
+            experienceLevel = "Experienced",
+            drivingRecord = "Minor Issues",
+            riskScore = 45
+        }
+end
+
+rule "Driver Profile - Adult Major Issues"
+    salience 98
+    when
+        $app: InsuranceApplication(age >= 25, age <= 65, $id: applicationId, dui == false)
+        eval($app.accidentCount >= 2 || $app.violationCount >= 4)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId = $app.applicationId,
+            ageCategory = "Adult",
+            experienceLevel = "Experienced",
+            drivingRecord = "Major Issues",
+            riskScore = 70
+        }
+end
+
+rule "Driver Profile - Senior Clean Record"
+    salience 100
+    when
+        $app: InsuranceApplication(age > 65, age <= 80, $id: applicationId, dui == false, accidentCount == 0, violationCount < 2)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId = $app.applicationId,
+            ageCategory = "Senior",
+            experienceLevel = "Experienced",
+            drivingRecord = "Clean",
+            riskScore = 45
+        }
+end
+
+rule "Driver Profile - Senior Minor Issues"
+    salience 99
+    when
+        $app: InsuranceApplication(age > 65, age <= 80, $id: applicationId, dui == false)
+        eval($app.accidentCount >= 1 || $app.violationCount >= 2)
+        eval($app.accidentCount < 2)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId = $app.applicationId,
+            ageCategory = "Senior",
+            experienceLevel = "Experienced",
+            drivingRecord = "Minor Issues",
+            riskScore = 60
+        }
+end
+
+rule "Driver Profile - Senior Major Issues"
+    salience 98
+    when
+        $app: InsuranceApplication(age > 65, $id: applicationId, dui == false, accidentCount >= 2)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId = $app.applicationId,
+            ageCategory = "Senior",
+            experienceLevel = "Experienced",
+            drivingRecord = "Major Issues",
+            riskScore = 80
+        }
+end
+
+rule "Driver Profile - Very Elderly"
+    salience 100
+    when
+        $app: InsuranceApplication(age > 80, $id: applicationId, dui == false, accidentCount < 2)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId = $app.applicationId,
+            ageCategory = "Senior",
+            experienceLevel = "Experienced",
+            drivingRecord = "Clean",
+            riskScore = 60
+        }
+end
+
+rule "Driver Profile - DUI History"
+    salience 110
+    when
+        $app: InsuranceApplication($id: applicationId, dui == true)
+        not DriverRiskProfile(applicationId == $id)
+    then
+        insert DriverRiskProfile {
+            applicationId = $app.applicationId,
+            ageCategory = "Any",
+            experienceLevel = "Any",
+            drivingRecord = "Uninsurable",
+            riskScore = 100
+        }
+end
+
+// ============================================================================
+// PHASE 2: VEHICLE RISK PROFILING (salience 90)
+// ============================================================================
+
+rule "Vehicle Profile - Sports Car"
+    salience 90
+    when
+        $app: InsuranceApplication($id: applicationId, vehicleType == "sports")
+        not VehicleRiskProfile(applicationId == $id)
+    then
+        insert VehicleRiskProfile {
+            applicationId = $app.applicationId,
+            vehicleCategory = "Very High Risk",
+            safetyRating = "Average",
+            vehicleAge = (2024 - $app.vehicleYear)
+        }
+end
+
+rule "Vehicle Profile - Motorcycle"
+    salience 90
+    when
+        $app: InsuranceApplication($id: applicationId, vehicleType == "motorcycle")
+        not VehicleRiskProfile(applicationId == $id)
+    then
+        insert VehicleRiskProfile {
+            applicationId = $app.applicationId,
+            vehicleCategory = "Very High Risk",
+            safetyRating = "Poor",
+            vehicleAge = (2024 - $app.vehicleYear)
+        }
+end
+
+rule "Vehicle Profile - SUV or Truck"
+    salience 90
+    when
+        $app: InsuranceApplication($id: applicationId, vehicleType in ("suv", "truck"))
+        not VehicleRiskProfile(applicationId == $id)
+    then
+        insert VehicleRiskProfile {
+            applicationId = $app.applicationId,
+            vehicleCategory = "High Risk",
+            safetyRating = "Good",
+            vehicleAge = (2024 - $app.vehicleYear)
+        }
+end
+
+rule "Vehicle Profile - Sedan or Minivan with Full Safety"
+    salience 90
+    when
+        $app: InsuranceApplication($id: applicationId, vehicleType in ("sedan", "minivan"), antiTheft == true, airbags == true, absSystem == true)
+        not VehicleRiskProfile(applicationId == $id)
+    then
+        insert VehicleRiskProfile {
+            applicationId = $app.applicationId,
+            vehicleCategory = "Low Risk",
+            safetyRating = "Excellent",
+            vehicleAge = (2024 - $app.vehicleYear)
+        }
+end
+
+rule "Vehicle Profile - Sedan or Minivan Standard"
+    salience 89
+    when
+        $app: InsuranceApplication($id: applicationId, vehicleType in ("sedan", "minivan"))
+        not VehicleRiskProfile(applicationId == $id)
+    then
+        insert VehicleRiskProfile {
+            applicationId = $app.applicationId,
+            vehicleCategory = "Low Risk",
+            safetyRating = "Good",
+            vehicleAge = (2024 - $app.vehicleYear)
+        }
+end
+
+rule "Vehicle Profile - Standard Vehicle"
+    salience 85
+    when
+        $app: InsuranceApplication($id: applicationId)
+        not VehicleRiskProfile(applicationId == $id)
+    then
+        insert VehicleRiskProfile {
+            applicationId = $app.applicationId,
+            vehicleCategory = "Standard",
+            safetyRating = "Average",
+            vehicleAge = (2024 - $app.vehicleYear)
+        }
+end
+
+// ============================================================================
+// PHASE 3: AUTO-DECLINE RULES (salience 85)
+// ============================================================================
+
+rule "Decline - DUI History"
+    salience 85
+    when
+        $app: InsuranceApplication($id: applicationId, dui == true)
+        not DeclineReason(applicationId == $id)
+    then
+        insert DeclineReason {
+            applicationId = $app.applicationId,
+            reason = "Applicants with DUI history are not eligible for coverage",
+            code = "DUI_HISTORY"
+        }
+end
+
+rule "Decline - Too Many Accidents"
+    salience 85
+    when
+        $app: InsuranceApplication($id: applicationId, accidentCount >= 3)
+        not DeclineReason(applicationId == $id)
+    then
+        insert DeclineReason {
+            applicationId = $app.applicationId,
+            reason = "Too many at-fault accidents in the past 5 years",
+            code = "EXCESSIVE_ACCIDENTS"
+        }
+end
+
+rule "Decline - Too Many Violations"
+    salience 85
+    when
+        $app: InsuranceApplication($id: applicationId, violationCount >= 5)
+        not DeclineReason(applicationId == $id)
+    then
+        insert DeclineReason {
+            applicationId = $app.applicationId,
+            reason = "Too many traffic violations in the past 3 years",
+            code = "EXCESSIVE_VIOLATIONS"
+        }
+end
+
+rule "Decline - Very Young With Accidents"
+    salience 85
+    when
+        $app: InsuranceApplication($id: applicationId, age < 21, accidentCount >= 2)
+        not DeclineReason(applicationId == $id)
+    then
+        insert DeclineReason {
+            applicationId = $app.applicationId,
+            reason = "Drivers under 21 with 2+ accidents are not eligible",
+            code = "YOUNG_HIGH_RISK"
+        }
+end
+
+// ============================================================================
+// PHASE 4: PREMIUM CALCULATION (salience 70)
+// ============================================================================
+
+rule "Calculate Premium - Low Risk Driver Low Risk Vehicle"
+    salience 70
+    when
+        $app: InsuranceApplication($id: applicationId, multiPolicy == true, accidentCount == 0, violationCount == 0, antiTheft == true, airbags == true, absSystem == true, annualMileage < 7500, garageParked == true, existingCustomer == true)
+        $driver: DriverRiskProfile(applicationId == $id, riskScore <= 30)
+        $vehicle: VehicleRiskProfile(applicationId == $id, vehicleCategory == "Low Risk")
+        not DeclineReason(applicationId == $id)
+        not PremiumCalculation(applicationId == $id)
+    then
+        insert PremiumCalculation {
+            applicationId = $app.applicationId,
+            basePremium = 1200.0,
+            driverMultiplier = 0.85,
+            vehicleMultiplier = 0.90,
+            locationMultiplier = 1.0,
+            discountPercent = 35.0,
+            finalPremium = (1200.0 * 0.85 * 0.90 * 0.65)
+        }
+end
+
+rule "Calculate Premium - Low Risk Driver"
+    salience 69
+    when
+        $app: InsuranceApplication($id: applicationId)
+        $driver: DriverRiskProfile(applicationId == $id, riskScore <= 30)
+        $vehicle: VehicleRiskProfile(applicationId == $id)
+        not DeclineReason(applicationId == $id)
+        not PremiumCalculation(applicationId == $id)
+    then
+        insert PremiumCalculation {
+            applicationId = $app.applicationId,
+            basePremium = 1200.0,
+            driverMultiplier = 0.85,
+            vehicleMultiplier = 1.0,
+            locationMultiplier = 1.0,
+            discountPercent = 10.0,
+            finalPremium = (1200.0 * 0.85 * 0.90)
+        }
+end
+
+rule "Calculate Premium - Medium Risk Driver"
+    salience 68
+    when
+        $app: InsuranceApplication($id: applicationId)
+        $driver: DriverRiskProfile(applicationId == $id, riskScore > 30, riskScore <= 50)
+        $vehicle: VehicleRiskProfile(applicationId == $id)
+        not DeclineReason(applicationId == $id)
+        not PremiumCalculation(applicationId == $id)
+    then
+        insert PremiumCalculation {
+            applicationId = $app.applicationId,
+            basePremium = 1200.0,
+            driverMultiplier = 1.0,
+            vehicleMultiplier = 1.0,
+            locationMultiplier = 1.0,
+            discountPercent = 5.0,
+            finalPremium = (1200.0 * 0.95)
+        }
+end
+
+rule "Calculate Premium - High Risk Driver"
+    salience 67
+    when
+        $app: InsuranceApplication($id: applicationId)
+        $driver: DriverRiskProfile(applicationId == $id, riskScore > 50, riskScore <= 70)
+        $vehicle: VehicleRiskProfile(applicationId == $id)
+        not DeclineReason(applicationId == $id)
+        not PremiumCalculation(applicationId == $id)
+    then
+        insert PremiumCalculation {
+            applicationId = $app.applicationId,
+            basePremium = 1200.0,
+            driverMultiplier = 1.35,
+            vehicleMultiplier = 1.0,
+            locationMultiplier = 1.0,
+            discountPercent = 0.0,
+            finalPremium = (1200.0 * 1.35)
+        }
+end
+
+rule "Calculate Premium - Very High Risk Driver"
+    salience 66
+    when
+        $app: InsuranceApplication($id: applicationId)
+        $driver: DriverRiskProfile(applicationId == $id, riskScore > 70, riskScore < 100)
+        $vehicle: VehicleRiskProfile(applicationId == $id)
+        not DeclineReason(applicationId == $id)
+        not PremiumCalculation(applicationId == $id)
+    then
+        insert PremiumCalculation {
+            applicationId = $app.applicationId,
+            basePremium = 1200.0,
+            driverMultiplier = 1.75,
+            vehicleMultiplier = 1.0,
+            locationMultiplier = 1.0,
+            discountPercent = 0.0,
+            finalPremium = (1200.0 * 1.75)
+        }
+end
+
+// ============================================================================
+// PHASE 5: POLICY DECISION (salience 60)
+// ============================================================================
+
+rule "Policy Decision - Approved"
+    salience 60
+    when
+        $app: InsuranceApplication($id: applicationId)
+        $premium: PremiumCalculation(applicationId == $id)
+        not DeclineReason(applicationId == $id)
+        not PolicyDecision(applicationId == $id)
+    then
+        insert PolicyDecision {
+            applicationId = $app.applicationId,
+            approved = true,
+            annualPremium = $premium.finalPremium,
+            monthlyPayment = ($premium.finalPremium / 12),
+            coverageLevel = "Standard",
+            reason = "Application approved based on risk assessment"
+        }
+end
+
+rule "Policy Decision - Declined"
+    salience 60
+    when
+        $app: InsuranceApplication($id: applicationId)
+        $decline: DeclineReason(applicationId == $id)
+        not PolicyDecision(applicationId == $id)
+    then
+        insert PolicyDecision {
+            applicationId = $app.applicationId,
+            approved = false,
+            annualPremium = 0,
+            monthlyPayment = 0,
+            coverageLevel = "None",
+            reason = $decline.reason
+        }
+end
+
+// ============================================================================
+// QUERIES
+// ============================================================================
+
+query "PolicyDecisions"
+    $decision: PolicyDecision()
+end
+
+query "ApprovedPolicies"
+    $decision: PolicyDecision(approved == true)
+end
+
+query "DeclinedPolicies"
+    $decision: PolicyDecision(approved == false)
+end
+
+query "HighRiskDrivers"
+    $driver: DriverRiskProfile(riskScore > 60)
+end
+
+query "PremiumsByRange"
+    $premium: PremiumCalculation(finalPremium > 0)
+end

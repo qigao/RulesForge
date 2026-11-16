@@ -1,0 +1,4 @@
+cmake_add_source(script_program_sources DIRS ${CMAKE_CURRENT_SOURCE_DIR})
+add_executable(script_program_demo ${script_program_sources})
+target_link_libraries(script_program_demo PRIVATE RulesForge)
+cmake_configure_target(script_program_demo FOLDER examples/script_program)

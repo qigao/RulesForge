@@ -1,0 +1,14 @@
+{
+  "provider": "$<TARGET_FILE_NAME:rulesforge_toad>",
+  "rules": "pricing.rfl", "signatures": "order.schema", "mode": "interpreter",
+  "modules": [{"name":"pricing","path":"pricing.toad"},{"name":"tax","path":"tax.toad"}],
+  "bindings": [
+    {"name":"pricing.calculate","module":"pricing","function":"calculate","parameters":["double"],"result":"Price"},
+    {"name":"tax.calculate","module":"tax","function":"calculate","parameters":["double"],"result":"double"}
+  ],
+  "limits": {
+    "source_bytes":4194304,"value_bytes":4194304,"value_nodes":65536,"value_depth":64,
+    "steps":100000,"loops":10000,"recursion":100,"retained_bytes":134217728,
+    "stack_bytes":1048576,"max_sessions":8
+  }
+}

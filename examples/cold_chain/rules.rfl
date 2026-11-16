@@ -1,0 +1,45 @@
+import schema "scenario.schema"
+declare Exposure shipment: String, reading: String, degreeMinutes: double end
+declare WindowCount result: int end
+declare WindowDose result: double end
+declare Decision id: String, action: String, reason: String, target: String, metric: double end
+rule "Compute an interval exposure"
+salience 100
+when
+    $reading: Reading(processed == false)
+    $shipment: Shipment(id == $reading.shipment)
+then
+    call "cold.exposure"($reading.temperature, $reading.minutes, $shipment.upper) into $dose
+    insert Exposure { shipment = $reading.shipment, reading = $reading.id, degreeMinutes = $dose.exposure }
+    update $reading { processed = true }
+end
+// Explicit cargo partition, matching the maintenance example's supported window contract.
+rule "Wait for three cargo observations"
+when
+    $request: Review(shipment == "cargo-1", done == false)
+    WindowCount(result < 3) from accumulate(Exposure(shipment == "cargo-1") over window:length(3), count())
+then
+    insert Decision { id = $request.id, action = "WAIT", reason = "window-warmup", target = $request.shipment, metric = 0.0 }
+    update $request { done = true }
+end
+rule "Hold a cargo with excessive recent exposure"
+when
+    $request: Review(shipment == "cargo-1", done == false)
+    $shipment: Shipment(id == "cargo-1")
+    WindowCount(result >= 3) from accumulate(Exposure(shipment == "cargo-1") over window:length(3), count())
+    $dose: WindowDose(result > $shipment.budget) from accumulate($point: Exposure(shipment == "cargo-1") over window:length(3), sum($point.degreeMinutes))
+then
+    insert Decision { id = $request.id, action = "HOLD", reason = "recent-exposure-budget", target = $request.shipment, metric = $dose.result }
+    update $request { done = true }
+end
+rule "Continue when recent exposure is within budget"
+when
+    $request: Review(shipment == "cargo-1", done == false)
+    $shipment: Shipment(id == "cargo-1")
+    WindowCount(result >= 3) from accumulate(Exposure(shipment == "cargo-1") over window:length(3), count())
+    $dose: WindowDose(result <= $shipment.budget) from accumulate($point: Exposure(shipment == "cargo-1") over window:length(3), sum($point.degreeMinutes))
+then
+    insert Decision { id = $request.id, action = "CONTINUE", reason = "recent-exposure-within-budget", target = $request.shipment, metric = $dose.result }
+    update $request { done = true }
+end
+query "Decisions" $row: Decision() end

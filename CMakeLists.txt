@@ -1,154 +1,61 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.25)
+project(
+    RulesForge
+    VERSION 0.1.0
+    DESCRIPTION "A Rete Network based rule engine"
+    HOMEPAGE_URL "https://github.com/qigao/RulesForge"
+    LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 20)
-# Set additional project information
-set(CMAKE_PROJECT_VERSION_MAJOR 0)
-set(CMAKE_PROJECT_VERSION_MINOR 9)
-set(CMAKE_PROJECT_VERSION_PATCH 2)
-
-set(PROJECT_VERSION
-    ${CMAKE_PROJECT_VERSION_MAJOR}.${CMAKE_PROJECT_VERSION_MINOR}.${CMAKE_PROJECT_VERSION_PATCH}
-)
-
-set(PROJECT_NAME "RulesForge")
-set(PROJECT_DESCRIPTION "A Rete Network based rule engine")
-set(PROJECT_WEBSITE "http://github.com/qigao/RulesForge")
-set(APPLICATION_LICENSE "Apache2 License")
-
-# Set the project name and language
-project(
-    ${PROJECT_NAME}
-    VERSION ${PROJECT_VERSION}
-    DESCRIPTION ${PROJECT_DESCRIPTION}
-    HOMEPAGE_URL ${PROJECT_WEBSITE}
-    LANGUAGES CXX C
-)
-
-include(CTest)
-if(MSVC)
-    add_compile_options(/experimental:c11atomics)
-endif()
-# Set the features of the project
-include(ProjectOptions.cmake)
-
-# No OpenSSL/BoringSSL dependency: RulesForge sources do not consume it.
-# Cryptographic transport functionality belongs to the installed Salts SDK.
-
-if(NOT DEFINED ENV{SALTS_ROOT} OR "$ENV{SALTS_ROOT}" STREQUAL "")
-    message(FATAL_ERROR "SALTS_ROOT must name the installed Salts profile")
-endif()
-if(NOT DEFINED ENV{SALTS_UTILS_ROOT} OR "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
-    message(FATAL_ERROR
-            "SALTS_UTILS_ROOT must name the installed SaltsUtils profile")
-endif()
-file(TO_CMAKE_PATH "$ENV{SALTS_ROOT}" RULESFORGE_SALTS_ROOT)
-file(TO_CMAKE_PATH "$ENV{SALTS_UTILS_ROOT}" RULESFORGE_SALTS_UTILS_ROOT)
-
-find_package(Salts CONFIG REQUIRED
-             PATHS "${RULESFORGE_SALTS_ROOT}" NO_DEFAULT_PATH)
-find_package(SaltsUtils CONFIG REQUIRED
-             PATHS "${RULESFORGE_SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
-
-file(REAL_PATH "${RULESFORGE_SALTS_UTILS_ROOT}" RULESFORGE_SALTS_UTILS_REAL_ROOT)
-if(NOT DEFINED SaltsUtils_DIR OR SaltsUtils_DIR STREQUAL "")
-    message(FATAL_ERROR "SaltsUtils package root cannot be verified")
-endif()
-file(REAL_PATH "${SaltsUtils_DIR}" RULESFORGE_SALTS_UTILS_REAL_DIR)
-cmake_path(IS_PREFIX RULESFORGE_SALTS_UTILS_REAL_ROOT
-           "${RULESFORGE_SALTS_UTILS_REAL_DIR}" NORMALIZE
-           RULESFORGE_SALTS_UTILS_IS_WITHIN_ROOT)
-if(NOT RULESFORGE_SALTS_UTILS_IS_WITHIN_ROOT)
-    message(FATAL_ERROR
-            "SaltsUtils resolved outside SALTS_UTILS_ROOT: ${SaltsUtils_DIR}")
-endif()
-
-if(NOT TARGET Salts::DataBind)
-    message(FATAL_ERROR
-            "resolved SaltsUtils package is missing required target Salts::DataBind")
-endif()
-
-include(CheckCSourceCompiles)
-set(RULESFORGE_MINIMUM_DATABIND_VERSION 30000)
-set(RULESFORGE_REQUIRED_DATABIND_ABI 10)
-set(_RULESFORGE_SAVED_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
-set(_RULESFORGE_SAVED_REQUIRED_DEFINITIONS "${CMAKE_REQUIRED_DEFINITIONS}")
-set(CMAKE_REQUIRED_LIBRARIES Salts::DataBind)
-set(CMAKE_REQUIRED_DEFINITIONS
-    "-DRULESFORGE_MINIMUM_DATABIND_VERSION=${RULESFORGE_MINIMUM_DATABIND_VERSION}"
-    "-DRULESFORGE_REQUIRED_DATABIND_ABI=${RULESFORGE_REQUIRED_DATABIND_ABI}")
-unset(RULESFORGE_HAS_DATABIND_3_0 CACHE)
-check_c_source_compiles([[
-  #include <data_bind.h>
-  #if DATA_BIND_VERSION < RULESFORGE_MINIMUM_DATABIND_VERSION
-  #error "RulesForge requires DataBind 3.0.0 or newer"
-  #endif
-  #if DATA_BIND_ABI_VERSION != RULESFORGE_REQUIRED_DATABIND_ABI
-  #error "RulesForge requires DataBind ABI 10"
-  #endif
-  int main() {
-    DataBindStreamConfig config = DATA_BIND_STREAM_CONFIG_INIT;
-    data_bind_stream_t *stream = NULL;
-    DataBindValue *value = NULL;
-    config.format = DATA_BIND_FORMAT_JSON;
-    config.selection = DATA_BIND_STREAM_SELECT_ROOT;
-    config.type_name = "RulesForgeProbe";
-    config.out_value = &value;
-    return (int)data_bind_stream_create(NULL, &config, &stream, NULL);
-  }
-]] RULESFORGE_HAS_DATABIND_3_0)
-set(CMAKE_REQUIRED_LIBRARIES "${_RULESFORGE_SAVED_REQUIRED_LIBRARIES}")
-set(CMAKE_REQUIRED_DEFINITIONS "${_RULESFORGE_SAVED_REQUIRED_DEFINITIONS}")
-unset(_RULESFORGE_SAVED_REQUIRED_LIBRARIES)
-unset(_RULESFORGE_SAVED_REQUIRED_DEFINITIONS)
-if(NOT RULESFORGE_HAS_DATABIND_3_0)
-    message(FATAL_ERROR
-            "RulesForge requires DataBind 3.0.0 or newer with ABI 10")
-endif()
-
-# Output files directory
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-set(CMAKE_EXECUTABLE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-
-# Cmake modules
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(ProjectOptions.cmake)
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+include(CmakeUtils)
 include(Sanitizers)
-add_subdirectory(tools)
-include(FindTools)
-# Add subdirectories
-add_subdirectory(parser)
-
-set(RULESFORGE_ENGINE_TARGET rulesforge_engine_objects)
-add_subdirectory(rulesforge)
-add_subdirectory(capi)
-
-if(BUILD_TESTING OR ENABLE_TESTS)
-    add_custom_target(
-        rulesforge_release_smoke
-        COMMAND
-            ${CMAKE_CTEST_COMMAND}
-            --test-dir ${CMAKE_BINARY_DIR}
-            -R
-            "^(engine_core_test\\.RulesForge|rhs_control_flow_test\\.RulesForge|parser_test\\.parser|parser_semantic_test\\.parser|rhs_parser_test\\.parser|expression_descriptor_test\\.parser|compiled_expression_compat_test\\.parser|capi_test|test_value_bridge|capi_demo_.*_smoke)$"
-            --output-on-failure
-        USES_TERMINAL
-        VERBATIM
-        COMMENT "Running RulesForge release smoke tests"
-    )
-    foreach(release_smoke_dep
-            engine_core_test.RulesForge
-            rhs_control_flow_test.RulesForge
-            parser_test.parser
-            parser_semantic_test.parser
-            rhs_parser_test.parser
-            expression_descriptor_test.parser
-            compiled_expression_compat_test.parser
-            capi_test
-            test_value_bridge
-            capi_demo)
-        if(TARGET ${release_smoke_dep})
-            add_dependencies(rulesforge_release_smoke ${release_smoke_dep})
-        endif()
-    endforeach()
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+if(BUILD_TESTS OR BUILD_BENCHMARK)
+    enable_testing()
 endif()
+
+list(PREPEND CMAKE_PREFIX_PATH
+    "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/$ENV{VCPKG_CONFIGURATION_SUBDIR}"
+    "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
+find_package(Threads REQUIRED)
+find_package(MIR CONFIG REQUIRED)
+find_package(SaltsBase CONFIG REQUIRED PATHS "$ENV{SALTS_BASE_ROOT}"
+             NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+find_package(CMeta CONFIG REQUIRED PATHS "$ENV{CMETA_ROOT}"
+             NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+find_package(SaltsCNet CONFIG REQUIRED PATHS "$ENV{SALTS_CORE_ROOT}"
+             NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+find_package(SaltsUtils CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}"
+             NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+find_package(Toad 0.1.3 CONFIG REQUIRED PATHS "$ENV{TOAD_ROOT}"
+             NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+include(FindTools)
+add_subdirectory(core)
+add_subdirectory(rulesforge)
+add_subdirectory(examples)
+
+install(TARGETS RulesForge EXPORT RulesForgeTargets
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(DIRECTORY rulesforge/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(EXPORT RulesForgeTargets NAMESPACE RulesForge::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/RulesForge)
+configure_package_config_file(cmake/RulesForgeConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/RulesForgeConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/RulesForge)
+write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/RulesForgeConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/RulesForgeConfig.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/RulesForgeConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/RulesForge)
+install(FILES LICENSE THIRD_PARTY_NOTICES.md DESTINATION ${CMAKE_INSTALL_DATADIR}/RulesForge)

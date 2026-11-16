@@ -1,0 +1,1 @@
+rulesforge_add_scenario(service_entitlements)

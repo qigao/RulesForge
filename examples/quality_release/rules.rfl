@@ -1,0 +1,50 @@
+import schema "scenario.schema"
+declare Metrics batch: String, mean: double, dispersion: double, inSpec: bool end
+declare Decision id: String, action: String, reason: String, target: String, metric: double end
+
+rule "Compute batch statistics"
+salience 100
+when
+    $batch: Batch(assessed == false)
+    $spec: ProductSpec(batch == $batch.id)
+then
+    call "quality.assess"($batch.samples, $spec.limits) into $stats
+    insert Metrics { batch = $batch.id, mean = $stats.mean, dispersion = $stats.dispersion, inSpec = $stats.inSpec }
+    update $batch { assessed = true }
+end
+
+rule "Hold uncalibrated production"
+when
+    $batch: Batch(assessed == true)
+    Calibration(machine == $batch.machine, valid == false)
+    $metrics: Metrics(batch == $batch.id)
+then
+    insert Decision { id = $batch.id, action = "HOLD", reason = "calibration-expired", target = $batch.machine, metric = $metrics.dispersion }
+end
+rule "Hold an out-of-specification batch"
+when
+    $batch: Batch(assessed == true)
+    Calibration(machine == $batch.machine, valid == true)
+    $metrics: Metrics(batch == $batch.id, inSpec == false)
+then
+    insert Decision { id = $batch.id, action = "HOLD", reason = "sample-outside-specification", target = $batch.machine, metric = $metrics.dispersion }
+end
+rule "Recheck excessive dispersion"
+when
+    $batch: Batch(assessed == true)
+    Calibration(machine == $batch.machine, valid == true)
+    $spec: ProductSpec(batch == $batch.id)
+    $metrics: Metrics(batch == $batch.id, inSpec == true, dispersion > $spec.limits.maxDispersion)
+then
+    insert Decision { id = $batch.id, action = "RECHECK", reason = "excessive-dispersion", target = $batch.machine, metric = $metrics.dispersion }
+end
+rule "Release a qualified batch"
+when
+    $batch: Batch(assessed == true)
+    Calibration(machine == $batch.machine, valid == true)
+    $spec: ProductSpec(batch == $batch.id)
+    $metrics: Metrics(batch == $batch.id, inSpec == true, dispersion <= $spec.limits.maxDispersion)
+then
+    insert Decision { id = $batch.id, action = "RELEASE", reason = "quality-and-calibration-passed", target = $batch.machine, metric = $metrics.dispersion }
+end
+query "Decisions" $row: Decision() end

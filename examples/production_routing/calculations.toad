@@ -1,0 +1,8 @@
+func estimate(hours, speed, laborRate, machineRate) {
+    if (hours <= 0 || speed <= 0 || laborRate < 0 || machineRate < 0) {
+        throw "invalid routing cost model";
+    };
+    duration = hours / speed;
+    return map {hours:duration, cost:duration * (laborRate + machineRate)};
+};
+export("estimate");

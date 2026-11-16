@@ -1,0 +1,101 @@
+import schema "maintenance.schema"
+
+declare Observation
+    cell: String
+    ticket: String
+    risk: double
+    variance: double
+    roughness: double
+    kurtosis: double
+end
+declare WindowCount result: int end
+declare WindowMean result: double end
+declare WindowPeak result: double end
+declare Evaluation
+    ticket: String
+    action: String
+    count: int
+    meanRisk: double
+    peakRisk: double
+    expectedCost: double
+end
+declare ActionRequest
+    ticket: String
+    action: String
+end
+
+rule "Analyze waveform into an observation"
+salience 100
+when
+    $reading: Reading(processed == false)
+    $asset: Asset(cell == $reading.cell)
+    $plan: MaintenancePlan(cell == $reading.cell, pending == false)
+then
+    update $plan { pending = true }
+    call "signal.analyze"($reading.waveform, $asset.model) into $metrics
+    insert Observation {
+        cell = $reading.cell, ticket = $reading.ticket, risk = $metrics.risk,
+        variance = $metrics.variance, roughness = $metrics.roughness, kurtosis = $metrics.kurtosis
+    }
+    update $reading { processed = true }
+    update $plan { pending = false }
+end
+
+// This is one explicit cell window, not an implicit per-key partitioned window.
+rule "Warm up press-7"
+when
+    $request: ReviewRequest(cell == "press-7", done == false)
+    $plan: MaintenancePlan(cell == "press-7", pending == false)
+    $count: WindowCount(result < 3) from accumulate(
+        Observation(cell == "press-7") over window:length(4), count()
+    )
+then
+    update $plan { action = "WARMUP", meanRisk = 0.0, peakRisk = 0.0, expectedCost = 0.0 }
+    insert Evaluation {
+        ticket = $request.ticket, action = "WARMUP", count = $count.result,
+        meanRisk = 0.0, peakRisk = 0.0, expectedCost = 0.0
+    }
+    update $request { done = true }
+end
+
+rule "Optimize maintenance for press-7"
+when
+    $request: ReviewRequest(cell == "press-7", done == false)
+    $asset: Asset(cell == "press-7")
+    $plan: MaintenancePlan(cell == "press-7", pending == false)
+    $permit: InspectionPermit(cell == "press-7")
+    $count: WindowCount(result >= 3) from accumulate(
+        Observation(cell == "press-7") over window:length(4), count()
+    )
+    $mean: WindowMean() from accumulate(
+        $observation: Observation(cell == "press-7") over window:length(4), average($observation.risk)
+    )
+    $peak: WindowPeak() from accumulate(
+        $observation: Observation(cell == "press-7") over window:length(4), max($observation.risk)
+    )
+then
+    update $plan { pending = true }
+    call "decision.decide"($mean.result, $peak.result, $count.result, $asset.model, $permit.available) into $choice
+    update $plan {
+        action = $choice.action, meanRisk = $mean.result, peakRisk = $peak.result,
+        expectedCost = $choice.expectedCost
+    }
+    insert Evaluation {
+        ticket = $request.ticket, action = $choice.action, count = $count.result,
+        meanRisk = $mean.result, peakRisk = $peak.result, expectedCost = $choice.expectedCost
+    }
+    update $request { done = true }
+    update $plan { pending = false }
+end
+
+rule "Derive a host action request"
+when
+    $evaluation: Evaluation(action in ("INSPECT", "STOP"))
+    not ActionRequest(ticket == $evaluation.ticket)
+then
+    insert ActionRequest { ticket = $evaluation.ticket, action = $evaluation.action }
+end
+
+query "Evaluations" $row: Evaluation() end
+query "Observations" $row: Observation() end
+query "ActionRequests" $row: ActionRequest() end

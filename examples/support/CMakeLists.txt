@@ -1,0 +1,8 @@
+add_library(rulesforge_example_support INTERFACE)
+cmake_add_source(support_headers DIRS ${CMAKE_CURRENT_SOURCE_DIR} PATTERNS "*.hpp")
+target_sources(rulesforge_example_support INTERFACE ${support_headers})
+target_include_directories(rulesforge_example_support INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(rulesforge_example_support INTERFACE RulesForge)
+if(BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

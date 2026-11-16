@@ -1,33 +1,39 @@
 # RulesForge.Native
 
-Prebuilt native RulesForge SDK for consumers of the stable C ABI.
+Native SDK for the stable RulesForge C ABI. Each SDK contains `include/rules_forge.h`,
+the shared library/import library, and `lib/cmake/RulesForge/RulesForgeTargets.cmake`.
+Archives carry a `rulesforge-sdk-manifest.json` with the exact source commit,
+producer workflow, profile and upstream versions.
 
-Package layout:
+The package layout is `sdk/windows-x64`, `sdk/linux-x64`, `sdk/macos-arm64` and
+`sdk/android-arm64-v8a`. Build trees, tests, internal C++ engine headers and vcpkg
+package trees are not installed as public SDK headers.
 
-```
-sdk/
-  linux-x64/
-  windows-x64/
-```
+Dependencies are the exact published split SDKs documented in the root
+[README](../../README.md#upstream-dependency-versions): Base 0.1.8, CMeta 0.1.7,
+Utils 0.1.4, CNet 0.1.12, Toad 0.1.3 and vcpkg-cache 0.1.3. DataBind remains part of Utils.
+No floating `Salts.Native` or `SaltsUtils.Native` NuGet dependency is declared.
 
-Each RID contains the installed RulesForge CMake package, public `rules_forge.h`, and the native shared library/import library.
-
-Dependencies:
-
-- latest published stable `Salts.Native`
-- latest published stable `SaltsUtils.Native`
-
-These GitHub packages are deliberately not encoded as NuGet transitive dependencies because `.nuspec` dependencies cannot float. Consumers must restore both explicitly with `Version="*"` (or equivalent latest resolution) before configuring RulesForge.
-
-DataBind is supplied only through SaltsUtils. There is no independent DataBind package or root.
-
-The package intentionally contains only the installed RulesForge consumer surface. Build trees, tests, generated intermediate parser files, and third-party vcpkg packages are not copied into the package.
-
-Typical CMake consumption restores the matching RID trees for RulesForge, Salts, and SaltsUtils, sets `SALTS_ROOT` and `SALTS_UTILS_ROOT`, then uses:
+Restore matching SDK/compiler/triplet roots before configuring a native consumer.
+`RulesForgeConfig.cmake` enforces the producer's exact Base/CMeta/Utils/Toad
+versions through `SALTS_BASE_ROOT`, `CMETA_ROOT`, `SALTS_UTILS_ROOT` and `TOAD_ROOT`.
 
 ```cmake
-find_package(RulesForge CONFIG REQUIRED
-  PATHS "${RULES_FORGE_ROOT}"
-  NO_DEFAULT_PATH)
+find_package(RulesForge CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE RulesForge::RulesForge)
 ```
+
+The application calls the RulesForge DLL through `rules_forge.h`. For the current
+LLVM-MinGW profile, the runtime/import filenames are `libRulesForge.dll` and
+`libRulesForge.dll.a`. The imported target selects the matching files; source-tree
+engine and example support targets are not downstream dependencies.
+
+The [development guide](../../docs/DEVELOPMENT_GUIDE.md) covers a complete DLL
+client and business deployment bundle. Program execution also requires the
+matching `rulesforge_toad` provider, Toad runtime and dynamic dependency closure;
+the RulesForge DLL alone is not the entire deployment.
+
+The project version follows the current CMake source version, 0.1.0. Publishing
+requires an explicit matching tag and successful complete CI build/test/install
+jobs. Android verification covers cross-build and ELF alignment, not device
+execution. Existing historical packages are not changed by this source migration.

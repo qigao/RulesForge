@@ -1,0 +1,267 @@
+#pragma once
+
+#include <cstdint>
+#include <string>
+#include <vector>
+#include <memory>
+#include <optional>
+#include <variant>
+#include <chrono>
+
+#include "text/rfl_strings.hpp"
+
+
+#include "model/value_types.hpp"
+#include "model/fact.hpp"
+
+struct SourcePosition {
+    std::string source;
+    std::size_t line = 0;
+    std::size_t column = 0;
+};
+
+enum class NodeType { LEAF, AND, OR };
+
+enum class CompareOp : uint8_t {
+    None,           // No operator (pure binding)
+    EQ,             // ==
+    NE,             // !=
+    GT,             // >
+    LT,             // <
+    GE,             // >=
+    LE,             // <=
+    HasFlag,        // has_flag(value, non-zero mask)
+    Contains,       // contains (string substring or collection membership)
+    NotContains,    // not contains
+    Matches,        // matches (regex)
+    NotMatches,     // not matches
+    StartsWith,     // startsWith
+    EndsWith,       // endsWith
+    LengthIs,       // lengthIs
+    MemberOf,       // memberOf
+    NotMemberOf,    // not memberOf
+    In,             // in
+    NotIn,          // not in
+    ContainsKey,    // containsKey (for Map)
+    NotContainsKey  // not containsKey (for Map)
+};
+
+/**
+ * @brief Parse comparison operator string to enum (called once at parse time)
+ */
+CompareOp parse_compare_op(std::string_view s);
+
+/**
+ * @brief Get negated operator for NOT patterns
+ */
+inline CompareOp negate_compare_op(CompareOp op) {
+    switch (op) {
+        case CompareOp::EQ: return CompareOp::NE;
+        case CompareOp::NE: return CompareOp::EQ;
+        case CompareOp::GT: return CompareOp::LE;
+        case CompareOp::LE: return CompareOp::GT;
+        case CompareOp::GE: return CompareOp::LT;
+        case CompareOp::LT: return CompareOp::GE;
+        default: return op;
+    }
+}
+
+/**
+ * @brief Convert CompareOp to string for debugging
+ */
+inline std::string_view compare_op_str(CompareOp op) {
+    switch (op) {
+        case CompareOp::None: return "";
+        case CompareOp::EQ: return "==";
+        case CompareOp::NE: return "!=";
+        case CompareOp::GT: return ">";
+        case CompareOp::LT: return "<";
+        case CompareOp::GE: return ">=";
+        case CompareOp::LE: return "<=";
+        case CompareOp::HasFlag: return "has_flag";
+        case CompareOp::Contains: return "contains";
+        case CompareOp::NotContains: return "not contains";
+        case CompareOp::Matches: return "matches";
+        case CompareOp::NotMatches: return "not matches";
+        case CompareOp::StartsWith: return "startsWith";
+        case CompareOp::EndsWith: return "endsWith";
+        case CompareOp::LengthIs: return "lengthIs";
+        case CompareOp::MemberOf: return "memberOf";
+        case CompareOp::NotMemberOf: return "not memberOf";
+        case CompareOp::In: return "in";
+        case CompareOp::NotIn: return "not in";
+        case CompareOp::ContainsKey: return "containsKey";
+        case CompareOp::NotContainsKey: return "not containsKey";
+    }
+    return "";
+}
+
+/**
+ * @brief Temporal operators as enum
+ */
+enum class TemporalOp : uint8_t {
+    None,
+    After,
+    Before,
+    Within,
+    Coincides,
+    During
+};
+
+TemporalOp parse_temporal_op(std::string_view s);
+
+inline char const* temporal_op_str(TemporalOp op) {
+    switch (op) {
+        case TemporalOp::None: return "";
+        case TemporalOp::After: return "after";
+        case TemporalOp::Before: return "before";
+        case TemporalOp::Within: return "within";
+        case TemporalOp::Coincides: return "coincides";
+        case TemporalOp::During: return "during";
+    }
+    return "";
+}
+
+struct ParsedTemporalConstraint {
+    TemporalOp op = TemporalOp::None;
+    std::string lhs_field;
+    std::pair<std::string, std::string> rhs_binding_and_field;
+    int64_t window_ms = -1;
+};
+
+
+
+namespace rulesforge { class ExpressionDescriptor; }
+
+struct ParsedConstraint {
+    std::optional<std::string> field_binding;
+    std::optional<std::string> left_binding;
+    std::string left_field;
+    std::vector<PathSegment> cached_left_field_path; // Optimization: parsed path
+    CompareOp op = CompareOp::None;
+    std::optional<ConstraintValue> right_literal;
+    std::optional<std::pair<std::string, std::string>> right_bound_field;
+    std::vector<PathSegment> cached_right_field_path; // Optimization: parsed path for RHS binding
+    std::optional<std::vector<ConstraintValue>> right_value_list;
+    std::optional<ParsedTemporalConstraint> temporal_constraint;
+    std::optional<std::string> right_arith_expr; // Diagnostic source.
+    std::shared_ptr<rulesforge::ExpressionDescriptor> right_arith_program;
+    ParsedConstraint() = default;
+    ParsedConstraint(ParsedConstraint&&) = default;
+    ParsedConstraint& operator=(ParsedConstraint&&) = default;
+    ParsedConstraint(ParsedConstraint const& other);
+    ParsedConstraint& operator=(ParsedConstraint const& other);
+    bool operator==(ParsedConstraint const& other) const;
+ };
+
+std::string constraint_to_string(ParsedConstraint const& constraint);
+
+
+struct ConstraintNode {
+    NodeType type;
+    ParsedConstraint constraint;
+    std::vector<std::unique_ptr<ConstraintNode>> children;
+    ConstraintNode(NodeType t);
+    ConstraintNode();
+    ConstraintNode(ConstraintNode const& other);
+    ConstraintNode(ConstraintNode&&) = default;
+    ConstraintNode& operator=(ConstraintNode const& other);
+    ConstraintNode& operator=(ConstraintNode&&) = default;
+    ~ConstraintNode() = default;
+};
+
+enum FieldType : uint32_t {
+    FT_String   = 1u << 0,
+    FT_Int      = 1u << 1,
+    FT_Long     = 1u << 2,
+    FT_Double   = 1u << 3,
+    FT_Float    = 1u << 4,
+    FT_Number   = 1u << 5,
+    FT_Boolean  = 1u << 6,
+    FT_List     = 1u << 7,
+    FT_Object   = 1u << 8,
+    FT_Unknown  = 1u << 9,
+    FT_Set      = 1u << 10,
+    FT_Map      = 1u << 11,
+    FT_Uuid     = 1u << 12,
+    FT_UInt64   = 1u << 13,
+    FT_Bytes    = 1u << 14,
+    FT_Enum     = 1u << 15,
+    FT_DateTime = 1u << 16,
+    FT_Date     = 1u << 17,
+    FT_Time     = 1u << 18,
+    FT_Duration = 1u << 19,
+    FT_Decimal  = 1u << 20,
+    FT_BigInt   = 1u << 21,
+    FT_Money    = 1u << 22
+};
+
+constexpr uint32_t FT_STRING_COMPAT = FT_String | FT_Object;
+constexpr uint32_t FT_INT_COMPAT = FT_Int | FT_Long | FT_Number;
+constexpr uint32_t FT_DOUBLE_COMPAT = FT_Double | FT_Float | FT_Number;
+constexpr uint32_t FT_LIST_COMPAT = FT_List;
+constexpr uint32_t FT_SET_COMPAT = FT_Set;
+constexpr uint32_t FT_MAP_COMPAT = FT_Map;
+constexpr uint32_t FT_UUID_COMPAT = FT_Uuid;
+
+inline FieldType parse_field_type(std::string_view s) {
+    if (s == "String" || s == "string") return FT_String;
+    if (s == "int" || s == "Integer") return FT_Int;
+    if (s == "long" || s == "Long") return FT_Long;
+    if (s == "double" || s == "Double") return FT_Double;
+    if (s == "float" || s == "Float") return FT_Float;
+    if (s == "Number" || s == "number") return FT_Number;
+    if (s == "boolean" || s == "Boolean" || s == "bool") return FT_Boolean;
+    if (s == "List" || s == "list") return FT_List;
+    if (s == "Set" || s == "set") return FT_Set;
+    if (s == "Map" || s == "map") return FT_Map;
+    if (s == "UUID" || s == "uuid") return FT_Uuid;
+    if (s == "uint64" || s == "uint64_t" || s == "UInt64") return FT_UInt64;
+    if (s == "bytes" || s == "Bytes") return FT_Bytes;
+    if (s == "enum" || s == "Enum") return FT_Enum;
+    if (s == "datetime" || s == "DateTime") return FT_DateTime;
+    if (s == "date" || s == "Date") return FT_Date;
+    if (s == "time" || s == "Time") return FT_Time;
+    if (s == "duration" || s == "Duration") return FT_Duration;
+    if (s == "decimal" || s == "Decimal") return FT_Decimal;
+    if (s == "bigint" || s == "BigInt") return FT_BigInt;
+    if (s == "money" || s == "Money") return FT_Money;
+    if (s == "Object" || s == "object") return FT_Object;
+    return FT_Unknown;
+}
+
+struct TypeParameter {
+    FieldType base_type = FT_Unknown;
+    std::string custom_type;  // For FT_Object, stores the custom type name like "Item"
+    std::unique_ptr<TypeParameter> nested;  // For nested generics like List<List<int>>
+
+    TypeParameter() = default;
+    TypeParameter(FieldType t) : base_type(t) {}
+    TypeParameter(FieldType t, std::string custom) : base_type(t), custom_type(std::move(custom)) {}
+    TypeParameter(TypeParameter const& other);
+    TypeParameter(TypeParameter&&) = default;
+    TypeParameter& operator=(TypeParameter const& other);
+    TypeParameter& operator=(TypeParameter&&) = default;
+};
+
+struct ParsedField {
+    std::string name;
+    FieldType type;
+    std::vector<TypeParameter> type_params;  // Generic type parameters: <T> or <K,V>
+};
+
+struct ParsedDeclaration {
+    std::string type_name;
+    std::vector<ParsedField> fields;
+    std::map<std::string, std::string> annotations;
+    std::optional<std::string> expires;
+    std::string source_package;
+};
+
+struct ParsedEnum {
+    std::string enum_name;
+    std::string underlying_type = "int";  /* default int32 */
+    std::vector<std::string> values;
+    std::map<std::string, std::string> annotations;
+    std::string source_package;
+};

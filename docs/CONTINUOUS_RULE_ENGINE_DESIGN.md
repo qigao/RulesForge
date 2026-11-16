@@ -1,7 +1,7 @@
 # Continuous Rule Engine
 
 This document describes the implemented continuous-session contract in
-RulesForge 0.9.0. It is not a background service: the caller drives every event,
+RulesForge 0.1.0. It is not a background service: the caller drives every event,
 watermark, drain, acknowledgement, and input chunk.
 
 ## When to Use It

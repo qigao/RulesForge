@@ -1,0 +1,48 @@
+import schema "scenario.schema"
+declare AssignmentCandidate request: String, worker: String, machine: String, rank: int, cost: double, hours: double end
+declare Decision id: String, action: String, reason: String, target: String, metric: double end
+rule "Commit a host-reported operation completion"
+salience 200
+when
+    $event: Completion(processed == false)
+    $operation: Operation(id == $event.operation)
+then
+    update $operation { complete = true }
+    update $event { processed = true }
+end
+rule "Price only qualified ready assignments"
+salience 100
+when
+    $request: PlanRequest(done == false)
+    $operation: Operation(id == $request.operation, complete == false)
+    Operation(id == $operation.predecessor, complete == true)
+    Material(operation == $operation.id, ready == true)
+    $worker: Worker(skill == $operation.skill, available == true)
+    $machine: Machine(skill == $operation.skill, available == true)
+    not AssignmentCandidate(request == $request.id, worker == $worker.id, machine == $machine.id)
+then
+    call "routing.estimate"($operation.hours, $machine.speed, $worker.hourlyCost, $machine.hourlyCost) into $estimate
+    insert AssignmentCandidate { request = $request.id, worker = $worker.id, machine = $machine.id,
+        rank = $machine.rank * 100 + $worker.rank, cost = $estimate.cost, hours = $estimate.hours }
+end
+rule "Choose a qualified assignment"
+when
+    $request: PlanRequest(done == false)
+    $best: AssignmentCandidate(request == $request.id)
+    not AssignmentCandidate(request == $request.id, cost < $best.cost)
+    not AssignmentCandidate(request == $request.id, cost == $best.cost, rank < $best.rank)
+then
+    insert Decision { id = $request.id, action = "ASSIGN", reason = "qualified-minimum-cost", target = $best.machine, metric = $best.cost }
+    update $request { done = true }
+end
+rule "Wait when no qualified assignment exists"
+salience -10
+when
+    $request: PlanRequest(done == false)
+    not AssignmentCandidate(request == $request.id)
+then
+    insert Decision { id = $request.id, action = "WAIT", reason = "no-ready-qualified-assignment", target = $request.operation, metric = 0.0 }
+    update $request { done = true }
+end
+query "Decisions" $row: Decision() end
+query "Assignments" $row: AssignmentCandidate() end

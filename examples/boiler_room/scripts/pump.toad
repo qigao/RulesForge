@@ -1,0 +1,35 @@
+func calculate(sample, mean, variance, lastTick, lastEpoch, lastSequence, samples) {
+    // Keep integer state in a record: numeric scalar locals use MIR number slots.
+    trend = map {lastTick:lastTick, lastEpoch:lastEpoch, lastSequence:lastSequence, samples:samples};
+    risk = 0.0; valid = false; mismatch = false;
+    if (sample.fresh) {
+        if (sample.epoch != lastEpoch || sample.sequence != lastSequence) {
+            if (trend.samples == 0 || sample.epoch != trend.lastEpoch || sample.tick - trend.lastTick > 10000) {
+                mean = sample.rms; variance = 0.0; trend.samples = boiler_state_integer(1);
+            } else {
+                alpha = boiler_ewma_alpha((sample.tick - lastTick) / 1000.0, 30.0);
+                delta = sample.rms - mean;
+                mean = mean + alpha * delta;
+                variance = (1.0 - alpha) * (variance + alpha * delta * delta);
+                trend.samples = boiler_state_integer(trend.samples + 1);
+                if (trend.samples < 0) { throw "trend counter out of range"; };
+            };
+            trend.lastTick = sample.tick; trend.lastEpoch = sample.epoch; trend.lastSequence = sample.sequence;
+        };
+        if (trend.samples >= 30) { valid = true; };
+        // The commissioned physical baseline is usable while EWMA warms up.
+        if (sample.running) {
+            risk = boiler_risk_index((sample.rms - 2.0) / 0.4,
+                (150.0 - sample.pressure) / 150.0, (18.0 - sample.flow) / 18.0);
+            if (sample.flow < 5.0 || sample.current < 1.0) { mismatch = true; };
+        } else {
+            // Standby flow/pressure are expected to be zero; assess its observed
+            // vibration on a full 0..100 scale before recommending a start.
+            risk = 2.0 * boiler_risk_index((sample.rms - 2.0) / 0.4, 0.0, 0.0);
+        };
+    };
+    return map {mean:mean, variance:variance, risk:risk, lastTick:trend.lastTick,
+        lastEpoch:trend.lastEpoch, lastSequence:trend.lastSequence, samples:trend.samples,
+        valid:valid, fresh:sample.fresh, mismatch:mismatch};
+};
+export("calculate");

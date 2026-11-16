@@ -4,6 +4,11 @@
 
 RulesForge is an embedded rule engine for C and C++ applications. It compiles RFL rule packs, consumes typed facts, evaluates RETE matches, manages session/agenda state, and exposes stateful and continuous execution through a stable C ABI.
 
+Downstream applications consume the RulesForge shared library through
+`RulesForge::RulesForge` and the public C header. Start with the
+[RulesForge + Toad development guide](docs/DEVELOPMENT_GUIDE.md) to build a DLL
+client and deploy your own schema, rules, script modules and native computations.
+
 RulesForge is deliberately not an application server or hidden workflow runtime. The host owns external I/O, scheduling, persistence, and side effects; RulesForge owns rule matching, session facts, agenda execution, queries, event-time state, and bounded continuous-rule coordination.
 
 **Tags:** C · C++ · RETE · rule-engine · inference · event-time · streaming · DataBind · CMeta · embedded-systems
@@ -12,24 +17,45 @@ RulesForge is deliberately not an application server or hidden workflow runtime.
 
 RulesForge participates in the [Salts](https://github.com/qigao/salts) ecosystem rather than defining an independent type and data-binding stack.
 
-Its published dependency policy is:
+The build selects exact stable releases in the parent environment or local `.env`:
+[SaltsBase 0.1.8](https://github.com/qigao/salts-base/releases/tag/v0.1.8),
+[CMeta 0.1.7](https://github.com/qigao/cmeta/releases/tag/v0.1.7),
+[SaltsUtils 0.1.4](https://github.com/qigao/salts-utils/releases/tag/v0.1.4),
+[CNet 0.1.12](https://github.com/qigao/salts-cnet/releases/tag/v0.1.12), and
+[Toad 0.1.3](https://github.com/qigao/TurboScript/releases/tag/v0.1.3), plus
+[vcpkg-cache 0.1.3](https://github.com/qigao/vcpkg-cache/releases/tag/v0.1.3).
 
-- latest published stable **Salts** for shared systems/runtime foundations and C-facing semantic infrastructure.
-- latest published stable **SaltsUtils** for DataBind, concrete parser components, IDL/schema tooling, and utilities. DataBind provides schema-defined external facts, native/dynamic values, parsing, and incremental ingestion.
+Base owns system services, logging, memory and UUIDs. CMeta owns reflection and
+CSTL. Utils owns DataBind and concrete parsers; CNet owns networking/crypto.
+Toad executes explicitly bound RHS computations, with ACE managing complete
+Program generations. See the [script Program guide](docs/SCRIPT_PROGRAM.md).
+These are independently published SDKs. The old aggregated `Salts.Native` SDK
+and floating NuGet versions are no longer build inputs. No upstream SDK is
+built from source during restoration.
 
-CI restores the latest published stable producer SDKs from GitHub Packages and restores third-party dependencies only through the shared **qigao/vcpkg-cache** binary cache. RulesForge does not rebuild Salts/SaltsUtils from source and does not keep a source-build fallback path.
+## Upstream dependency versions
 
-The target ecosystem boundary is:
+The existing restore entry point verifies release asset sizes and SHA-256.
+Base and CMeta are also checked against their release manifests and successful
+producer CI, including exact Base/cache constraints and the selected triplet.
+Shared vcpkg-cache `resolve-release` produces a build-directory URL/hash lock;
+`locked` restores it. The returned receipt is the installation-root fact source.
+Lemon and re2c use the versioned host-tool packages from the same release.
 
-```text
-Salts
-  ├── salts-utils (including DataBind schema / compiler / binding)
-  └── salts-net
-        ↓
-    RulesForge
-```
+`.env.example` lists exact selectors. Optional existing SDK/cache/tool roots may
+be shared with another project when version, compiler, profile and receipts
+match. Existing installations are never overwritten or used after a receipt
+mismatch. Without explicit roots, restoration creates versioned directories
+under ignored `build/dependencies`. Keep SDKs and cache from one compatible
+compiler/triplet composition. CMake neither reads `.env` nor downloads packages.
 
-DataBind is part of SaltsUtils. Its source, build, installation, and exported targets belong to SaltsUtils.
+Splitting dependency owners preserves the public C API and DataBind ABI 10.
+UUID values in the internal C++ variant now own a 16-byte `std::array` and use
+Base's parse/format/equality API; copying, hashing and lexicographic ordering
+retain their value semantics. The removed CMeta UUID type has no compatibility
+shim. Reverting this migration requires the earlier source checkout and its
+matching published SDK environment, followed by a fresh configure; the build
+contains no automatic old-SDK fallback.
 
 ## What RulesForge owns
 
@@ -62,10 +88,10 @@ That separation keeps the rule engine deterministic and embeddable.
 The installed public C API is:
 
 ```text
-include/rules_forge.h
+rulesforge/include/rules_forge.h
 ```
 
-C and C++ applications integrate through this C ABI and the installed RulesForge library. The C++ implementation headers under `rulesforge/include` are internal and are not the public compatibility boundary.
+C and C++ applications integrate through this C ABI and the installed RulesForge library. The C++ implementation headers under `core/include` are internal and are not the public compatibility boundary.
 
 ## Execution models
 
@@ -103,6 +129,19 @@ create
 ```
 
 A continuous session is caller-driven. It does not create its own thread, queue, broker client, clock thread, or event loop.
+
+## Runnable application scenarios
+
+The [scenario guide](docs/SCENARIOS.md) covers production quality, energy dispatch,
+cold-chain screening, production routing, release admission, reconciliation and
+service entitlements. Each runs through the public C ABI with schema-bound mock
+input, Toad computations, decision persistence and idempotent mock delivery.
+The examples provide explicit interpreter/JIT bundles and formal tests.
+
+These scenarios use stateful Programs. Their mock persistence is in memory;
+network services and durable databases remain host integrations. Energy dispatch
+finds a minimum over 27 discrete plans; the guide explains when a dedicated
+optimization solver would be appropriate.
 
 ## Typed data ingestion
 
@@ -158,16 +197,51 @@ See [User guide](docs/USER_GUIDE.md) for the complete integration flow.
 
 ## Build
 
-Requirements include:
+Requirements: CMake 3.27+, Ninja, Python 3.12+, GitHub CLI and a C17/C++20
+compiler matching the selected SDK profile. `mir-jit` (MIR::MIR) comes from the
+shared preinstalled vcpkg-cache tree; the payments CLI uses `Salts::CmdParser`
+from the released Base SDK. Only `BUILD_TESTS` and `BUILD_BENCHMARK`
+control tests and benchmarks; examples and modules assemble unconditionally.
 
-- CMake 3.20+
-- C17 compiler support for the C boundary
-- C++20 compiler support for the engine implementation
-- latest published stable **Salts.Native**
-- latest published stable **SaltsUtils.Native** with DataBind 3 / ABI 10 and the required parser/utility components
-- OpenSSL-compatible crypto and other third-party dependencies through the configured vcpkg-cache environment
+For Windows LLVM-MinGW, in one PowerShell session:
 
-The dependency ownership contract is Salts from `SALTS_ROOT` and SaltsUtils, including DataBind, from `SALTS_UTILS_ROOT`.
+```powershell
+$env:GITHUB_TOKEN = gh auth token
+./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64 -Profile windows-llvm-mingw-x64 -Local
+cmake --fresh --preset native-release-user
+cmake --build --preset native-release-user
+ctest --preset native-release-user --output-on-failure --no-tests=error
+cmake --build --preset install-native-release-user
+```
+
+Run each command only after its predecessor succeeds. The wrapper loads only
+non-secret build fields from `.env`, and exports qualified roots/runtime paths
+after every dependency succeeds. The preset selects the complete formal test
+graph. Module tests remain with their owner under `core/parser/tests`,
+`core/test` and `rulesforge/tests`; verification uses those targets and CTest.
+
+CI uses the same exact restore entry and existing presets for Windows
+LLVM-MinGW x64, Linux Clang x64, macOS Clang arm64 and Android arm64. Native
+profiles execute the complete CTest graph. Android cross-build/install and
+16 KiB ELF alignment checks do not establish device runtime behavior.
+`release-sdk.yml` delegates to the same workflow for manual qualification;
+no independent installed-consumer validation project is used.
+
+### Benchmarks
+
+Use the existing benchmark switch with the same restored SDK environment:
+
+```powershell
+cmake --preset llvm-mingw-x64-release-user -DBUILD_TESTS=ON -DBUILD_BENCHMARK=ON
+cmake --build --preset llvm-mingw-x64-release-user --parallel 3
+ctest --preset llvm-mingw-x64-release-user -L '^benchmark$' -j 1 -V --no-tests=error
+```
+
+Run the seven registered benchmark suites serially. The
+[measurement protocol and dated results](docs/architecture/core-ownership-and-dispatch.md#benchmark-snapshot)
+explain sample counts, setup costs and the difference between MIR warm calls
+and a complete program lifecycle. The current measurements establish a
+baseline; they do not establish a speedup against an older revision.
 
 ## Design principles
 
@@ -183,13 +257,16 @@ The dependency ownership contract is Salts from `SALTS_ROOT` and SaltsUtils, inc
 
 | Need | Document |
 | --- | --- |
+| Develop a DLL client with RulesForge + Toad | [Development guide](docs/DEVELOPMENT_GUIDE.md) |
 | Integrate the runtime | [User guide](docs/USER_GUIDE.md) |
 | Bind JSON/YAML/CSV/XML/binary input | [Data ingestion](docs/DATA_INGESTION.md) |
 | Continuous/event-time processing | [Continuous engine](docs/CONTINUOUS_RULE_ENGINE_DESIGN.md) |
 | RFL syntax | [DSL reference](docs/dsl.md) |
 | Production deployment | [Deployment guide](docs/DEPLOYMENT.md) |
-| Example rule packs | [Examples](docs/examples/README.md) |
-| C API example | [C API example](capi/examples/readme.md) |
+| Run and interpret benchmarks | [Benchmark snapshot](docs/architecture/core-ownership-and-dispatch.md#benchmark-snapshot) |
+| Example rule packs | [Examples](examples/README.md) |
+| Run seven domain scenarios with mock APIs | [Scenario guide](docs/SCENARIOS.md) |
+| C API example | [C API example](examples/README.md) |
 
 ---
 

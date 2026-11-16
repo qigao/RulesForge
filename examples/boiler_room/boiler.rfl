@@ -1,0 +1,499 @@
+import schema "boiler.schema"
+
+declare RiskSample tick: int epoch: int risk: double valid: bool end
+declare ReviewStats requested: bool end
+declare MeanResult result: double end
+declare PeakResult result: double end
+declare CountResult result: int end
+declare TickResult result: int end
+declare Transition
+    tick: int
+    code: String
+    kind: int
+    occurrence: int
+    revision: int
+end
+declare AckResult accepted: bool end
+
+rule "Advance explicit simulation clock"
+salience 300
+when $step: AdvanceClock() $clock: Clock() PumpState()
+then
+    update $clock { tick = $step.tick, cutoff = $step.cutoff, split = $step.split }
+    insert ReviewStats { requested = true }
+    retract $step
+end
+
+rule "Expire thirty second risk window"
+salience 250
+when $clock: Clock() $sample: RiskSample(tick <= $clock.cutoff)
+then retract $sample
+end
+
+rule "Calculate boiler heat and aligned energy efficiency"
+salience 200
+when $input: BoilerInput() $model: BoilerModel() $state: BoilerState()
+then
+    call "thermal.calculate"($input.reading, $model.parameters, $state.efficiency,
+        $state.efficiencyTick, $state.efficiencyEpoch, $state.efficiencyValid) into $result
+    update $state { heatKw = $result.heatKw, efficiency = $result.efficiency,
+        heatValid = $result.heatValid, efficiencyValid = $result.efficiencyValid,
+        efficiencyTick = $result.efficiencyTick, efficiencyEpoch = $result.efficiencyEpoch,
+        fresh = $result.fresh, fault = $result.fault }
+    retract $input
+end
+
+rule "Fuse pump vibration and VFD measurements"
+salience 200
+when $input: PumpInput() $state: PumpState() $clock: Clock()
+then
+    call "pump.calculate"($input.reading, $state.mean, $state.variance, $state.lastTick,
+        $state.lastEpoch, $state.lastSequence, $state.samples) into $result
+    update $state { mean = $result.mean, variance = $result.variance, risk = $result.risk,
+        lastTick = $result.lastTick, lastEpoch = $result.lastEpoch,
+        lastSequence = $result.lastSequence, samples = $result.samples,
+        valid = $result.valid, fresh = $result.fresh, mismatch = $result.mismatch }
+    insert RiskSample { tick = $clock.tick, epoch = $result.lastEpoch, risk = $result.risk, valid = $result.valid }
+    retract $input
+end
+
+rule "Discard risk frames from previous source epochs"
+salience 250
+when $state: PumpState() $sample: RiskSample(epoch != $state.lastEpoch)
+then retract $sample end
+
+rule "Mark an explicit clock only frame as unknown"
+salience 150
+when
+    ReviewStats() $clock: Clock() $state: PumpState()
+    not RiskSample(tick == $clock.tick)
+then
+    insert RiskSample { tick = $clock.tick, epoch = $state.lastEpoch, risk = 0.0, valid = false }
+    update $state { fresh = false, valid = false }
+end
+
+rule "Review bounded risk window"
+salience 100
+when
+    $request: ReviewStats() $state: PumpState() $window: WindowEvidence()
+    $clock: Clock() $policy: WindowPolicy()
+    $count: CountResult(result > 0) from accumulate(RiskSample(valid == true, epoch == $state.lastEpoch), count())
+    $high: CountResult() from accumulate(RiskSample(valid == true, epoch == $state.lastEpoch, risk >= $policy.elevatedRisk), count())
+    $recentCount: CountResult() from accumulate(RiskSample(valid == true, epoch == $state.lastEpoch, tick > $clock.split), count())
+    $priorCount: CountResult() from accumulate(RiskSample(valid == true, epoch == $state.lastEpoch, tick <= $clock.split), count())
+    $mean: MeanResult() from accumulate($sample: RiskSample(valid == true, epoch == $state.lastEpoch), average($sample.risk))
+    $peak: PeakResult() from accumulate($sample: RiskSample(valid == true, epoch == $state.lastEpoch), max($sample.risk))
+    $recent: MeanResult() from accumulate($sample: RiskSample(valid == true, epoch == $state.lastEpoch, tick > $clock.split), average($sample.risk))
+    $prior: MeanResult() from accumulate($sample: RiskSample(valid == true, epoch == $state.lastEpoch, tick <= $clock.split), average($sample.risk))
+    $break: TickResult() from accumulate($sample: RiskSample(epoch == $state.lastEpoch, valid == false || risk < $policy.elevatedRisk), max($sample.tick))
+    $oldest: TickResult() from accumulate($sample: RiskSample(epoch == $state.lastEpoch), min($sample.tick))
+    $last: TickResult() from accumulate($sample: RiskSample(valid == true, epoch == $state.lastEpoch), max($sample.tick))
+then
+    call "window.summarize"($clock.tick, $count.result, $high.result, $recentCount.result, $priorCount.result,
+        $mean.result, $peak.result, $recent.result, $prior.result, $break.result, $oldest.result,
+        $last.result, $state.valid, $policy.model) into $summary
+    update $window { tick = $summary.tick, samples = $summary.samples, elevated = $summary.elevated,
+        recentSamples = $summary.recentSamples, priorSamples = $summary.priorSamples,
+        mean = $summary.mean, peak = $summary.peak, recentMean = $summary.recentMean, priorMean = $summary.priorMean,
+        coveragePct = $summary.coveragePct, continuousSeconds = $summary.continuousSeconds,
+        trendDelta = $summary.trendDelta, trendPerSecond = $summary.trendPerSecond,
+        ready = $summary.ready, trendReady = $summary.trendReady }
+    update $state { windowMean = $summary.mean, windowPeak = $summary.peak }
+    retract $request
+end
+
+rule "Complete review without valid risk frames"
+salience 90
+when
+    $request: ReviewStats() $state: PumpState() $window: WindowEvidence()
+    $clock: Clock() $policy: WindowPolicy()
+    not RiskSample(valid == true, epoch == $state.lastEpoch)
+then
+    call "window.summarize"($clock.tick, 0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, false, $policy.model) into $summary
+    update $window { tick = $summary.tick, samples = $summary.samples, elevated = $summary.elevated,
+        recentSamples = $summary.recentSamples, priorSamples = $summary.priorSamples,
+        mean = $summary.mean, peak = $summary.peak, recentMean = $summary.recentMean, priorMean = $summary.priorMean,
+        coveragePct = $summary.coveragePct, continuousSeconds = $summary.continuousSeconds,
+        trendDelta = $summary.trendDelta, trendPerSecond = $summary.trendPerSecond,
+        ready = $summary.ready, trendReady = $summary.trendReady }
+    update $state { windowMean = $summary.mean, windowPeak = $summary.peak }
+    retract $request
+end
+
+rule "Calculate room balance and weather demand"
+salience 200
+when $input: RoomInput() $state: RoomState()
+then
+    call "balance.calculate"($input.reading) into $result
+    update $state { gapPct = $result.gapPct, deficitPct = $result.deficitPct, demandKw = $result.demandKw,
+        heatValid = $result.heatValid, demandValid = $result.demandValid }
+    retract $input
+end
+
+rule "Advance alert state with hysteresis and hold times"
+when
+    $input: AlarmInput()
+    $state: AlarmState(code == $input.code)
+    $policy: AlarmPolicy(code == $input.code)
+then
+    call "alert.step"($input.tick, $input.valid, $input.bad, $input.recovered,
+        $state.phase, $state.since, $state.occurrence, $state.revision,
+        $state.acknowledged, $policy.raiseMs, $policy.clearMs) into $next
+    update $state { phase = $next.phase, since = $next.since, occurrence = $next.occurrence,
+        revision = $next.revision, acknowledged = $next.acknowledged }
+    if $next.notify > 0 {
+        insert Transition { tick = $input.tick, code = $input.code, kind = $next.notify,
+            occurrence = $next.occurrence, revision = $next.revision }
+    }
+    retract $input
+end
+
+rule "Acknowledge the expected alert occurrence and revision"
+when $request: AckRequest() $state: AlarmState(code == $request.code)
+then
+    call "alert.acknowledge"($state.phase, $state.occurrence, $state.revision,
+        $state.acknowledged, $request.occurrence, $request.revision) into $next
+    update $state { acknowledged = $next.acknowledged, revision = $next.revision }
+    insert AckResult { accepted = $next.accepted }
+    if $next.notify > 0 {
+        insert Transition { tick = $request.tick, code = $request.code, kind = $next.notify,
+            occurrence = $state.occurrence, revision = $next.revision }
+    }
+    retract $request
+end
+
+rule "Drain published transitions"
+salience 10
+when Drain() $transition: Transition()
+then retract $transition
+end
+rule "Drain acknowledgement results"
+salience 10
+when Drain() $result: AckResult()
+then retract $result
+end
+rule "Complete output drain"
+salience -10
+when $drain: Drain() not Transition() not AckResult()
+then retract $drain
+end
+
+query "Boiler" $row: BoilerState() end
+query "Pump" $row: PumpState() end
+query "Room" $row: RoomState() end
+query "Alarms" $row: AlarmState() end
+query "Transitions" $row: Transition() end
+query "AckResults" $row: AckResult() end
+query "RiskSamples" $row: RiskSample() end
+query "WindowStats" $row: WindowEvidence() end
+query "Clocks" $row: Clock() end
+query "BoilerInputs" $row: BoilerInput() end
+
+// The host supplies observations. These joins establish diagnosis, admission
+// and ranking; no host-side action switch duplicates this policy.
+rule "Classify missing stale or incomplete window evidence"
+salience 1100
+when
+    $request: DispatchRequest() not DrainDispatch()
+    $pump: PumpSnapshot(tick == $request.tick)
+    not WindowSnapshot(pump == $pump.pump, metrics.tick == $request.tick, metrics.ready == true)
+    not WindowAssessment(tick == $request.tick, pump == $pump.pump)
+then insert WindowAssessment { tick = $request.tick, pump = $pump.pump, level = "UNKNOWN" } end
+
+rule "Confirm continuous abnormal exposure"
+salience 1090
+when
+    $request: DispatchRequest() not DrainDispatch() $policy: WindowPolicy()
+    $window: WindowSnapshot(metrics.tick == $request.tick, metrics.ready == true,
+        metrics.continuousSeconds >= $policy.confirmedSeconds)
+    not WindowAssessment(tick == $request.tick, pump == $window.pump)
+then insert WindowAssessment { tick = $request.tick, pump = $window.pump, level = "CONFIRMED" } end
+
+rule "Retain substantial repeated abnormal exposure during recovery"
+salience 1089
+when
+    $request: DispatchRequest() not DrainDispatch() $policy: WindowPolicy()
+    $window: WindowSnapshot(metrics.tick == $request.tick, metrics.ready == true,
+        metrics.elevated >= $policy.majoritySamples, metrics.mean >= $policy.confirmedMean)
+    not WindowAssessment(tick == $request.tick, pump == $window.pump)
+then insert WindowAssessment { tick = $request.tick, pump = $window.pump, level = "CONFIRMED" } end
+
+rule "Recognize a covered worsening trend before sustained exposure"
+salience 1080
+when
+    $request: DispatchRequest() not DrainDispatch() $policy: WindowPolicy()
+    $window: WindowSnapshot(metrics.tick == $request.tick, metrics.ready == true, metrics.trendReady == true,
+        metrics.trendDelta >= $policy.trendDelta, metrics.recentMean >= $policy.trendMean)
+    not WindowAssessment(tick == $request.tick, pump == $window.pump)
+then insert WindowAssessment { tick = $request.tick, pump = $window.pump, level = "DEGRADING" } end
+
+rule "Observe an isolated peak without treating it as sustained failure"
+salience 1070
+when
+    $request: DispatchRequest() not DrainDispatch() $policy: WindowPolicy()
+    $window: WindowSnapshot(metrics.tick == $request.tick, metrics.ready == true, metrics.peak >= $policy.watchPeak)
+    not WindowAssessment(tick == $request.tick, pump == $window.pump)
+then insert WindowAssessment { tick = $request.tick, pump = $window.pump, level = "TRANSIENT" } end
+
+rule "Classify a complete quiet window"
+salience 1060
+when
+    $request: DispatchRequest() not DrainDispatch()
+    $window: WindowSnapshot(metrics.tick == $request.tick, metrics.ready == true)
+    not WindowAssessment(tick == $request.tick, pump == $window.pump)
+then insert WindowAssessment { tick = $request.tick, pump = $window.pump, level = "NORMAL" } end
+
+rule "Diagnose a running pump from independent measurements and its route"
+salience 950
+when
+    $request: DispatchRequest(valid == true)
+    not DrainDispatch()
+    $route: PumpRoute(loop == $request.loop, primary == true)
+    $pump: PumpSnapshot(tick == $request.tick, pump == $route.pump, fresh == true,
+        running == true, risk >= $request.warningRisk,
+        flow < $route.warningFlow, pressure < $route.warningPressure)
+    not DispatchIncident(tick == $request.tick, pump == $pump.pump)
+then
+    insert DispatchIncident { tick = $request.tick, pump = $pump.pump, loop = $route.loop,
+        risk = $pump.risk, flow = $pump.flow, pressure = $pump.pressure }
+end
+
+rule "Create the bounded plan set"
+salience 900
+when DispatchRequest() not DrainDispatch() $plan: PlanSpec() not PlanCandidate(planId == $plan.id)
+then
+    insert PlanCandidate { planId = $plan.id, action = $plan.action,
+        status = "NEW", reason = "PENDING", calculated = false,
+        capacityKw = 0.0, marginKw = 0.0, energyKwh = 0.0, residualRisk = 0.0,
+        energyCost = 0.0, riskCost = 0.0, score = 0.0 }
+end
+
+rule "Reject incomplete thermal observations"
+salience 800
+when DispatchRequest(valid == false) $candidate: PlanCandidate(status == "NEW")
+then update $candidate { status = "REJECTED", reason = "INPUT_INCOMPLETE" }
+end
+
+rule "Require the primary running pump observation"
+salience 795
+when
+    $request: DispatchRequest()
+    $route: PumpRoute(loop == $request.loop, primary == true)
+    $candidate: PlanCandidate(status == "NEW")
+    not PumpSnapshot(tick == $request.tick, pump == $route.pump, fresh == true, running == true)
+then update $candidate { status = "REJECTED", reason = "PRIMARY_UNAVAILABLE" }
+end
+
+rule "Require the secondary circuit that contributes the other heat"
+salience 794
+when
+    $request: DispatchRequest()
+    $candidate: PlanCandidate(status == "NEW")
+    not PumpSnapshot(tick == $request.tick, pump == "P2", fresh == true, running == true,
+        maintenance == false, available == true, risk <= $request.maxRisk)
+then update $candidate { status = "REJECTED", reason = "SECONDARY_UNAVAILABLE" }
+end
+
+rule "Do not continue operating a locked primary pump"
+salience 793
+when
+    $request: DispatchRequest() $route: PumpRoute(loop == $request.loop, primary == true)
+    $plan: PlanSpec(action in ("KEEP", "DERATE"))
+    $candidate: PlanCandidate(status == "NEW", planId == $plan.id)
+    not PumpSnapshot(tick == $request.tick, pump == $route.pump, maintenance == false, available == true)
+then update $candidate { status = "REJECTED", reason = "PRIMARY_LOCKED" }
+end
+
+rule "Reject standby outside the affected loop"
+salience 790
+when
+    $request: DispatchRequest()
+    $plan: PlanSpec(needsStandby == true)
+    $candidate: PlanCandidate(status == "NEW", planId == $plan.id)
+    not PumpRoute(pump == $plan.standby, loop == $request.loop, primary == false)
+then update $candidate { status = "REJECTED", reason = "TOPOLOGY_MISMATCH" }
+end
+
+rule "Respect the maintenance lock"
+salience 780
+when
+    $request: DispatchRequest() $plan: PlanSpec(needsStandby == true)
+    $candidate: PlanCandidate(status == "NEW", planId == $plan.id)
+    PumpSnapshot(tick == $request.tick, pump == $plan.standby, maintenance == true)
+then update $candidate { status = "REJECTED", reason = "MAINTENANCE_LOCK" }
+end
+
+rule "Require fresh standby evidence"
+salience 770
+when
+    $request: DispatchRequest() $plan: PlanSpec(needsStandby == true)
+    $candidate: PlanCandidate(status == "NEW", planId == $plan.id)
+    not PumpSnapshot(tick == $request.tick, pump == $plan.standby, fresh == true)
+then update $candidate { status = "REJECTED", reason = "STANDBY_STALE" }
+end
+
+rule "Require an available stopped standby"
+salience 760
+when
+    $request: DispatchRequest() $plan: PlanSpec(needsStandby == true)
+    $candidate: PlanCandidate(status == "NEW", planId == $plan.id)
+    not PumpSnapshot(tick == $request.tick, pump == $plan.standby,
+        available == true, running == false)
+then update $candidate { status = "REJECTED", reason = "STANDBY_UNAVAILABLE" }
+end
+
+rule "Require a current covered primary window"
+salience 750
+when
+    $request: DispatchRequest() $route: PumpRoute(loop == $request.loop, primary == true)
+    $candidate: PlanCandidate(status == "NEW")
+    not WindowSnapshot(pump == $route.pump, metrics.tick == $request.tick, metrics.ready == true)
+then update $candidate { status = "REJECTED", reason = "PRIMARY_WINDOW_INCOMPLETE" } end
+
+rule "Require a current covered secondary window"
+salience 749
+when
+    $request: DispatchRequest() $candidate: PlanCandidate(status == "NEW")
+    not WindowSnapshot(pump == "P2", metrics.tick == $request.tick, metrics.ready == true, metrics.mean <= $request.maxRisk)
+then update $candidate { status = "REJECTED", reason = "SECONDARY_WINDOW_UNSAFE" } end
+
+rule "Require a covered standby window before recommending a start"
+salience 748
+when
+    $request: DispatchRequest() $plan: PlanSpec(needsStandby == true)
+    $candidate: PlanCandidate(status == "NEW", planId == $plan.id)
+    not WindowSnapshot(pump == $plan.standby, metrics.tick == $request.tick, metrics.ready == true)
+then update $candidate { status = "REJECTED", reason = "STANDBY_WINDOW_INCOMPLETE" } end
+
+rule "Require confirmed or worsening evidence before operational changes"
+salience 740
+when
+    $request: DispatchRequest() $route: PumpRoute(loop == $request.loop, primary == true)
+    $plan: PlanSpec(action in ("DERATE", "SWITCH"))
+    $candidate: PlanCandidate(status == "NEW", planId == $plan.id)
+    not WindowAssessment(tick == $request.tick, pump == $route.pump, level in ("CONFIRMED", "DEGRADING"))
+then update $candidate { status = "REJECTED", reason = "WINDOW_NOT_CONFIRMED" } end
+
+rule "Calculate keep derate and stop proposals"
+salience 700
+when
+    $request: DispatchRequest(valid == true)
+    $fluid: BoilerModel()
+    $plan: PlanSpec(needsStandby == false)
+    $policy: WindowPolicy()
+    $candidate: PlanCandidate(status == "NEW", planId == $plan.id)
+    $route: PumpRoute(loop == $request.loop, primary == true)
+    $pump: PumpSnapshot(tick == $request.tick, pump == $route.pump, fresh == true, running == true)
+    $evidence: WindowSnapshot(pump == $route.pump, metrics.tick == $request.tick, metrics.ready == true)
+then
+    call "dispatch.assess"($request.thermal, $plan.parameters, $route.nominalKw,
+        $pump.flow, $pump.risk, $fluid.parameters, $evidence.metrics, $policy.lookaheadSeconds) into $metrics
+    update $candidate { status = "SCORED", calculated = true,
+        capacityKw = $metrics.capacityKw, marginKw = $metrics.marginKw,
+        energyKwh = $metrics.energyKwh, residualRisk = $metrics.residualRisk,
+        energyCost = $metrics.energyCost, riskCost = $metrics.riskCost, score = $metrics.score }
+end
+
+rule "Calculate a topology compatible standby proposal"
+salience 700
+when
+    $request: DispatchRequest(valid == true)
+    $fluid: BoilerModel()
+    $plan: PlanSpec(needsStandby == true)
+    $policy: WindowPolicy()
+    $candidate: PlanCandidate(status == "NEW", planId == $plan.id)
+    $route: PumpRoute(loop == $request.loop, pump == $plan.standby, primary == false)
+    $evidence: WindowSnapshot(pump == $plan.standby, metrics.tick == $request.tick, metrics.ready == true)
+    $pump: PumpSnapshot(tick == $request.tick, pump == $plan.standby, fresh == true,
+        available == true, maintenance == false, running == false)
+then
+    call "dispatch.assess"($request.thermal, $plan.parameters, $route.nominalKw,
+        $route.designFlow, $pump.risk, $fluid.parameters, $evidence.metrics, $policy.lookaheadSeconds) into $metrics
+    update $candidate { status = "SCORED", calculated = true,
+        capacityKw = $metrics.capacityKw, marginKw = $metrics.marginKw,
+        energyKwh = $metrics.energyKwh, residualRisk = $metrics.residualRisk,
+        energyCost = $metrics.energyCost, riskCost = $metrics.riskCost, score = $metrics.score }
+end
+
+rule "Reject supply below demand plus reserve"
+salience 600
+when $candidate: PlanCandidate(status == "SCORED", marginKw < 0.0)
+then update $candidate { status = "REJECTED", reason = "INSUFFICIENT_HEAT" }
+end
+rule "Reject residual risk beyond policy"
+salience 590
+when $request: DispatchRequest() $candidate: PlanCandidate(status == "SCORED", residualRisk > $request.maxRisk)
+then update $candidate { status = "REJECTED", reason = "RISK_LIMIT" }
+end
+rule "Admit feasible scored plans"
+salience 500
+when $candidate: PlanCandidate(status == "SCORED")
+then update $candidate { status = "ACCEPTED", reason = "FEASIBLE" }
+end
+
+rule "Keep operating under observation after an isolated peak"
+salience 401
+when
+    $request: DispatchRequest() not DrainDispatch()
+    $route: PumpRoute(loop == $request.loop, primary == true)
+    WindowAssessment(tick == $request.tick, pump == $route.pump, level == "TRANSIENT")
+    $candidate: PlanCandidate(status == "ACCEPTED", action == "KEEP")
+    not PlanCandidate(status == "ACCEPTED", score < $candidate.score)
+    not PlanCandidate(status == "ACCEPTED", score == $candidate.score, planId < $candidate.planId)
+    not DispatchDecision(tick == $request.tick)
+then
+    insert DispatchDecision { tick = $request.tick, planId = $candidate.planId, feasible = true,
+        action = "OBSERVE", reason = "ISOLATED_OR_RECOVERING_PEAK",
+        score = $candidate.score, marginKw = $candidate.marginKw }
+end
+
+rule "Choose the cheapest feasible plan with a stable tie break"
+salience 400
+when
+    $request: DispatchRequest()
+    not DrainDispatch()
+    $candidate: PlanCandidate(status == "ACCEPTED")
+    not PlanCandidate(status == "ACCEPTED", score < $candidate.score)
+    not PlanCandidate(status == "ACCEPTED", score == $candidate.score, planId < $candidate.planId)
+    not DispatchDecision(tick == $request.tick)
+then
+    insert DispatchDecision { tick = $request.tick, planId = $candidate.planId, feasible = true,
+        action = $candidate.action, reason = "MINIMUM_FEASIBLE_COST",
+        score = $candidate.score, marginKw = $candidate.marginKw }
+end
+rule "Escalate when constraints leave no feasible plan"
+salience 400
+when $request: DispatchRequest() not DrainDispatch() not PlanCandidate(status == "ACCEPTED") not DispatchDecision(tick == $request.tick)
+then
+    insert DispatchDecision { tick = $request.tick, planId = 0, feasible = false,
+        action = "REQUEST_SUPPORT", reason = "NO_SAFE_PLAN", score = 0.0, marginKw = 0.0 }
+end
+
+rule "Drain plan candidates" salience 10
+when DrainDispatch() $value: PlanCandidate() then retract $value end
+rule "Drain dispatch incidents" salience 10
+when DrainDispatch() $value: DispatchIncident() then retract $value end
+rule "Drain pump snapshots" salience 10
+when DrainDispatch() $value: PumpSnapshot() then retract $value end
+rule "Drain dispatch decisions" salience 10
+when DrainDispatch() $value: DispatchDecision() then retract $value end
+rule "Drain dispatch requests" salience 10
+when DrainDispatch() $value: DispatchRequest() then retract $value end
+rule "Drain window snapshots" salience 10
+when DrainDispatch() $value: WindowSnapshot() then retract $value end
+rule "Drain window assessments" salience 10
+when DrainDispatch() $value: WindowAssessment() then retract $value end
+rule "Finish dispatch drain" salience -10
+when
+    $drain: DrainDispatch() not PlanCandidate() not DispatchIncident()
+    not PumpSnapshot() not DispatchDecision() not DispatchRequest()
+    not WindowSnapshot() not WindowAssessment()
+then retract $drain end
+
+query "PlanCandidates" $row: PlanCandidate() end
+query "DispatchDecisions" $row: DispatchDecision() end
+query "DispatchIncidents" $row: DispatchIncident() end
+query "DispatchRequests" $row: DispatchRequest() end
+query "PumpSnapshots" $row: PumpSnapshot() end
+query "WindowAssessments" $row: WindowAssessment() end
+query "WindowSnapshots" $row: WindowSnapshot() end

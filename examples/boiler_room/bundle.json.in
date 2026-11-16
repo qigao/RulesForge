@@ -1,0 +1,28 @@
+{
+  "provider":"$<TARGET_FILE_NAME:rulesforge_toad>",
+  "rules":"boiler.rfl", "signatures":"boiler.schema", "mode":"interpreter",
+  "native_modules":[
+    {"path":"$<TARGET_FILE_NAME:boiler_physics>"},
+    {"path":"$<TARGET_FILE_NAME:boiler_statistics>"},
+    {"path":"$<TARGET_FILE_NAME:boiler_scoring>"}
+  ],
+  "modules":[
+    {"name":"thermal","path":"thermal.toad"}, {"name":"pump","path":"pump.toad"},
+    {"name":"balance","path":"balance.toad"}, {"name":"alert","path":"alert.toad"},
+    {"name":"dispatch","path":"dispatch.toad"}
+  ],
+  "bindings":[
+    {"name":"thermal.calculate","module":"thermal","function":"calculate","parameters":["BoilerReading","BoilerParameters","double","int64","int64","bool"],"result":"BoilerMetrics"},
+    {"name":"pump.calculate","module":"pump","function":"calculate","parameters":["PumpReading","double","double","int64","int64","int64","int64"],"result":"PumpMetrics"},
+    {"name":"balance.calculate","module":"balance","function":"calculate","parameters":["RoomReading"],"result":"RoomMetrics"},
+    {"name":"alert.step","module":"alert","function":"advance_alert","parameters":["int64","bool","bool","bool","int64","int64","int64","int64","bool","int64","int64"],"result":"AlarmStep"},
+    {"name":"alert.acknowledge","module":"alert","function":"acknowledge","parameters":["int64","int64","int64","bool","int64","int64"],"result":"AckStep"},
+    {"name":"dispatch.assess","module":"dispatch","function":"assess_plan","parameters":["DispatchThermal","PlanParameters","double","double","double","BoilerParameters","WindowEvidence","double"],"result":"PlanMetrics"},
+    {"name":"window.summarize","module":"dispatch","function":"summarize_window","parameters":["int64","int64","int64","int64","int64","double","double","double","double","int64","int64","int64","bool","WindowModel"],"result":"WindowEvidence"}
+  ],
+  "limits":{
+    "source_bytes":4194304,"value_bytes":4194304,"value_nodes":65536,"value_depth":64,
+    "steps":100000,"loops":10000,"recursion":100,"retained_bytes":134217728,
+    "stack_bytes":1048576,"max_sessions":6
+  }
+}

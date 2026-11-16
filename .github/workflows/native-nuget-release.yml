@@ -1,386 +1,291 @@
 name: RulesForge native SDK release
-
 on:
+  pull_request:
+    branches: [master]
   push:
     branches: [master]
     tags: ["v*"]
-    paths:
-      - ".github/workflows/native-nuget-release.yml"
   workflow_dispatch:
-
+  workflow_call:
 permissions:
   contents: read
   packages: read
-
 concurrency:
-  group: rulesforge-native-sdk-${{ github.ref }}
-  cancel-in-progress: false
-
+  group: rulesforge-sdk-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  VCPKG_CACHE_VERSION: ${{ vars.VCPKG_CACHE_VERSION }}
+  SALTS_BASE_VERSION: ${{ vars.SALTS_BASE_VERSION }}
+  CMETA_VERSION: ${{ vars.CMETA_VERSION }}
+  SALTS_UTILS_VERSION: ${{ vars.SALTS_UTILS_VERSION }}
+  SALTS_CORE_VERSION: ${{ vars.SALTS_CORE_VERSION }}
+  TOAD_VERSION: ${{ vars.TOAD_VERSION }}
 jobs:
   metadata:
-    name: Release metadata
-    if: >-
-      github.ref_type == 'tag' ||
-      (github.ref_name == 'master' && startsWith(github.event.head_commit.message, 'release: publish RulesForge package'))
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
-      source_commit: ${{ steps.version.outputs.source_commit }}
+      release: ${{ steps.version.outputs.release }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
-
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Check SDK restore syntax
+        shell: bash
+        run: python3 -c 'from pathlib import Path; p = Path("cmake/ci/restore-native-sdks.py"); compile(p.read_text(encoding="utf-8"), str(p), "exec")'
       - id: version
-        name: Validate release identity
         shell: bash
         run: |
           set -euo pipefail
-          major="$(awk '/set\(CMAKE_PROJECT_VERSION_MAJOR/{gsub(/[)]/,"",$2); print $2; exit}' CMakeLists.txt)"
-          minor="$(awk '/set\(CMAKE_PROJECT_VERSION_MINOR/{gsub(/[)]/,"",$2); print $2; exit}' CMakeLists.txt)"
-          patch="$(awk '/set\(CMAKE_PROJECT_VERSION_PATCH/{gsub(/[)]/,"",$2); print $2; exit}' CMakeLists.txt)"
-          version="$major.$minor.$patch"
-          manifest_version="$(python3 -c 'import json; print(json.load(open("vcpkg.json", encoding="utf-8"))["version-semver"])')"
-          test "$manifest_version" = "$version"
+          version="$(awk '/^[[:space:]]*VERSION [0-9]/{print $2; exit}' CMakeLists.txt)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          vcpkg_version="$(python3 -c 'import json; print(json.load(open("vcpkg.json", encoding="utf-8"))["version-semver"])')"
+          if [[ "$vcpkg_version" != "$version" ]]; then
+            echo "release version mismatch: CMake=$version vcpkg=$vcpkg_version" >&2
+            exit 1
+          fi
+
+          header_major="$(awk '/^#define RULEFORGE_VERSION_MAJOR / {print $3; exit}' rulesforge/include/rules_forge.h)"
+          header_minor="$(awk '/^#define RULEFORGE_VERSION_MINOR / {print $3; exit}' rulesforge/include/rules_forge.h)"
+          header_patch="$(awk '/^#define RULEFORGE_VERSION_PATCH / {print $3; exit}' rulesforge/include/rules_forge.h)"
+          header_string="$(awk '/^#define RULEFORGE_VERSION_STRING / {gsub(/"/, "", $3); print $3; exit}' rulesforge/include/rules_forge.h)"
+          header_version="$header_major.$header_minor.$header_patch"
+          if [[ "$header_version" != "$version" || "$header_string" != "$version" ]]; then
+            echo "release version mismatch: CMake=$version public-header=$header_version public-header-string=$header_string" >&2
+            exit 1
+          fi
+
+          nuget_version="$(python3 -c 'import xml.etree.ElementTree as ET; print(ET.parse("packaging/nuget/RulesForge.Native.csproj").find(".//PackageVersion").text)')"
+          if [[ "$nuget_version" != "$version" ]]; then
+            echo "release version mismatch: CMake=$version NuGet=$nuget_version" >&2
+            exit 1
+          fi
+
           tag="v$version"
-          source_commit="$(git rev-parse HEAD)"
-          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             if [[ "$GITHUB_REF_NAME" != "$tag" ]]; then
               echo "release tag mismatch: pushed=$GITHUB_REF_NAME expected=$tag" >&2
               exit 1
             fi
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
           else
-            test "${GITHUB_REF_NAME:-}" = "master"
-            test "${{ startsWith(github.event.head_commit.message, 'release: publish RulesForge package') }}" = "true"
+            echo "version=$version-ci.$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "source_commit=$source_commit" >> "$GITHUB_OUTPUT"
-
-  linux:
-    name: Linux x64 SDK
+  build:
+    name: ${{ matrix.profile }}
     needs: metadata
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: windows-latest, rid: windows-x64, profile: windows-llvm-mingw-x64, preset: ci-llvm-mingw-x64-release-user, triplet: qigao-x64-windows-llvm-mingw, host: windows-x64, native: true}
+          - {runner: ubuntu-24.04, rid: linux-x64, profile: linux-clang-x64, preset: ci-llvm-native-release-user, triplet: x64-linux, host: linux-x64, native: true}
+          - {runner: macos-15, rid: macos-arm64, profile: macos-clang-arm64, preset: ci-llvm-native-release-user, triplet: arm64-osx, host: macos-arm64, native: true}
+          - {runner: ubuntu-24.04, rid: android-arm64-v8a, profile: android-arm64, preset: ci-android-arm64-release-user, triplet: arm64-android, host: linux-x64, native: false}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      VCPKG_CACHE_REPOSITORY_ROOT: ${{ github.workspace }}/build/infrastructure
+      LLVM_NATIVE_TARGET_TRIPLET: ${{ matrix.triplet }}
+      PRESET: ${{ matrix.preset }}
+      RID: ${{ matrix.rid }}
+      SDK_VERSION: ${{ needs.metadata.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-
-      - name: Use empty vcpkg L1 cache
-        shell: bash
-        run: |
-          set -euo pipefail
-          cache="$RUNNER_TEMP/rulesforge-release-empty-l1"
-          rm -rf "$cache"
-          mkdir -p "$cache"
-          echo "VCPKG_BINARY_CACHE=$cache" >> "$GITHUB_ENV"
-
-      - name: Checkout immutable native curl GitHub Packages client
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           repository: qigao/vcpkg-cache
-          ref: b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
-          path: build/vcpkg-cache-contract
+          ref: v${{ env.VCPKG_CACHE_VERSION }}
+          path: build/infrastructure
           persist-credentials: false
-      - name: Configure canonical curl-only vcpkg binary cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
+      - uses: actions/setup-python@v5
         with:
-          mode: read
-          triplet: x64-linux
-          host-triplet: x64-linux
-
-      - name: Restore canonical re2c host tool
-        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
-
-
-      - name: Install build tools
+          python-version: '3.12'
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ninja-build pkg-config
-
-      - name: Restore published Salts SDK pair
-        shell: pwsh
+          sudo apt-get install -y --no-install-recommends clang ninja-build pkg-config
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install ninja pkgconf llvm@18
+      - name: Install Windows build tools
+        if: runner.os == 'Windows'
+        run: |
+          choco install ninja pkgconfiglite --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: ./build/infrastructure/.github/actions/setup-llvm-mingw
+        id: mingw
+        if: runner.os == 'Windows'
+      - name: Select the published Windows compiler
+        if: runner.os == 'Windows'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/ci/restore-native-sdks.ps1 -Rid linux-x64
-
-      - name: Configure release SDK
-        shell: bash
+          COMPILER_ROOT: ${{ steps.mingw.outputs.root }}
         run: |
-          set -euo pipefail
-          cmake -S . -B build/native-release -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed"             -DVCPKG_INSTALL_OPTIONS=--only-binarycaching             -DENABLE_TESTS=OFF             -DBUILD_TESTING=OFF             -DENABLE_SAMPLES=OFF             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/stage/sdk/linux-x64"
-
-      - name: Build and install SDK
-        shell: bash
+          $root = $env:COMPILER_ROOT.Replace('\', '/')
+          "LLVM_MINGW_ROOT=$root" >> $env:GITHUB_ENV
+      - uses: ./build/infrastructure/.github/actions/setup-llvm-native
+        if: matrix.native && runner.os != 'Windows'
+      - name: Select Android NDK
+        if: '!matrix.native'
         run: |
-          set -euo pipefail
-          cmake --build build/native-release --target RulesForge --parallel 2
-          cmake --install build/native-release --strip
-          prefix="$GITHUB_WORKSPACE/stage/sdk/linux-x64"
-          test -f "$prefix/include/rules_forge.h"
-          test -f "$prefix/lib/cmake/RulesForge/RulesForgeConfig.cmake"
-          test -f "$prefix/lib/libRulesForge.so"
-          {
-            echo "package=RulesForge.Native"
-            echo "version=${{ needs.metadata.outputs.version }}"
-            echo "rid=linux-x64"
-            echo "salts=$SALTS_PACKAGE_VERSION"
-            echo "saltsutils=$SALTS_UTILS_PACKAGE_VERSION"
-            echo "databind_abi=10"
-            echo "profile=release"
-            echo "source=$GITHUB_SHA"
-          } > "$prefix/rulesforge-sdk-manifest.txt"
-
-      - name: Verify native release ELF runtime closure
-        shell: bash
+          if (!$env:ANDROID_NDK_HOME) { throw 'ANDROID_NDK_HOME is required' }
+          Get-Content (Join-Path $env:ANDROID_NDK_HOME 'source.properties')
+      - name: Restore exact published SDKs and generator tools
         run: |
-          set -euo pipefail
-          prefix="$GITHUB_WORKSPACE/stage/sdk/linux-x64"
-          library="$prefix/lib/libRulesForge.so"
-          test -f "$library"
-          LD_LIBRARY_PATH="$prefix/lib:$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:${LD_LIBRARY_PATH:-}" \
-            ldd -r "$library" | tee "$RUNNER_TEMP/rulesforge-elf-closure.txt"
-          if grep -Eq '=> not found|undefined symbol:' "$RUNNER_TEMP/rulesforge-elf-closure.txt"; then
-            echo "Refusing to publish a native SDK with unresolved ELF dependencies" >&2
-            exit 1
-          fi
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rulesforge-sdk-linux-x64
-          path: stage/sdk/linux-x64
-          if-no-files-found: error
-
-  windows:
-    name: Windows x64 SDK
-    needs: metadata
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-
-      - name: Use empty vcpkg L1 cache
-        shell: pwsh
+          ./cmake/ci/restore-native-sdks.ps1 -Rid '${{ matrix.rid }}' -HostRid '${{ matrix.host }}' -Profile '${{ matrix.profile }}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "SALTS_CI_VCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" >> $env:GITHUB_ENV
+      - name: Configure the complete build graph
         run: |
-          $ErrorActionPreference = "Stop"
-          $cache = Join-Path $env:RUNNER_TEMP "rulesforge-release-empty-l1"
-          if (Test-Path -LiteralPath $cache) { Remove-Item -LiteralPath $cache -Recurse -Force }
-          New-Item -ItemType Directory -Force -Path $cache | Out-Null
-          "VCPKG_BINARY_CACHE=$cache" >> $env:GITHUB_ENV
-
-      - name: Checkout immutable native curl GitHub Packages client
-        uses: actions/checkout@v4
-        with:
-          repository: qigao/vcpkg-cache
-          ref: b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
-          path: build/vcpkg-cache-contract
-          persist-credentials: false
-      - name: Configure canonical curl-only vcpkg binary cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
-        with:
-          mode: read
-          triplet: x64-windows
-          host-triplet: x64-windows
-
-      - name: Restore canonical re2c host tool
-        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@b4952760bf85d666d834c5b0c75ff4d9d0f8ddad
-
-
-      - name: Locate MSVC
-        shell: pwsh
+          cmake --fresh --preset $env:PRESET
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build the complete graph
         run: |
-          $ErrorActionPreference = "Stop"
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
-          $vs = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw "x64 MSVC was not found" }
-          "VSINSTALL=$vs" >> $env:GITHUB_ENV
-
-      - name: Install Ninja
-        shell: pwsh
-        run: choco install ninja -y --no-progress
-
-      - name: Restore published Salts SDK pair
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64
-
-      - name: Configure, build and install release SDK
-        shell: cmd
+          cmake --build --preset $env:PRESET --parallel 3
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run the complete formal CTest suite
+        if: matrix.native
         run: |
-          set "QIGAO_CANONICAL_VCPKG_ROOT=%VCPKG_ROOT%"
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-          if errorlevel 1 exit /b 1
-          set "VCPKG_ROOT=%QIGAO_CANONICAL_VCPKG_ROOT%"
-          cmake -S . -B build\native-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="%QIGAO_VCPKG_TOOLCHAIN_FILE%" -DVCPKG_TARGET_TRIPLET=x64-windows -DVCPKG_HOST_TRIPLET=x64-windows -DVCPKG_INSTALLED_DIR="%GITHUB_WORKSPACE%\vcpkg_installed" -DVCPKG_INSTALL_OPTIONS=--only-binarycaching -DENABLE_TESTS=OFF -DBUILD_TESTING=OFF -DENABLE_SAMPLES=OFF -DCMAKE_INSTALL_PREFIX="%GITHUB_WORKSPACE%\stage\sdk\windows-x64"
-          if errorlevel 1 exit /b 1
-          cmake --build build\native-release --target RulesForge --parallel 2
-          if errorlevel 1 exit /b 1
-          cmake --install build\native-release
-          if errorlevel 1 exit /b 1
-
-      - name: Verify Windows SDK
-        shell: pwsh
+          ctest --preset $env:PRESET --no-tests=error --output-on-failure --timeout 180 --output-junit "build/$env:PRESET/ctest.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install and archive the SDK
         run: |
-          $ErrorActionPreference = "Stop"
-          $prefix = Join-Path $env:GITHUB_WORKSPACE "stage/sdk/windows-x64"
-          foreach ($file in @(
-            "include/rules_forge.h",
-            "lib/cmake/RulesForge/RulesForgeConfig.cmake",
-            "bin/RulesForge.dll",
-            "lib/RulesForge.lib"
-          )) {
-            $path = Join-Path $prefix $file
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "missing SDK file: $path" }
+          cmake --build --preset "install-$env:PRESET"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $prefix = "build/$env:PRESET/stage"
+          @{schema=1; version=$env:SDK_VERSION; commit='${{ github.event.pull_request.head.sha || github.sha }}';
+            rid=$env:RID; profile='${{ matrix.profile }}'; producer_run=$env:GITHUB_RUN_ID;
+            native_tests='${{ matrix.native }}';
+            dependencies=@{vcpkg_cache=$env:VCPKG_CACHE_VERSION; SaltsBase=$env:SALTS_BASE_VERSION;
+              CMeta=$env:CMETA_VERSION; SaltsUtils=$env:SALTS_UTILS_VERSION;
+              CNet=$env:SALTS_CORE_VERSION; Toad=$env:TOAD_VERSION}} |
+            ConvertTo-Json -Depth 5 | Set-Content "$prefix/rulesforge-sdk-manifest.json" -Encoding utf8
+          New-Item -ItemType Directory -Path "stage/$env:RID", dist -Force | Out-Null
+          Copy-Item -Path "$prefix/*" -Destination "stage/$env:RID" -Recurse
+          tar -czf "dist/rulesforge-${env:SDK_VERSION}-${{ matrix.profile }}.tar.gz" -C stage $env:RID
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify Android ELF load-segment alignment
+        if: '!matrix.native'
+        run: |
+          $readelf = Join-Path $env:ANDROID_NDK_HOME 'toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf'
+          $libraries = Get-ChildItem "build/$env:PRESET/stage" -Recurse -Filter '*.so'
+          if (!$libraries) { throw 'Android SDK contains no shared ELF libraries' }
+          foreach ($library in $libraries) {
+            $headers = & $readelf --program-headers --wide $library.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $loads = @($headers | Where-Object { $_ -match '^\s*LOAD\s' })
+            if (!$loads.Count) { throw "No LOAD segments: $($library.FullName)" }
+            foreach ($load in $loads) {
+              if ($load -notmatch '\s(0x[0-9a-fA-F]+)\s*$' -or [Convert]::ToUInt64($Matches[1], 16) -lt 16384) {
+                throw "ELF LOAD alignment below 16 KiB: $($library.FullName): $load"
+              }
+            }
           }
-          @(
-            "package=RulesForge.Native",
-            "version=${{ needs.metadata.outputs.version }}",
-            "rid=windows-x64",
-            "salts=$env:SALTS_PACKAGE_VERSION",
-            "saltsutils=$env:SALTS_UTILS_PACKAGE_VERSION",
-            "databind_abi=10",
-            "profile=release",
-            "source=$env:GITHUB_SHA"
-          ) | Set-Content -LiteralPath (Join-Path $prefix "rulesforge-sdk-manifest.txt") -Encoding ascii
-
       - uses: actions/upload-artifact@v4
         with:
-          name: rulesforge-sdk-windows-x64
-          path: stage/sdk/windows-x64
+          name: rulesforge-sdk-${{ matrix.profile }}
+          path: dist/*.tar.gz
           if-no-files-found: error
-
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rulesforge-diagnostics-${{ matrix.profile }}
+          path: |
+            build/${{ matrix.preset }}/ctest.xml
+            build/${{ matrix.preset }}/CMakeCache.txt
+            build/${{ matrix.preset }}/Testing/Temporary
+            build/${{ matrix.preset }}/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn
   pack:
-    name: Pack RulesForge.Native
-    needs: [metadata, linux, windows]
+    needs: [metadata, build]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-
       - uses: actions/download-artifact@v4
         with:
           pattern: rulesforge-sdk-*
-          path: package/sdk
-          merge-multiple: false
-
-      - name: Normalize artifact layout
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p normalized/sdk
-          cp -a package/sdk/rulesforge-sdk-linux-x64 normalized/sdk/linux-x64
-          cp -a package/sdk/rulesforge-sdk-windows-x64 normalized/sdk/windows-x64
-          rm -rf package
-          mv normalized package
-          test -f package/sdk/linux-x64/include/rules_forge.h
-          test -f package/sdk/linux-x64/lib/cmake/RulesForge/RulesForgeConfig.cmake
-          test -f package/sdk/linux-x64/lib/libRulesForge.so
-          test -f package/sdk/windows-x64/include/rules_forge.h
-          test -f package/sdk/windows-x64/lib/cmake/RulesForge/RulesForgeConfig.cmake
-          test -f package/sdk/windows-x64/bin/RulesForge.dll
-          test "$(find package/sdk -maxdepth 2 -name rulesforge-sdk-manifest.txt | wc -l)" -eq 2
-
+          merge-multiple: true
+          path: dist
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
-
-      - name: Configure GitHub Packages source
-        shell: bash
+          dotnet-version: '8.0.x'
+      - name: Pack the qualified SDKs
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          config="$RUNNER_TEMP/rulesforge-pack.config"
-          printf '<?xml version="1.0" encoding="utf-8"?><configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
-          dotnet nuget add source "https://nuget.pkg.github.com/qigao/index.json"             --name github --username qigao --password "$GITHUB_TOKEN"             --store-password-in-clear-text --configfile "$config"
-          echo "NUGET_CONFIG=$config" >> "$GITHUB_ENV"
-
-      - name: Create NuGet package
+          SDK_VERSION: ${{ needs.metadata.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          dotnet restore packaging/nuget/RulesForge.Native.csproj             --configfile "$NUGET_CONFIG" --packages "$RUNNER_TEMP/pack-nuget" --no-cache --force-evaluate
-          dotnet pack packaging/nuget/RulesForge.Native.csproj             --no-restore --configuration Release --output dist             -p:PackageVersion=${{ needs.metadata.outputs.version }}             -p:PackageRoot="$GITHUB_WORKSPACE/package"             -p:RestorePackagesPath="$RUNNER_TEMP/pack-nuget"             -p:RepositoryCommit="$GITHUB_SHA"
-          nupkg="dist/RulesForge.Native.${{ needs.metadata.outputs.version }}.nupkg"
-          test -f "$nupkg"
-          unzip -Z1 "$nupkg" | sort | tee "$RUNNER_TEMP/rulesforge-nupkg.txt"
-          grep -Fx "sdk/linux-x64/include/rules_forge.h" "$RUNNER_TEMP/rulesforge-nupkg.txt"
-          grep -Fx "sdk/linux-x64/lib/cmake/RulesForge/RulesForgeConfig.cmake" "$RUNNER_TEMP/rulesforge-nupkg.txt"
-          grep -Fx "sdk/windows-x64/include/rules_forge.h" "$RUNNER_TEMP/rulesforge-nupkg.txt"
-          grep -Fx "sdk/windows-x64/bin/RulesForge.dll" "$RUNNER_TEMP/rulesforge-nupkg.txt"
-          unzip -p "$nupkg" "RulesForge.Native.nuspec" > "$RUNNER_TEMP/rulesforge.nuspec"
-          if grep -E 'id="(Salts\.Native|SaltsUtils\.Native)"' "$RUNNER_TEMP/rulesforge.nuspec"; then
-            echo "RulesForge.Native must not embed GitHub package dependency metadata" >&2
-            exit 1
-          fi
-
+          mkdir -p package/sdk
+          for profile in windows-llvm-mingw-x64 linux-clang-x64 macos-clang-arm64 android-arm64; do
+            tar -xzf "dist/rulesforge-$SDK_VERSION-$profile.tar.gz" -C package/sdk
+          done
+          for rid in windows-x64 linux-x64 macos-arm64 android-arm64-v8a; do
+            test -f "package/sdk/$rid/include/rules_forge.h"
+            test -f "package/sdk/$rid/lib/cmake/RulesForge/RulesForgeTargets.cmake"
+          done
+          dotnet pack packaging/nuget/RulesForge.Native.csproj --configuration Release --output dist \
+            "-p:PackageVersion=$SDK_VERSION" "-p:PackageRoot=$GITHUB_WORKSPACE/package"
+          (cd dist && sha256sum *.tar.gz *.nupkg > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
-          name: RulesForge.Native.${{ needs.metadata.outputs.version }}
-          path: dist/*.nupkg
+          name: rulesforge-release
+          path: dist/*
           if-no-files-found: error
-
   publish:
-    name: Publish package and GitHub Release
+    name: Publish RulesForge release
     needs: [metadata, pack]
+    if: startsWith(github.ref, 'refs/tags/v') && needs.metadata.outputs.release == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
       packages: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: RulesForge.Native.${{ needs.metadata.outputs.version }}
+          name: rulesforge-release
           path: dist
-
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
-
-      - name: Create bootstrap tag when needed
-        if: github.ref_type != 'tag'
-        shell: bash
+          dotnet-version: '8.0.x'
+      - name: Verify release asset checksums
+        run: cd dist && sha256sum --check SHA256SUMS
+      - name: Publish RulesForge.Native
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.metadata.outputs.tag }}
-          SOURCE_COMMIT: ${{ needs.metadata.outputs.source_commit }}
+          GITHUB_TOKEN: ${{ github.token }}
+          SDK_VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           set -euo pipefail
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
-            existing="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha)"
-            test "$existing" = "$SOURCE_COMMIT"
-          else
-            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$SOURCE_COMMIT"
-          fi
-
-      - name: Publish to qigao GitHub Packages
-        shell: bash
+          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json --name github \
+            --username qigao --password "$GITHUB_TOKEN" --store-password-in-clear-text
+          dotnet nuget push "dist/RulesForge.Native.$SDK_VERSION.nupkg" --source github --api-key "$GITHUB_TOKEN"
+      - name: Publish GitHub Release with qualified SDKs
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          SDK_VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           set -euo pipefail
-          dotnet nuget add source "https://nuget.pkg.github.com/qigao/index.json"             --name github --username qigao --password "$GITHUB_TOKEN"             --store-password-in-clear-text
-          dotnet nuget push "dist/RulesForge.Native.${{ needs.metadata.outputs.version }}.nupkg"             --api-key "$GITHUB_TOKEN" --source github --skip-duplicate
-
-      - name: Create GitHub Release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.metadata.outputs.tag }}
-          VERSION: ${{ needs.metadata.outputs.version }}
-        run: |
-          set -euo pipefail
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "release $TAG already exists; package publish was idempotent"
-            exit 0
-          fi
-          gh release create "$TAG" dist/*.nupkg             --repo "$GITHUB_REPOSITORY" --verify-tag             --title "RulesForge $VERSION" --generate-notes
+          gh release create "v$SDK_VERSION" dist/* --verify-tag \
+            --title "RulesForge $SDK_VERSION" --generate-notes

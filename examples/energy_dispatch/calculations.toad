@@ -1,0 +1,23 @@
+func score(plan, model) {
+    if (model.capacityKwh <= 0 || model.reserveKwh < 0 || model.reserveKwh > model.capacityKwh ||
+        model.initialKwh < model.reserveKwh || model.initialKwh > model.capacityKwh ||
+        model.finalKwh < model.reserveKwh || model.finalKwh > model.capacityKwh ||
+        model.maxGridKw < 0 || model.wearPerKwh < 0) { throw "invalid energy model"; };
+    soc = model.initialKwh; minSoc = soc; maxSoc = soc;
+    minGrid = 1e100; peakGrid = -1e100; total = 0.0; index = 0;
+    for (battery in plan.battery) {
+        if (battery < -2 || battery > 2 || model.demand[index] < 0 ||
+            model.renewable[index] < 0 || model.price[index] < 0) { throw "invalid dispatch input"; };
+        grid = model.demand[index] - model.renewable[index] - battery;
+        soc = soc - battery;
+        if (soc < minSoc) { minSoc = soc; };
+        if (soc > maxSoc) { maxSoc = soc; };
+        if (grid < minGrid) { minGrid = grid; };
+        if (grid > peakGrid) { peakGrid = grid; };
+        throughput = battery; if (throughput < 0) { throughput = -throughput; };
+        total = total + grid * model.price[index] + throughput * model.wearPerKwh;
+        index = index + 1;
+    };
+    return map {total:total, minSoc:minSoc, maxSoc:maxSoc, finalSoc:soc, minGrid:minGrid, peakGrid:peakGrid};
+};
+export("score");

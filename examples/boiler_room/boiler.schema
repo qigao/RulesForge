@@ -1,0 +1,121 @@
+schema BoilerRoom [id(21), version(1), byte_order(little)];
+
+composite BoilerReading {
+    int64 tick;
+    bool waterValid; bool fuelValid; bool energyReady;
+    double supply; double returnTemp; double flow; double gasFlow;
+    double waterKwh; double gasVolume;
+    int64 fuelEpoch;
+    bool fault;
+}
+composite BoilerParameters { double rho; double cp; double lhv; }
+message BoilerInput { BoilerReading reading; }
+message BoilerModel { BoilerParameters parameters; }
+message BoilerState {
+    double heatKw; double efficiency; bool heatValid; bool efficiencyValid;
+    int64 efficiencyTick; int64 efficiencyEpoch; bool fresh; bool fault;
+}
+message BoilerMetrics {
+    double heatKw; double efficiency; bool heatValid; bool efficiencyValid;
+    int64 efficiencyTick; int64 efficiencyEpoch; bool fresh; bool fault;
+}
+
+composite PumpReading {
+    int64 tick; int64 epoch; int64 sequence;
+    bool fresh; bool running;
+    double rms; double kurtosis; double current; double pressure; double flow;
+}
+composite WindowEvidence {
+    int64 tick; int64 samples; int64 elevated; int64 recentSamples; int64 priorSamples;
+    double mean; double peak; double recentMean; double priorMean;
+    double coveragePct; double continuousSeconds; double trendDelta; double trendPerSecond;
+    bool ready; bool trendReady;
+}
+composite WindowModel {
+    int64 spanMs; int64 halfMs; int64 frameMs; int64 freshMs; int64 minSamples; int64 minHalf;
+}
+message WindowPolicy {
+    WindowModel model;
+    double elevatedRisk; double confirmedSeconds; int64 majoritySamples;
+    double confirmedMean; double trendDelta; double trendMean; double watchPeak; double lookaheadSeconds;
+}
+message WindowSnapshot { WindowEvidence metrics; string pump; }
+message WindowAssessment { int64 tick; string pump; string level; }
+message PumpInput { PumpReading reading; }
+message PumpState {
+    double mean; double variance; double risk; double windowMean; double windowPeak;
+    int64 lastTick; int64 lastEpoch; int64 lastSequence; int64 samples;
+    bool valid; bool fresh; bool mismatch;
+}
+message PumpMetrics {
+    double mean; double variance; double risk;
+    int64 lastTick; int64 lastEpoch; int64 lastSequence; int64 samples;
+    bool valid; bool fresh; bool mismatch;
+}
+
+composite RoomReading {
+    bool heatValid; bool demandValid;
+    double heatA; double heatB; double headerKw; double outsideTemp;
+}
+message RoomInput { RoomReading reading; }
+message RoomState { double gapPct; double deficitPct; double demandKw; bool heatValid; bool demandValid; }
+message RoomMetrics { double gapPct; double deficitPct; double demandKw; bool heatValid; bool demandValid; }
+
+message AlarmState {
+    int64 phase; int64 since; int64 occurrence; int64 revision; bool acknowledged;
+    string code;
+}
+message AlarmPolicy { int64 raiseMs; int64 clearMs; string code; }
+message AlarmInput { int64 tick; bool valid; bool bad; bool recovered; string code; }
+message AlarmStep {
+    int64 phase; int64 since; int64 occurrence; int64 revision;
+    bool acknowledged; int64 notify;
+}
+message AckRequest { int64 tick; int64 occurrence; int64 revision; string code; }
+message AckStep { bool accepted; bool acknowledged; int64 revision; int64 notify; }
+message Clock { int64 tick; int64 cutoff; int64 split; }
+message AdvanceClock { int64 tick; int64 cutoff; int64 split; }
+message Drain { bool requested; }
+
+composite PlanParameters { double speed; double riskFactor; double fixedCost; }
+composite DispatchThermal {
+    double otherHeat; double availableHeat; double supply; double returnTemp;
+    double demand; double reserve; double otherPumpKw;
+    double energyPrice; double horizonHours; double failureCost;
+}
+message PumpRoute {
+    double designFlow; double nominalKw; double warningFlow; double warningPressure;
+    bool primary;
+    string pump; string loop;
+}
+message PlanSpec {
+    int64 id; PlanParameters parameters; bool needsStandby;
+    string action; string standby;
+}
+message DispatchRequest {
+    int64 tick; DispatchThermal thermal; double maxRisk; double warningRisk;
+    bool valid;
+    string loop;
+}
+message PumpSnapshot {
+    int64 tick; double risk; double flow; double pressure;
+    bool fresh; bool running; bool maintenance; bool available;
+    string pump;
+}
+message PlanMetrics {
+    double capacityKw; double marginKw; double energyKwh; double residualRisk;
+    double energyCost; double riskCost; double score;
+}
+message PlanCandidate {
+    int64 planId; bool calculated;
+    double capacityKw; double marginKw; double energyKwh; double residualRisk;
+    double energyCost; double riskCost; double score;
+    string action; string status; string reason;
+}
+message DispatchIncident { int64 tick; double risk; double flow; double pressure; string pump; string loop; }
+message DispatchDecision {
+    int64 tick; int64 planId; bool feasible;
+    double score; double marginKw;
+    string action; string reason;
+}
+message DrainDispatch { bool requested; }

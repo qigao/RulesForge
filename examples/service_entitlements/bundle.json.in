@@ -1,0 +1,48 @@
+{
+  "provider": "$<TARGET_FILE_NAME:rulesforge_toad>",
+  "rules": "rules.rfl",
+  "signatures": "scenario.schema",
+  "mode": "@RULESFORGE_EXAMPLE_MODE@",
+  "modules": [
+    {
+      "name": "calculations",
+      "path": "calculations.toad"
+    }
+  ],
+  "bindings": [
+    {
+      "name": "tariff.validate_usage",
+      "module": "calculations",
+      "function": "validate_usage",
+      "parameters": [
+        "int64"
+      ],
+      "result": "UsageCheck"
+    },
+    {
+      "name": "tariff.price",
+      "module": "calculations",
+      "function": "price",
+      "parameters": [
+        "int64",
+        "int64",
+        "int64",
+        "int64",
+        "int64"
+      ],
+      "result": "Price"
+    }
+  ],
+  "limits": {
+    "source_bytes": 4194304,
+    "value_bytes": 4194304,
+    "value_nodes": 65536,
+    "value_depth": 64,
+    "steps": 100000,
+    "loops": 10000,
+    "recursion": 100,
+    "retained_bytes": 134217728,
+    "stack_bytes": 1048576,
+    "max_sessions": 8
+  }
+}

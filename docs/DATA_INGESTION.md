@@ -140,9 +140,10 @@ or broker callback may call `feed` for each received chunk and call `finish`
 after end-of-message. RulesForge does not schedule callbacks, retain the
 caller's chunk buffer, or create worker threads.
 
-Keep the stream and its session on the same execution strand or thread. If an
-async framework may resume callbacks on different workers, pin the operation or
-dispatch all stream calls to one serialized executor.
+Keep the stream and its session on the same thread. If an async framework may
+resume callbacks on different workers, pin the operation to a dedicated owner
+thread. Serialization alone does not guarantee thread affinity. Program
+sessions retain their creating thread through destruction.
 
 ## Continuous Events
 
@@ -176,7 +177,7 @@ names the bound string field containing each event ID and the bound integer
 field containing each event timestamp. All selected records share one entry
 point and commit atomically through the continuous batch operation.
 
-DataBind 2.5.1 invokes a synchronous callback whenever a streamable JSON/YAML
+The selected DataBind runtime invokes a synchronous callback whenever a streamable JSON/YAML
 array item, CSV row, or XML path element has passed path selection and schema
 binding.
 RulesForge immediately copies that borrowed value into an owned pending event.

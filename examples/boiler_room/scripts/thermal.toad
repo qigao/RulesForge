@@ -1,0 +1,24 @@
+func calculate(sample, model, efficiency, efficiencyTick, efficiencyEpoch, efficiencyValid) {
+    heat = 0.0;
+    if (sample.waterValid) {
+        heat = boiler_heat_kw(sample.flow, sample.supply, sample.returnTemp, model.rho, model.cp);
+    };
+    ready = false;
+    value = efficiency;
+    at = efficiencyTick;
+    epoch = efficiencyEpoch;
+    if (sample.waterValid && sample.fuelValid) {
+        if (sample.energyReady && sample.gasVolume > 0.0) {
+            value = boiler_efficiency_pct(sample.waterKwh, sample.gasVolume, model.lhv);
+            ready = true; at = sample.tick; epoch = sample.fuelEpoch;
+        } else if (efficiencyValid && epoch == sample.fuelEpoch && sample.tick - at <= 8000) {
+            ready = true;
+        };
+    };
+    fresh = false;
+    if (sample.waterValid && sample.fuelValid) { fresh = true; };
+    return map {heatKw:heat, efficiency:value, heatValid:sample.waterValid,
+        efficiencyValid:ready, efficiencyTick:at, efficiencyEpoch:epoch,
+        fresh:fresh, fault:sample.fault};
+};
+export("calculate");
