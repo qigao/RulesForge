@@ -650,3 +650,9 @@
   来放宽持久化重放冲突。现有 scenario_support_test 增加一 ULP 差异拒绝及
   signed-zero 幂等回归。Windows 在 8570a14 的完整 graph／CTest **79/79**
   通过，DLL 导出名称仍为原 **121** 项；最后的跨平台发布资格由 tag CI 记录。
+- Android CI 43817758490 已编译并安装完整 graph，ELF 验收发现项目自身的
+  librulesforge_toad.so LOAD 对齐为 0x1000。根 CMake 的 Android 平台链接策略
+  对全部项目目标设置 max-page-size/common-page-size=16384，覆盖 provider、
+  RulesForge 与生成 schema DSO；不修改 presets，不跳过 ELF 验收，也不重写上游
+  SDK。依据：[Android 16 KiB 支持](https://developer.android.com/guide/practices/page-sizes)。
+  编译／ELF 对齐通过仍不能代表 Android 设备运行通过。

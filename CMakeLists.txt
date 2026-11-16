@@ -10,6 +10,11 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    # All project DSOs, including providers and generated schema modules, must
+    # satisfy the SDK's 16 KiB LOAD alignment contract with NDK r27 as well.
+    add_link_options("LINKER:-z,max-page-size=16384" "LINKER:-z,common-page-size=16384")
+endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(ProjectOptions.cmake)
 include(GNUInstallDirs)
