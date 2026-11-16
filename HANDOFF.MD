@@ -644,3 +644,9 @@
   fixture target 显式链接既有 Salts::DataBind，将实际运行依赖交给 CMake 生成
   RPATH，不修改上游 SDK、不猜测其他目录。两个 native 示例的零值／整数判定
   同样使用 fpclassify／modf，保持精确边界并满足 Android 的现有告警策略。
+- Android 的严格告警也覆盖模拟遥测的 double 布尔值及 mock Decision 默认生成
+  的浮点 equality。遥测以 fpclassify 判零；Decision 显式使用 partial ordering
+  的 equivalent，维持精确数值相等（正负零相等、NaN 不等），不能加 epsilon
+  来放宽持久化重放冲突。现有 scenario_support_test 增加一 ULP 差异拒绝及
+  signed-zero 幂等回归。Windows 在 8570a14 的完整 graph／CTest **79/79**
+  通过，DLL 导出名称仍为原 **121** 项；最后的跨平台发布资格由 tag CI 记录。

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <compare>
 #include <cstdio>
 #include <exception>
 #include <span>
@@ -45,7 +46,13 @@ struct Text {
 struct Decision {
     Text id, action, reason, target;
     double metric = 0;
-    bool operator==(Decision const&) const = default;
+    bool operator==(Decision const& other) const noexcept {
+        // Replay requires exact numeric equality; an epsilon could hide a
+        // conflicting decision. Partial ordering also keeps NaN unequal.
+        return id == other.id && action == other.action && reason == other.reason &&
+               target == other.target &&
+               (metric <=> other.metric) == std::partial_ordering::equivalent;
+    }
 };
 struct DecisionBatch {
     std::array<Decision, max_decisions> values{};

@@ -27,6 +27,16 @@ suite("Scenario mock API commit and delivery protocol") {
         check_equal(actions.size(), std::size_t{1});
         check_true(repository.rows()[0].delivered);
     }
+    it("requires exact metric replay and treats signed zero as the same value") {
+        MockDecisionApi repository;
+        repository.commit(std::array{decision("one", 1.0)});
+        check_throws_with(repository.commit(std::array{
+            decision("one", std::nextafter(1.0, 2.0))}), "Conflicting replay");
+        check_equal(repository.get("one").metric, 1.0);
+        repository.commit(std::array{decision("zero", 0.0)});
+        repository.commit(std::array{decision("zero", -0.0)});
+        check_equal(repository.size(), std::size_t{2});
+    }
     it("leaves a committed row pending after failed delivery until an explicit call") {
         MockDecisionApi repository;
         MockActionApi actions;
