@@ -12,7 +12,7 @@ $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 if ($Local) {
   $localFields = @(
     'VCPKG_CACHE_VERSION', 'SALTS_BASE_VERSION', 'CMETA_VERSION',
-    'SALTS_UTILS_VERSION', 'SALTS_CORE_VERSION', 'CHTTP_VERSION',
+    'SALTS_UTILS_VERSION', 'SALTS_CORE_VERSION', 'TOAD_VERSION',
     'VCPKG_ROOT', 'VCPKG_CACHE_REPOSITORY_ROOT', 'VCPKG_BINARY_SOURCES',
     'VSDEVCMD_BAT', 'CMAKE_BUILD_PARALLEL_LEVEL', 'MSVC_TARGET_TRIPLET',
     'LLVM_NATIVE_TARGET_TRIPLET', 'GCC_TARGET_TRIPLET', 'GCC_C_COMPILER',
@@ -43,9 +43,10 @@ foreach ($key in $restored.Keys) {
 $runtimeBins = @(
   (Join-Path $restored['RE2C_ROOT'] 'bin')
   (Join-Path $restored['SALTS_BASE_ROOT'] 'bin')
+  (Join-Path $restored['CMETA_ROOT'] 'bin')
   (Join-Path $restored['SALTS_UTILS_ROOT'] 'bin')
-  (Join-Path $restored['SALTSCORE_ROOT'] 'bin')
-  (Join-Path $restored['CHTTP_ROOT'] 'bin')
+  (Join-Path $restored['SALTS_CORE_ROOT'] 'bin')
+  (Join-Path $restored['TOAD_ROOT'] 'bin')
 )
 $env:PATH = ($runtimeBins -join [IO.Path]::PathSeparator) + [IO.Path]::PathSeparator + $env:PATH
 if (-not $Local) {

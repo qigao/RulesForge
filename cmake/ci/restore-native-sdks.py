@@ -54,11 +54,6 @@ def main():
     environment = {key: versions[repo] for repo, key in VERSIONS.items()}
     environment.update(VCPKG_TARGET_TRIPLET=triplet,
                        VCPKG_CACHE_REPOSITORY_ROOT=infra.as_posix())
-    # CI supplies the released curl cache policy; local restores retain the
-    # read-only NuGet feed and writable default cache unless explicitly set.
-    environment['VCPKG_BINARY_SOURCES'] = os.environ.get('VCPKG_BINARY_SOURCES',
-        'clear;default,readwrite;nugettimeout,1800;nugetconfig,'
-        + (root / 'cmake/vcpkg-cache.nuget.config').as_posix() + ',read')
     if args.rid == 'android-arm64-v8a':
         environment['ANDROID_ABI'] = 'arm64-v8a'
     releases = {}
@@ -90,8 +85,8 @@ def main():
             raise ValueError('Release archive size/digest mismatch: ' + name)
         return archive, item
 
-    def sdk(repo, prefix, config, selected_profile):
-        name = f'{repo}-{versions[repo]}-{selected_profile}.tar'
+    def sdk(repo, prefix, config, selected_profile, *, archive_name=None, payload='.'):
+        name = archive_name or f'{repo}-{versions[repo]}-{selected_profile}.tar'
         if repo == 'salts-base':
             metadata, _ = download(repo, f'{repo}-{versions[repo]}-manifest.json')
             manifest = json.loads(metadata.read_text(encoding='utf-8-sig'))
@@ -126,33 +121,6 @@ def main():
                 raise ValueError(f'CMeta {versions[repo]} release requires SaltsBase '
                                  f'{required_base}; selected {versions["salts-base"]}. '
                                  'A matching published CMeta SDK is required.')
-        elif repo == 'chttp':
-            metadata, _ = download(repo, f'{repo}-{versions[repo]}-manifest.json')
-            manifest = json.loads(metadata.read_text(encoding='utf-8-sig'))
-            producer, = [s for s in manifest['sdks'] if s['profile'] == selected_profile]
-            item = asset(repo, name)
-            dependencies = manifest['dependencies']
-            # CMeta publishes SameMinorVersion compatibility. A selected patch
-            # upgrade must still match Base exactly via its own release manifest.
-            cmeta_version = tuple(map(int, versions['cmeta'].split('.')))
-            cmeta_minimum = tuple(map(int, dependencies['CMeta'].split('.')))
-            run_info = json.loads(run('gh', 'api',
-                f'repos/qigao/chttp/actions/runs/{manifest["producer_run"]}'))
-            if (manifest['schema'] != 1 or manifest['repository'] != 'qigao/chttp'
-                    or manifest['cmake_package'] != 'Chttp'
-                    or manifest['version'] != versions[repo]
-                    or run_info['conclusion'] != 'success'
-                    or run_info['head_sha'] != manifest['commit']
-                    or producer['asset'] != name or producer['sizeBytes'] != item['size']
-                    or 'sha256:' + producer['sha256'] != item['digest']
-                    or producer['sdk_manifest']['profile'] != selected_profile
-                    or cmeta_version[:2] != cmeta_minimum[:2]
-                    or cmeta_version < cmeta_minimum
-                    or any(dependencies[key] != versions[dependency] for key, dependency in (
-                        ('SaltsBase', 'salts-base'),
-                        ('SaltsCNet', 'salts-cnet'), ('SaltsUtils', 'salts-utils'),
-                        ('vcpkg-cache', 'vcpkg-cache')))):
-                raise ValueError('CHttp manifest does not qualify the selected SDK/dependency set')
         archive, item = download(repo, name)
         target = destination / f'{repo}-{versions[repo]}-{selected_profile}'
         receipt = dict(repository=repo, version=versions[repo], profile=selected_profile,
@@ -166,10 +134,25 @@ def main():
                 staging.mkdir()
                 with tarfile.open(archive) as package:
                     package.extractall(staging, filter='data')
-                (staging / 'receipt.json').write_text(json.dumps(receipt) + '\n')
-                staging.rename(target)
+                selected_root = staging / payload
+                (selected_root / 'receipt.json').write_text(json.dumps(receipt) + '\n')
+                selected_root.rename(target)
         if not (target / config).is_file():
             raise ValueError('Incomplete SDK: ' + str(target / config))
+        if repo == 'TurboScript':
+            manifest = json.loads((target / 'toad-sdk-manifest.json').read_text(encoding='utf-8-sig'))
+            producer = json.loads(run('gh', 'api',
+                f'repos/qigao/{repo}/actions/runs/{manifest["producer_run"]}'))
+            if (manifest['schema'] != 1 or manifest['version'] != versions[repo]
+                    or manifest['profile'] != selected_profile or manifest['rid'] != args.rid
+                    or producer['conclusion'] != 'success'
+                    or producer['head_sha'] != manifest['commit']
+                    or any(manifest['dependencies'][key] != versions[dependency]
+                           for key, dependency in (
+                               ('SaltsBase', 'salts-base'), ('CMeta', 'cmeta'),
+                               ('SaltsUtils', 'salts-utils'), ('CNet', 'salts-cnet'),
+                               ('vcpkg_cache', 'vcpkg-cache')))):
+                raise ValueError('Toad manifest does not qualify the selected SDK/dependency set')
         environment[prefix + '_ROOT'] = target.as_posix()
         print(f'Restored {repo} {versions[repo]} ({selected_profile})', file=sys.stderr)
 
@@ -179,12 +162,13 @@ def main():
     cnet_profile = {'windows-llvm-mingw-x64': 'windows-x64',
                     'linux-clang-x64': 'linux-x64', 'linux-clang-arm64': 'linux-arm64',
                     'macos-clang-arm64': 'macos-arm64'}.get(profile, profile)
-    sdk('salts-cnet', 'SALTSCORE', 'lib/cmake/SaltsCNet/SaltsCNetConfig.cmake', cnet_profile)
-    sdk('chttp', 'CHTTP', 'lib/cmake/Chttp/ChttpConfig.cmake', profile)
+    sdk('salts-cnet', 'SALTS_CORE', 'lib/cmake/SaltsCNet/SaltsCNetConfig.cmake', cnet_profile)
+    sdk('TurboScript', 'TOAD', 'lib/cmake/Toad/ToadConfig.cmake', profile,
+        archive_name=f'toad-{versions["TurboScript"]}-{profile}.tar.gz', payload=args.rid)
     helper = infra / 'scripts/restore-native-dependency.py'
     os.environ['VCPKG_TARGET_TRIPLET'] = triplet
     lock = destination / f'vcpkg-cache-{triplet}.lock.json'
-    run(sys.executable, helper, 'resolve-release', root / 'cmake/dependencies/vcpkg-cache.json',
+    run(sys.executable, helper, 'resolve-release', root / f'cmake/dependencies/{triplet}.lock.json',
         '--output-lock', lock)
     receipt = json.loads(run(sys.executable, helper, 'locked', lock,
         '--destination', destination / f'vcpkg-cache-{versions["vcpkg-cache"]}-{triplet}',
@@ -217,7 +201,7 @@ def main():
 
 VERSIONS = {'vcpkg-cache': 'VCPKG_CACHE_VERSION', 'salts-base': 'SALTS_BASE_VERSION',
             'cmeta': 'CMETA_VERSION', 'salts-utils': 'SALTS_UTILS_VERSION',
-            'salts-cnet': 'SALTS_CORE_VERSION', 'chttp': 'CHTTP_VERSION'}
+            'salts-cnet': 'SALTS_CORE_VERSION', 'TurboScript': 'TOAD_VERSION'}
 PROFILES = {'windows-x64': ('windows-msvc-x64', 'x64-windows'),
             'linux-x64': ('linux-clang-x64', 'x64-linux'),
             'linux-arm64': ('linux-clang-arm64', 'arm64-linux'),
