@@ -597,3 +597,29 @@
   仅验证 Windows LLVM-MinGW x64 Release；未验证其他平台、sanitizer 或性能收益。
   本地 Ninja 仍报告 premature end of file 自恢复告警，未调查其成因。未提交、
   推送或发布，保留已有暂存与其他工作区改动。
+
+## 2026-11-16：0.1.0 发布前的平台验证
+
+- **MED／已修复**：首次发布 CI 43812881731 在四个平台恢复 SDK 时要求过期的
+  CHTTP_VERSION；恢复入口现与 CMake 一致，选择 Toad 0.1.3、SALTS_CORE_ROOT
+  和各 triplet 的既有缓存描述文件。Toad 包内含 RID 目录，必须选择该 payload，
+  并核对内嵌 manifest 的依赖、提交及成功 producer run，不能按其他 SDK 的平铺
+  tar 布局恢复。没有新增 SDK 版本、依赖来源或 presets 开关。
+- **MED／已修复**：CI 43813665378 的 macOS SDK 标准库没有浮点 from_chars。
+  两个标量浮点入口改用统一的 C numeric locale 转换，NUL 终止的临时文本由
+  既有 OwnedText／tstr 持有。Windows 使用 _strtod_l，POSIX 使用 strtod_l；
+  这是平台实现选择，不在转换失败后重试。拒绝前导空格／加号、十六进制和尾随
+  字节，保留整数溢出、浮点非有限值及范围错误；可表示的 subnormal 不因 libc
+  设置 ERANGE 而误判溢出，不修改宿主全局 locale。
+- **MED／已修复**：同轮 Linux GCC 14 头文件对递归 pair<string, ScriptShape>
+  过早实例化完整类型检查。改成 vector<ScriptShapeField>，字段在 ScriptShape
+  完整定义后声明，保持名称、嵌套 shape、复制和遍历语义。
+- Android 编译示例也需要在 Linux 主机运行 salts-idlc。恢复相同发布版本的主机
+  Base、CMeta、Utils，并传入 Utils 已有的三项 SaltsUtils_IDLC_* 配置；主机和
+  目标 SDK 根独立。不得用 Android 的可执行文件作为主机生成器，或跳过示例。
+- **验证**：Python／PowerShell 恢复脚本语法及 diff 检查通过；现有 Windows
+  LLVM-MinGW preset 的 rhs_parser_test.parser、scalar_function_test.engine、
+  script_values_test.engine **3/3** 通过。新增数字用例覆盖无终止符切片、嵌入 NUL、
+  科学计数、最小 subnormal、零下溢和不支持的 C 转换扩展。日志
+  build/release-portability-{build,focused-ctest}.log。发布仍由完整平台 CI、
+  原生 CTest、Android ELF 对齐和最终 pack/publish gate 决定。

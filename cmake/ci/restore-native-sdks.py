@@ -85,7 +85,8 @@ def main():
             raise ValueError('Release archive size/digest mismatch: ' + name)
         return archive, item
 
-    def sdk(repo, prefix, config, selected_profile, *, archive_name=None, payload='.'):
+    def sdk(repo, prefix, config, selected_profile, *, archive_name=None, payload='.',
+            selected_triplet=triplet):
         name = archive_name or f'{repo}-{versions[repo]}-{selected_profile}.tar'
         if repo == 'salts-base':
             metadata, _ = download(repo, f'{repo}-{versions[repo]}-manifest.json')
@@ -99,7 +100,7 @@ def main():
                     or manifest['dependencies']['release'] != 'v' + versions['vcpkg-cache']
                     or manifest['ci']['conclusion'] != 'success'
                     or not manifest['ci']['runId'] or producer['file'] != name
-                    or producer['triplet'] != triplet
+                    or producer['triplet'] != selected_triplet
                     or producer['sizeBytes'] != item['size']
                     or 'sha256:' + producer['sha256'] != item['digest']):
                 raise ValueError('SaltsBase manifest does not qualify the selected SDK')
@@ -165,6 +166,13 @@ def main():
     sdk('salts-cnet', 'SALTS_CORE', 'lib/cmake/SaltsCNet/SaltsCNetConfig.cmake', cnet_profile)
     sdk('TurboScript', 'TOAD', 'lib/cmake/Toad/ToadConfig.cmake', profile,
         archive_name=f'toad-{versions["TurboScript"]}-{profile}.tar.gz', payload=args.rid)
+    if host_rid != args.rid:
+        host_profile, host_triplet = PROFILES[host_rid]
+        sdk('salts-base', 'SALTS_BASE_HOST', 'lib/cmake/SaltsBase/SaltsBaseConfig.cmake',
+            host_profile, selected_triplet=host_triplet)
+        sdk('cmeta', 'CMETA_HOST', 'lib/cmake/CMeta/CMetaConfig.cmake', host_profile)
+        sdk('salts-utils', 'SALTS_UTILS_HOST', 'bin/salts-idlc.exe'
+            if host_rid.startswith('windows') else 'bin/salts-idlc', host_profile)
     helper = infra / 'scripts/restore-native-dependency.py'
     os.environ['VCPKG_TARGET_TRIPLET'] = triplet
     lock = destination / f'vcpkg-cache-{triplet}.lock.json'

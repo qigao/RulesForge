@@ -20,11 +20,18 @@ enum class ScriptKind {
   Array,
   Record
 };
+struct ScriptShapeField;
 struct ScriptShape {
   ScriptKind kind = ScriptKind::Null;
   bool nullable = false;
-  std::vector<std::pair<std::string, ScriptShape>> fields;
+  std::vector<ScriptShapeField> fields;
   std::shared_ptr<ScriptShape const> element;
+};
+// vector admits an incomplete element; pair<string, ScriptShape> requires the
+// recursive shape to be complete before some standard libraries instantiate it.
+struct ScriptShapeField {
+  std::string name;
+  ScriptShape shape;
 };
 struct ScriptBinding {
   std::string name;

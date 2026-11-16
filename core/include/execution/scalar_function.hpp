@@ -9,6 +9,9 @@
 #include <string_view>
 
 namespace rulesforge {
+// Locale-independent decimal conversion for bounded views on every supported
+// standard library. The returned pointer always refers to the caller's view.
+std::from_chars_result parse_scalar_double(std::string_view text, double &value);
 // A lexical number probe, with errors distinguished from a non-number. An
 // integer overflow must not be retried as an approximate floating value.
 inline std::optional<ConstraintValue> parse_scalar_number(std::string_view text) {
@@ -22,7 +25,7 @@ inline std::optional<ConstraintValue> parse_scalar_number(std::string_view text)
             throw std::out_of_range("Integer expression literal exceeds int64 range");
     }
     double number = 0;
-    auto [number_end, number_status] = std::from_chars(text.data(), end, number);
+    auto [number_end, number_status] = parse_scalar_double(text, number);
     if (number_end == end && number_status == std::errc{}) {
         if (!std::isfinite(number)) throw std::domain_error("Non-finite expression literal");
         return ConstraintValue{number};

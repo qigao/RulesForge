@@ -18,6 +18,16 @@ suite("Native scalar vocabulary") {
         std::array<char, 4> value{'1', '.', '2', '5'};
         check_equal(std::get<double>(*parse_scalar_number({value.data(), value.size()})), 1.25);
     }
+    it("keeps decimal admission bounded and independent of C locale extensions") {
+        check_equal(std::get<double>(*parse_scalar_number("1.25e2")), 125.0);
+        check_equal(std::get<double>(*parse_scalar_number("4.9406564584124654e-324")),
+                    std::numeric_limits<double>::denorm_min());
+        check_throws_as(parse_scalar_number("1e-999"), std::out_of_range);
+        for (auto text : {" 1.5", "+1.5", "0x1p2", "-0x1p2", "1.5x", "1.5 "})
+            check_false(parse_scalar_number(text).has_value());
+        std::array<char, 7> input{'1', '.', '2', '5', '\0', '9', '9'};
+        check_false(parse_scalar_number({input.data(), input.size()}).has_value());
+    }
     it("dispatches the shared numeric vocabulary with exact arities") {
         struct Case { char const* name; std::array<double, 2> args; double expected; };
         for (auto const& item : std::array<Case, 17>{{

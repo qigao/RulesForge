@@ -1,6 +1,7 @@
 #include "rhs_parser.hpp"
 #include "diagnostics/logging_control.hpp"
 #include "expression_descriptor.hpp"
+#include "execution/scalar_function.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -526,7 +527,7 @@ FieldAssignment RhsParser::Parser::parse_value() {
     assign.type = RhsValueType::NUMERIC;
     Token num = advance();
     double value = 0;
-    auto [end, status] = std::from_chars(num.text.data(), num.text.data() + num.text.size(), value);
+    auto [end, status] = parse_scalar_double(num.text, value);
     if (status != std::errc{} || end != num.text.data() + num.text.size() || !std::isfinite(value)) {
       error("Floating literal is invalid or outside double range: " + std::string(num.text));
       return assign;

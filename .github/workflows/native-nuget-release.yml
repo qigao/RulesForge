@@ -154,7 +154,14 @@ jobs:
           "SALTS_CI_VCPKG_INSTALLED_DIR=$env:VCPKG_INSTALLED_DIR" >> $env:GITHUB_ENV
       - name: Configure the complete build graph
         run: |
-          cmake --fresh --preset $env:PRESET
+          $configure = @('--fresh', '--preset', $env:PRESET)
+          if ('${{ matrix.native }}' -eq 'false') {
+            $configure += @(
+              "-DSaltsUtils_IDLC_EXECUTABLE:FILEPATH=$env:SALTS_UTILS_HOST_ROOT/bin/salts-idlc",
+              "-DSaltsUtils_IDLC_HOST_SALTS_BASE_ROOT:PATH=$env:SALTS_BASE_HOST_ROOT",
+              "-DSaltsUtils_IDLC_HOST_CMETA_ROOT:PATH=$env:CMETA_HOST_ROOT")
+          }
+          cmake @configure
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build the complete graph
         run: |

@@ -274,10 +274,10 @@ ConstraintValue ScriptValues::copy_at(toad_script_value_view_t const &v, ScriptS
         std::string_view name(entry.key.data ? entry.key.data : "", entry.key.size);
         FieldScope field(*this, name);
         auto it = std::find_if(s.fields.begin(), s.fields.end(),
-                               [&](auto const &f) { return f.first == name; });
+                               [&](auto const &f) { return f.name == name; });
         if (it == s.fields.end() || result->entries.contains(std::string(name)))
           mismatch();
-        result->entries.emplace(it->first, copy_at(entry.value, it->second, depth + 1));
+        result->entries.emplace(it->name, copy_at(entry.value, it->shape, depth + 1));
       }
       return result;
     }
