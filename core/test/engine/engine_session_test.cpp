@@ -165,7 +165,7 @@ suite("Engine Session") {
             source += "rule \"Independent " + std::to_string(rule) +
                       "\" when $input: Input() then insert Output { ordinal = " +
                       std::to_string(rule) + ", key = $input.key } end\n";
-        source += "query \"Outputs\" $output: Output() end";
+        source += "query \"Outputs\" $output: Output() end\n";
         TestFixture fixture;
         fixture.build_session(source);
         auto &session = *fixture.session;

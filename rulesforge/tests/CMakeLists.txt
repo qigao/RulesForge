@@ -23,7 +23,9 @@ add_test(NAME maintenance_demo.example COMMAND $<TARGET_FILE:maintenance_demo>
 add_executable(toad_provider_test toad_provider_test.cpp)
 cmake_configure_target(toad_provider_test FOLDER rulesforge/tests)
 target_include_directories(toad_provider_test PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
-target_link_libraries(toad_provider_test PRIVATE CMeta::ACE Toad::Script Salts::TinyTest)
+# The direct provider fixture needs DataBind's runtime path even though the
+# Toad DSO keeps that dependency private in its imported target interface.
+target_link_libraries(toad_provider_test PRIVATE CMeta::ACE Toad::Script Salts::DataBind Salts::TinyTest)
 target_compile_definitions(toad_provider_test PRIVATE RF_TOAD_PROVIDER_PATH="$<TARGET_FILE:rulesforge_toad>")
 add_dependencies(toad_provider_test rulesforge_toad)
 add_test(NAME toad_provider_test COMMAND toad_provider_test)

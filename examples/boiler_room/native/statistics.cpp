@@ -12,9 +12,11 @@ double boiler_ewma_alpha(double dt, double tau) {
 // consumed by the script before any state is committed; no narrowing is implicit.
 TOAD_PLUGIN_FUNCTION(int, boiler_state_integer, (double, value, CMETA_PARAM_IN));
 int boiler_state_integer(double value) {
-  if (!std::isfinite(value) || value < 0 || value > 1000000 || std::floor(value) != value)
+  double integral = 0;
+  if (!std::isfinite(value) || value < 0 || value > 1000000 ||
+      std::fpclassify(std::modf(value, &integral)) != FP_ZERO)
     return -1;
-  return static_cast<int>(value);
+  return static_cast<int>(integral);
 }
 #define EXPORTS(X)                                                                                 \
   X(function, boiler_ewma_alpha, "boiler_ewma_alpha", "boiler.statistics", 1u, 0u)                 \

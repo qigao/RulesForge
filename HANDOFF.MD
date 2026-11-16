@@ -638,3 +638,9 @@
   future::get 等待，保留独立 owner、错误收集及异常时等待工作者结束的语义。
   Android 的既有 -Werror=float-equal 要求零值判定使用 fpclassify；保留正负零、
   subnormal 和非有限值行为，没有关闭告警、测试或切换工具链。
+- CI 43816068519 中原 Linux 7 项失败全部通过；新增匹配集回归因生成的 RFL
+  缺少末尾换行而失败，修正后本地 engine_session_test.engine 通过。macOS
+  的 toad_provider_test 直接加载 Toad DSO 时缺少 DataBind 运行库搜索路径；
+  fixture target 显式链接既有 Salts::DataBind，将实际运行依赖交给 CMake 生成
+  RPATH，不修改上游 SDK、不猜测其他目录。两个 native 示例的零值／整数判定
+  同样使用 fpclassify／modf，保持精确边界并满足 Android 的现有告警策略。

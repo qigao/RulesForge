@@ -11,7 +11,7 @@ double maintenance_risk_score(double mean, double variance, double roughness, do
   if (baseline <= 0 || variance < 0 || roughness < 0)
     return std::numeric_limits<double>::quiet_NaN();
   double scale = baseline * baseline;
-  if (!std::isfinite(scale) || scale == 0)
+  if (!std::isfinite(scale) || std::fpclassify(scale) == FP_ZERO)
     return std::numeric_limits<double>::quiet_NaN();
   double risk = 10.0 * variance / scale + 5.0 * roughness / scale +
                 10.0 * std::abs(mean - baseline) / baseline;
